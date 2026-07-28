@@ -1,0 +1,5 @@
+PLATFORM_NAME = "One UCH"
+
+PLATFORM_VERSION = "1.0.0"
+
+BUILD = "Enterprise"
