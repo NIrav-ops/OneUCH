@@ -81,6 +81,8 @@ class WorkflowNode(models.Model):
     WEBHOOK = "webhook"
     SCRIPT = "script"
     SUBWORKFLOW = "subworkflow"
+    FORK = "fork"
+    JOIN = "join"
 
     NODE_TYPES = [
         (START, "Start"),
@@ -94,6 +96,8 @@ class WorkflowNode(models.Model):
         (WEBHOOK, "Webhook"),
         (SCRIPT, "Script"),
         (SUBWORKFLOW, "Sub Workflow"),
+        (FORK, "Fork"),
+        (JOIN, "Join"),
     ]
 
     id = models.UUIDField(
@@ -163,9 +167,20 @@ class WorkflowTransition(models.Model):
         blank=True,
     )
 
+    priority = models.PositiveIntegerField(
+        default=100,
+        help_text="Lower numbers are evaluated first.",
+    )
+
     created_at = models.DateTimeField(
         auto_now_add=True,
     )
+
+    class Meta:
+        ordering = [
+            "priority",
+            "id",
+        ]
 
     def __str__(self):
         return f"{self.source.name} → {self.target.name}"
@@ -245,6 +260,22 @@ class WorkflowInstance(models.Model):
         WorkflowDefinition,
         on_delete=models.PROTECT,
         related_name="instances",
+    )
+
+    parent_instance = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="child_instances",
+    )
+
+    parent_token = models.ForeignKey(
+        "WorkflowToken",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="spawned_instances",
     )
 
     organization = models.ForeignKey(

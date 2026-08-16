@@ -4,6 +4,7 @@ from workflow.models import (
     WorkflowInstance,
     WorkflowToken,
     WorkflowExecutionLog,
+    WorkflowDefinition,
 )
 
 from platform_core.observability import get_logger
@@ -94,6 +95,15 @@ class WorkflowTokenRepository:
 
         return token
 
+    @staticmethod
+    def active_by_node(instance, node):
+
+        return WorkflowToken.objects.filter(
+            instance=instance,
+            node=node,
+            status=WorkflowToken.STATUS_ACTIVE,
+        )
+
 class WorkflowExecutionLogRepository:
 
     @staticmethod
@@ -117,7 +127,16 @@ class WorkflowExecutionLogRepository:
         return WorkflowExecutionLog.objects.filter(
             instance=instance
         )
-    
+
+    @staticmethod
+    def for_instance(instance):
+        return WorkflowExecutionLog.objects.filter(
+            instance=instance,
+        ).select_related(
+            "node",
+        ).order_by(
+            "created_at",
+        )
 class WorkflowRuntimeRepository:
 
     instance = WorkflowInstanceRepository

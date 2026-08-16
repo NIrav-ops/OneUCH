@@ -2,22 +2,49 @@ from copy import deepcopy
 
 from workflow.models import WorkflowInstance
 
-class WorkflowExecutionContext:
 
+class WorkflowExecutionContext:
     """
     Runtime execution context.
 
     Holds all variables for one workflow execution.
+
+    The workflow definition and version are captured when
+    the runtime context is created so execution remains
+    pinned to the WorkflowDefinition associated with the
+    WorkflowInstance.
     """
 
-    def __init__(self, instance: WorkflowInstance):
+    def __init__(
+        self,
+        instance: WorkflowInstance,
+    ):
 
         self.instance = instance
 
         self._variables = deepcopy(
             instance.context or {}
         )
-    
+
+        #
+        # Runtime version pin.
+        #
+        # WorkflowInstance.workflow is already a foreign key
+        # to an immutable WorkflowDefinition version.
+        #
+
+        self.workflow_id = str(
+            instance.workflow_id
+        )
+
+        self.workflow_code = (
+            instance.workflow.code
+        )
+
+        self.workflow_version = (
+            instance.workflow.version
+        )
+
     def get(
         self,
         key,
@@ -28,7 +55,7 @@ class WorkflowExecutionContext:
             key,
             default,
         )
-    
+
     def set(
         self,
         key,
@@ -36,7 +63,7 @@ class WorkflowExecutionContext:
     ):
 
         self._variables[key] = value
-    
+
     def update(
         self,
         values: dict,
@@ -45,14 +72,14 @@ class WorkflowExecutionContext:
         self._variables.update(
             values
         )
-    
+
     def exists(
         self,
         key,
     ):
 
         return key in self._variables
-    
+
     def remove(
         self,
         key,
@@ -71,12 +98,6 @@ class WorkflowExecutionContext:
         Mark the current workflow execution context as suspended.
 
         Suspension is a runtime state, not an execution failure.
-
-        Examples:
-        - AI human review
-        - external approval
-        - timer/wait node
-        - asynchronous external dependency
         """
 
         self.set(
@@ -97,9 +118,6 @@ class WorkflowExecutionContext:
     def resume(self):
         """
         Clear runtime suspension state.
-
-        Actual token reactivation is controlled by the
-        workflow execution engine.
         """
 
         self.set(
@@ -123,15 +141,13 @@ class WorkflowExecutionContext:
     ):
         """
         Store the resolved human-review outcome.
-
-        The workflow engine may later inspect this record
-        to determine whether execution may safely continue.
         """
 
         if hasattr(
             resolution,
             "review_id",
         ):
+
             payload = {
                 "review_id": resolution.review_id,
                 "approved": resolution.approved,
@@ -141,38 +157,42 @@ class WorkflowExecutionContext:
                 "comments": resolution.comments,
                 "reason": resolution.reason,
             }
+
         else:
-            payload = dict(resolution)
+
+            payload = dict(
+                resolution
+            )
 
         self.set(
             "ai_review_resolution",
             payload,
         )
 
-
     @property
     def review_resolution(
         self,
     ):
+
         return self.get(
             "ai_review_resolution"
         )
-
 
     @property
     def review_completed(
         self,
     ):
+
         return (
             self.review_resolution
             is not None
         )
 
-
     @property
     def review_approved(
         self,
     ):
+
         resolution = (
             self.review_resolution
             or {}
@@ -185,11 +205,11 @@ class WorkflowExecutionContext:
             )
         )
 
-
     @property
     def review_rejected(
         self,
     ):
+
         resolution = (
             self.review_resolution
             or {}
@@ -200,7 +220,7 @@ class WorkflowExecutionContext:
                 "rejected",
                 False,
             )
-        )    
+        )
 
     def clear_pending_review(
         self,
@@ -226,24 +246,39 @@ class WorkflowExecutionContext:
         )
 
     @property
-    def is_suspended(self):
+    def is_suspended(
+        self,
+    ):
 
         return bool(
             self.get(
                 "workflow_suspended",
                 False,
             )
-        )        
+        )
+
+    @property
+    def variables(
+        self,
+    ):
+        """
+        Read-only view of workflow variables used by
+        routing, AI, approvals and runtime services.
+        """
+
+        return self._variables
 
     def serialize(self):
 
         return deepcopy(
             self._variables
         )
-    
+
     def save(self):
 
-        self.instance.context = self.serialize()
+        self.instance.context = (
+            self.serialize()
+        )
 
         self.instance.save(
             update_fields=[

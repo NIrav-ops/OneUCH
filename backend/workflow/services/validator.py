@@ -66,7 +66,7 @@ class WorkflowValidator:
                 )
 
             return True
-        
+
         @staticmethod
         def validate_workflow(workflow):
 
@@ -74,39 +74,219 @@ class WorkflowValidator:
                 workflow
             )
 
-            nodes = workflow.nodes.all()
+            nodes = list(
+                workflow.nodes.all()
+            )
 
-            transitions = workflow.transitions.all()
-            
+            transitions = list(
+                workflow.transitions.all()
+            )
+
             starts = [
-                n for n in nodes
-                if n.node_type == WorkflowNode.START
+                node
+                for node in nodes
+                if node.node_type == WorkflowNode.START
             ]
 
             if len(starts) != 1:
+
                 raise WorkflowValidationError(
                     "Workflow must contain exactly one Start node."
                 )
 
             ends = [
-                n for n in nodes
-                if n.node_type == WorkflowNode.END
+                node
+                for node in nodes
+                if node.node_type == WorkflowNode.END
             ]
 
             if len(ends) < 1:
+
                 raise WorkflowValidationError(
                     "Workflow must contain at least one End node."
                 )
 
+            #
+            # Validate every persisted node.
+            #
+
             for node in nodes:
+
                 WorkflowValidator.validate_node(
                     node
                 )
-            
+
+            #
+            # Validate every persisted transition.
+            #
+
             for transition in transitions:
+
                 WorkflowValidator.validate_transition(
                     transition
                 )
 
-            return True    
             
+
+            #
+            # Build adjacency map.
+            #
+            # This uses persisted node IDs, not names.
+            #
+
+            adjacency = {
+                node.pk: []
+                for node in nodes
+            }
+
+            for transition in transitions:
+
+                adjacency[
+                    transition.source_id
+                ].append(
+                    transition.target_id
+                )
+
+            #
+            # Traverse the graph from START.
+            #
+
+            reachable = set()
+
+            stack = [
+                starts[0].pk
+            ]
+
+            while stack:
+
+                node_id = stack.pop()
+
+                if node_id in reachable:
+                    continue
+
+                reachable.add(
+                    node_id
+                )
+
+                for target_id in adjacency.get(
+                    node_id,
+                    [],
+                ):
+
+                    if target_id not in reachable:
+
+                        stack.append(
+                            target_id
+                        )
+
+            #
+            # Every persisted node must be reachable
+            # from START.
+            #
+
+            unreachable_nodes = [
+                node
+                for node in nodes
+                if node.pk not in reachable
+            ]
+
+            if unreachable_nodes:
+
+                names = ", ".join(
+                    node.name
+                    for node in unreachable_nodes
+                )
+
+                raise WorkflowValidationError(
+                    "Workflow contains unreachable nodes: "
+                    f"{names}."
+                )
+
+    #
+    # Every END node must be reachable.
+    #
+    # This is technically covered by the previous
+    # check, but keeping the explicit rule makes the
+    # enterprise validation contract clear.
+    #
+
+            unreachable_ends = [
+                node
+                for node in ends
+                if node.pk not in reachable
+            ]
+
+            if unreachable_ends:
+
+                names = ", ".join(
+                    node.name
+                    for node in unreachable_ends
+                )
+
+                raise WorkflowValidationError(
+                    "Workflow contains unreachable End nodes: "
+                    f"{names}."
+                )
+
+            #
+            # Execution-safety validation.
+            #
+            # At this point graph reachability has already
+            # been validated.
+            #
+            # Therefore these checks validate execution
+            # semantics rather than basic connectivity.
+            #
+
+            for node in nodes:
+
+                incoming = [
+                    transition
+                    for transition in transitions
+                    if transition.target_id == node.pk
+                ]
+
+                outgoing = [
+                    transition
+                    for transition in transitions
+                    if transition.source_id == node.pk
+                ]
+
+                #
+                # START is the workflow entry point.
+                #
+
+                if node.node_type == WorkflowNode.START:
+
+                    if incoming:
+
+                        raise WorkflowValidationError(
+                            "START node cannot have incoming transitions."
+                        )
+
+                #
+                # END terminates workflow execution.
+                #
+
+                if node.node_type == WorkflowNode.END:
+
+                    if outgoing:
+
+                        raise WorkflowValidationError(
+                            "END node cannot have outgoing transitions."
+                        )
+
+                #
+                # Every reachable non-END node must have
+                # a continuation.
+                #
+
+                if node.node_type != WorkflowNode.END:
+
+                    if not outgoing:
+
+                        raise WorkflowValidationError(
+                            f"Node '{node.name}' has no outgoing transition."
+                        )
+
+            return True

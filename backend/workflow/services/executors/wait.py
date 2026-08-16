@@ -24,6 +24,11 @@ class WaitNodeExecutor(BaseNodeExecutor):
             "workflow_wait",
         )
 
+        configuration.setdefault(
+            "policy",
+            "datetime",
+        )
+
         token.wait_configuration = configuration
 
         token.save(
