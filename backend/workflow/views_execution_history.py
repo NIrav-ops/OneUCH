@@ -11,6 +11,11 @@ from workflow.serializers.execution_history import (
     WorkflowExecutionHistorySerializer,
 )
 
+from workflow.services.runtime_governance import (
+    WorkflowRuntimeGovernance,
+    WorkflowRuntimeGovernanceError,
+)
+
 from workflow.services.runtime_repository import (
     WorkflowRuntimeRepository,
 )
@@ -29,16 +34,25 @@ class WorkflowExecutionHistoryAPIView(
         request,
     ):
 
+        organization = getattr(
+            request.user,
+            "organization",
+            None,
+        )
+
+        if organization is not None:
+            return organization
+
         membership = getattr(
             request.user,
             "organization_membership",
             None,
         )
 
-        if membership is None:
-            return None
+        if membership is not None:
+            return membership.organization
 
-        return membership.organization
+        return None
 
     def get(
         self,
@@ -69,6 +83,33 @@ class WorkflowExecutionHistoryAPIView(
             pk=instance_id,
             organization=organization,
         )
+
+        #
+        # Execution history is an audit surface.
+        #
+        # Organization scoping alone is not sufficient.
+        # Apply the same runtime governance boundary used
+        # by the runtime inspection API.
+        #
+
+        try:
+
+            WorkflowRuntimeGovernance.authorize(
+                user=request.user,
+                instance=instance,
+                action=(
+                    WorkflowRuntimeGovernance.ACTION_VIEW
+                ),
+            )
+
+        except WorkflowRuntimeGovernanceError as exc:
+
+            return Response(
+                {
+                    "detail": str(exc),
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
         logs = (
             WorkflowRuntimeRepository
