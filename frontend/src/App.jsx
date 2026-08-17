@@ -1,46 +1,96 @@
 import { useState } from "react";
+import {
+  Routes,
+  Route,
+  Navigate,
+} from "react-router-dom";
+
+import AppLayout from "./layouts/AppLayout";
+
+import Dashboard from "./pages/Dashboard";
 import Inbox from "./pages/Inbox";
 import ActionCenter from "./pages/ActionCenter";
+import ApprovalCenter from "./pages/ApprovalCenter";
+import SearchResults from "./pages/SearchResults";
+import Notifications from "./pages/Notifications";
+import Login from "./pages/Login";
+import Workflows from "./pages/Workflows";
+import WorkflowDetail from "./pages/WorkflowDetail";
+import WorkflowRuntime from "./pages/WorkflowRuntime";
 
 export default function App() {
-  const [view, setView] = useState("inbox");
+  const [isAuth, setIsAuth] = useState(
+    !!localStorage.getItem("access")
+  );
+
+  if (!isAuth) {
+    return (
+      <Login
+        onLogin={() => setIsAuth(true)}
+      />
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-slate-100">
-      <div className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 shadow-sm">
-        <div>
-          <h1 className="text-lg font-semibold text-slate-900">One UCH</h1>
-          <p className="text-xs text-slate-500">
-            Communication intelligence and execution layer
-          </p>
-        </div>
+    <Routes>
+      <Route element={<AppLayout />}>
 
-        <div className="flex gap-2">
-          <button
-            onClick={() => setView("inbox")}
-            className={`rounded-xl px-4 py-2 text-sm font-medium ${
-              view === "inbox"
-                ? "bg-slate-900 text-white"
-                : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-            }`}
-          >
-            Inbox
-          </button>
+        <Route
+          path="/dashboard"
+          element={<Dashboard />}
+        />
 
-          <button
-            onClick={() => setView("actions")}
-            className={`rounded-xl px-4 py-2 text-sm font-medium ${
-              view === "actions"
-                ? "bg-slate-900 text-white"
-                : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-            }`}
-          >
-            Action Center
-          </button>
-        </div>
-      </div>
+        <Route
+          path="/inbox"
+          element={<Inbox />}
+        />
 
-      {view === "inbox" ? <Inbox /> : <ActionCenter />}
-    </div>
+        <Route
+          path="/actions"
+          element={<ActionCenter />}
+        />
+
+        <Route
+          path="/approvals"
+          element={<ApprovalCenter />}
+        />
+
+        <Route
+          path="/workflows"
+          element={<Workflows />}
+        />
+
+        <Route
+          path="/workflows/:workflowId"
+          element={<WorkflowDetail />}
+        />
+
+        <Route
+          path="/workflows/:workflowId/runtime/:instanceId"
+          element={<WorkflowRuntime />}
+        />
+
+        <Route
+          path="/search"
+          element={<SearchResults />}
+        />
+
+        <Route
+          path="/notifications"
+          element={<Notifications />}
+        />
+
+        <Route
+          path="*"
+          element={
+            <Navigate
+              to="/dashboard"
+              replace
+            />
+          }
+        />
+
+      </Route>
+    </Routes>
   );
 }

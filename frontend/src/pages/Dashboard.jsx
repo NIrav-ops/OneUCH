@@ -18,7 +18,6 @@ export default function Dashboard() {
   const [priorityCount, setPriorityCount] = useState(0);
   const [escalatedCount, setEscalatedCount] = useState(0);
   const [dashboardStats, setDashboardStats] = useState({});
-  const [recentActivity, setRecentActivity] = useState([]);
 
   const fetchData = async () => {
     try {
@@ -75,9 +74,6 @@ export default function Dashboard() {
       setDashboardStats(
         dashboardRes.data || {}
       );
-      setRecentActivity(
-        dashboardRes.data?.recent_activity || []
-      );
       
     } catch (err) {
       console.error("Dashboard load error:", err);
@@ -106,51 +102,55 @@ export default function Dashboard() {
     [followups]
   );
 
-  const escalatedItems = useMemo(() => {
-    const escalatedActions = actions.filter(
-      (a) => (a.escalation_level || 0) > 0
-    );
-
-    const escalatedApprovals = approvals.filter(
-      (a) => (a.escalation_level || 0) > 0
-    );
-
-    const escalatedFollowups = followups.filter(
-      (f) => (f.escalation_level || 0) > 0
-    );
-
-    return [
-      ...escalatedActions,
-      ...escalatedApprovals,
-      ...escalatedFollowups,
-    ];
-  }, [actions, approvals, followups]);
-
-  const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const startOfTomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-
   const overdueActions = useMemo(() => {
+    const now = new Date();
+
+    const startOfToday = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate()
+    );
+
     return openActions.filter((a) => {
       if (!a.due_date) return false;
+
       const due = new Date(a.due_date);
-      return !Number.isNaN(due.getTime()) && due < startOfToday;
+
+      return (
+        !Number.isNaN(due.getTime()) &&
+        due < startOfToday
+      );
     });
   }, [openActions]);
 
   const dueTodayActions = useMemo(() => {
+    const now = new Date();
+
+    const startOfToday = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate()
+    );
+
+    const startOfTomorrow = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() + 1
+    );
+
     return openActions.filter((a) => {
       if (!a.due_date) return false;
+
       const due = new Date(a.due_date);
+
       return (
         !Number.isNaN(due.getTime()) &&
         due >= startOfToday &&
         due < startOfTomorrow
       );
     });
-  }, [openActions, startOfToday, startOfTomorrow]);
+  }, [openActions]);
 
-  const topActions = useMemo(() => openActions.slice(0, 5), [openActions]);
   const topApprovals = useMemo(() => pendingApprovals.slice(0, 5), [pendingApprovals]);
   const topFollowups = useMemo(() => pendingFollowups.slice(0, 5), [pendingFollowups]);
   const topPriorityMessages = useMemo(() => priorityMessages.slice(0, 5), [priorityMessages]);

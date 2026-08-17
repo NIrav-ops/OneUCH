@@ -99,6 +99,20 @@ class WorkflowExecutionEventService:
         )
 
         # --------------------------------------------------------------
+        # Execution correlation
+        #
+        # WorkflowInstance is the authoritative execution identity.
+        #
+        # A caller must never be able to override the correlation
+        # identifier because that would allow audit events to appear
+        # associated with another execution.
+        # --------------------------------------------------------------
+
+        payload["correlation_id"] = str(
+            instance.pk
+        )
+
+        # --------------------------------------------------------------
         # Workflow identity
         #
         # Always derive these values from the WorkflowInstance.

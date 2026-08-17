@@ -8,29 +8,43 @@ export default function ConversationTimeline({
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!conversationId) return;
+    if (!conversationId) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadTimeline = async () => {
+      try {
+        setLoading(true);
+
+        const res = await axios.get(
+          `/api/timeline/conversation/${conversationId}/`
+        );
+
+        if (!cancelled) {
+          setEvents(res.data);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          console.error(
+            "Timeline load error:",
+            err
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
 
     loadTimeline();
+
+    return () => {
+      cancelled = true;
+    };
   }, [conversationId]);
-
-  const loadTimeline = async () => {
-    try {
-      setLoading(true);
-
-      const res = await axios.get(
-        `/api/timeline/conversation/${conversationId}/`
-      );
-
-      setEvents(res.data);
-    } catch (err) {
-      console.error(
-        "Timeline load failed",
-        err
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const getIcon = (eventType) => {
 

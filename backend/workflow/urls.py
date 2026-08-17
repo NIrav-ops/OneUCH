@@ -14,12 +14,12 @@ from workflow.views_publish import (
 
 from workflow.views_runtime import (
     WorkflowRuntimeAPIView,
+    WorkflowRuntimeCreateAPIView,
 )
 
 from workflow.views_execution_history import (
     WorkflowExecutionHistoryAPIView,
 )
-
 
 urlpatterns = [
 
@@ -45,6 +45,12 @@ urlpatterns = [
         "definitions/<uuid:workflow_id>/publish/",
         WorkflowPublishAPIView.as_view(),
         name="workflow-publish",
+    ),
+
+    path(
+        "definitions/<uuid:workflow_id>/runtime/",
+        WorkflowRuntimeCreateAPIView.as_view(),
+        name="workflow-runtime-create",
     ),
 
     path(

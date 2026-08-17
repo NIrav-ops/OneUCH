@@ -8,7 +8,7 @@ export default function Login({ onLogin }) {
   const handleLogin = async () => {
     try {
       const res = await axios.post(
-        "http://localhost:8000/api/auth/token/",
+        "/api/auth/token/",
         {
           email: email,
           password: password,

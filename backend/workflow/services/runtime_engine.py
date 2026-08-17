@@ -84,6 +84,34 @@ class WorkflowRuntimeEngine:
         #
         self.controller = RuntimeController()
 
+    def _is_terminal(self):
+        return self.instance.status in {
+            WorkflowInstance.STATUS_COMPLETED,
+            WorkflowInstance.STATUS_FAILED,
+            WorkflowInstance.STATUS_CANCELLED,
+        }
+
+    def _get_active_tokens(self):
+        return list(
+            WorkflowToken.objects.filter(
+                instance=self.instance,
+                status=WorkflowToken.STATUS_ACTIVE,
+            ).select_related("node")
+        )
+
+    def _get_waiting_tokens(self):
+        return list(
+            WorkflowToken.objects.filter(
+                instance=self.instance,
+                status=WorkflowToken.STATUS_WAITING,
+            ).select_related("node")
+        )
+
+    def _has_started_execution(self):
+        return WorkflowToken.objects.filter(
+            instance=self.instance,
+        ).exists()
+
     def _record_event(
         self,
         *,
@@ -187,10 +215,26 @@ class WorkflowRuntimeEngine:
 
     def get_start_node(self):
 
-        return WorkflowNode.objects.get(
-            workflow=self.instance.workflow,
-            node_type=WorkflowNode.START,
+        start_nodes = list(
+            WorkflowNode.objects.filter(
+                workflow=self.instance.workflow,
+                node_type=WorkflowNode.START,
+            )
         )
+
+        if not start_nodes:
+
+            raise ValueError(
+                "Workflow has no START node."
+            )
+
+        if len(start_nodes) > 1:
+
+            raise ValueError(
+                "Workflow has multiple START nodes."
+            )
+
+        return start_nodes[0]
 
     def get_next_node(
         self,
@@ -353,6 +397,13 @@ class WorkflowRuntimeEngine:
     def advance(self, token):
 
         if self.context.is_suspended:
+            return None
+
+        #
+        # END is a legitimate terminal node.
+        #
+
+        if token.node.node_type == WorkflowNode.END:
 
             return None
 
@@ -361,19 +412,18 @@ class WorkflowRuntimeEngine:
             self.context,
         )
 
+        #
+        # Any non-END node without a valid transition
+        # represents an invalid runtime graph.
+        #
+
         if next_node is None:
 
-            return None
-
-        if next_node.node_type == (
-            WorkflowNode.FORK
-        ):
-            pass
-
-        if next_node.node_type == (
-            WorkflowNode.JOIN
-        ):
-            pass
+            raise ValueError(
+                "Workflow execution stopped because "
+                f"node '{token.node.name}' has no valid "
+                "outgoing transition."
+            )
 
         return (
             WorkflowRuntimeRepository.token.create(
@@ -641,28 +691,62 @@ class WorkflowRuntimeEngine:
             return self.instance
 
         #
+        # A runtime that already has a waiting token must
+        # be resumed rather than started again.
+        #
+
+        if self._get_waiting_tokens():
+
+            raise ValueError(
+                "Workflow is suspended and must be resumed."
+            )
+
+        #
+        # A runtime that already contains execution tokens
+        # has already started.
+        #
+
+        if self._has_started_execution():
+
+            raise ValueError(
+                "Workflow execution has already started."
+            )
+
+        #
         # Runtime controller enters RUNNING state only
-        # after terminal-state guards have passed.
+        # after lifecycle guards have passed.
         #
 
         self.controller.start()
 
-        self._record_event(
-            instance=self.instance,
-            event=(
-                WorkflowExecutionEventService
-                .WORKFLOW_STARTED
-            ),
-        )
-
-        current = (
-            WorkflowRuntimeRepository.token.create(
-                instance=self.instance,
-                node=self.get_start_node(),
-            )
-        )
+        current = None
 
         try:
+
+            #
+            # Resolve and create the START token inside
+            # the protected execution boundary.
+            #
+            # This ensures invalid workflow definitions
+            # are persisted as FAILED rather than being
+            # left in RUNNING state.
+            #
+
+            start_node = self.get_start_node()
+
+            current = (
+                WorkflowRuntimeRepository.token.create(
+                    instance=self.instance,
+                    node=start_node,
+                )
+            )
+
+            self._record_event(
+                event=(
+                    WorkflowExecutionEventService
+                    .WORKFLOW_STARTED
+                ),
+            )
 
             while current:
 
@@ -673,7 +757,6 @@ class WorkflowRuntimeEngine:
                 if self.context.is_suspended:
 
                     self._record_event(
-                        instance=self.instance,
                         node=current.node,
                         event=(
                             WorkflowExecutionEventService
@@ -695,11 +778,10 @@ class WorkflowRuntimeEngine:
                     return self.instance
 
                 #
-                # Node started. 
+                # Node started.
                 #
 
                 self._record_event(
-                    instance=self.instance,
                     node=current.node,
                     event=(
                         WorkflowExecutionEventService
@@ -716,27 +798,13 @@ class WorkflowRuntimeEngine:
                 )
 
                 #
-                # Node completed.
-                #
-
-                self._record_event(
-                    instance=self.instance,
-                    node=current.node,
-                    event=(
-                        WorkflowExecutionEventService
-                        .NODE_COMPLETED
-                    ),
-                )
-
-                #
-                # Node execution may have suspended
-                # the workflow.
+                # A suspended node is WAITING, not
+                # completed.
                 #
 
                 if self.context.is_suspended:
 
                     self._record_event(
-                        instance=self.instance,
                         node=current.node,
                         event=(
                             WorkflowExecutionEventService
@@ -758,6 +826,19 @@ class WorkflowRuntimeEngine:
                     return self.instance
 
                 #
+                # Only genuinely completed nodes receive
+                # NODE_COMPLETED.
+                #
+
+                self._record_event(
+                    node=current.node,
+                    event=(
+                        WorkflowExecutionEventService
+                        .NODE_COMPLETED
+                    ),
+                )
+
+                #
                 # Advance to the next node.
                 #
 
@@ -766,19 +847,15 @@ class WorkflowRuntimeEngine:
                 )
 
             #
-            # The runtime reached the end of the
-            # executable graph.
+            # The runtime reached a legitimate terminal
+            # condition.
             #
-            # IMPORTANT:
-            # current == None is the normal terminal
-            # condition only when the workflow was not
-            # suspended.
+            # advance() returns None for END nodes.
             #
 
             if not self.context.is_suspended:
 
                 self._record_event(
-                    instance=self.instance,
                     event=(
                         WorkflowExecutionEventService
                         .WORKFLOW_COMPLETED
@@ -806,7 +883,6 @@ class WorkflowRuntimeEngine:
             if current is not None:
 
                 self._record_event(
-                    instance=self.instance,
                     node=current.node,
                     event=(
                         WorkflowExecutionEventService
@@ -826,7 +902,6 @@ class WorkflowRuntimeEngine:
             #
 
             self._record_event(
-                instance=self.instance,
                 event=(
                     WorkflowExecutionEventService
                     .WORKFLOW_FAILED
@@ -837,4 +912,5 @@ class WorkflowRuntimeEngine:
             #
             # Preserve the original exception.
             #
+
             raise

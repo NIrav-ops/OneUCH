@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import {useCallback,useEffect,useRef,useState,} from "react";
 import { useLocation } from "react-router-dom";
 import axios from "../axiosConfig";
 import ConversationTimeline from "../components/ConversationTimeline";
@@ -33,17 +33,29 @@ export default function Inbox() {
   // =========================
   // LOAD ACCOUNTS
   // =========================
-  const loadAccounts = async () => {
+  const loadAccounts = useCallback(async () => {
     try {
-      const res = await axios.get("/api/email-accounts/");
-      setAccounts(res.data || []);
-      if (res.data?.length > 0 && !selectedAccountId) {
-        setSelectedAccountId(res.data[0].id);
+      const res = await axios.get(
+        "/api/email-accounts/"
+      );
+
+      const data = res.data || [];
+
+      setAccounts(data);
+
+      if (data.length > 0) {
+        setSelectedAccountId((currentId) => {
+          if (currentId) {
+            return currentId;
+          }
+
+          return data[0].id;
+        });
       }
     } catch (err) {
       console.error(err);
     }
-  };
+  }, []);
 
   const loadSyncStatus = async () => {
     try {
@@ -57,7 +69,7 @@ export default function Inbox() {
   useEffect(() => {
     loadAccounts();
     loadSyncStatus();
-  }, []);
+  }, [loadAccounts]);
 
   const getSyncStatus = (platform) => {
     return syncStatuses.find((item) => item.platform === platform);
@@ -78,57 +90,108 @@ export default function Inbox() {
   // =========================
   // LOAD CONVERSATIONS
   // =========================
-  const loadConversations = async () => {
+  const loadConversations = useCallback(async () => {
     try {
       setError("");
       setLoading(true);
+
       const queryParams = new URLSearchParams({
         folder: activeTab,
       });
 
       if (search.trim()) {
-        queryParams.set("search", search.trim());
+        queryParams.set(
+          "search",
+          search.trim()
+        );
       }
 
       if (selectedAccountId) {
-        queryParams.set("account_id", selectedAccountId);
+        queryParams.set(
+          "account_id",
+          selectedAccountId
+        );
       }
 
-      const res = await axios.get(`/api/inbox/unified-conversations/?${queryParams.toString()}`);
-      const data = res.data.results || [];
+      const res = await axios.get(
+        `/api/inbox/unified-conversations/?${queryParams.toString()}`
+      );
+
+      const data = res.data?.results || [];
+
       setConversations(data);
-      // ✅ auto open first email
-      const urlParams = new URLSearchParams(location.search);
-      const conversationFromUrl = urlParams.get("conversation");
+
+      const urlParams = new URLSearchParams(
+        location.search
+      );
+
+      const conversationFromUrl =
+        urlParams.get("conversation");
 
       if (data.length > 0) {
         if (conversationFromUrl) {
           const match = data.find(
-            (conv) => String(conv.conversation_id) === String(conversationFromUrl)
+            (conv) =>
+              String(conv.conversation_id) ===
+              String(conversationFromUrl)
           );
 
           if (match) {
-            setSelectedId(match.conversation_id);
-          } else if (!selectedId) {
-            setSelectedId(data[0].conversation_id);
+            setSelectedId(
+              match.conversation_id
+            );
+          } else {
+            setSelectedId((currentId) => {
+              if (currentId) {
+                return currentId;
+              }
+
+              return data[0].conversation_id;
+            });
           }
-        } else if (!selectedId) {
-          setSelectedId(data[0].conversation_id);
+        } else {
+          setSelectedId((currentId) => {
+            if (currentId) {
+              return currentId;
+            }
+
+            return data[0].conversation_id;
+          });
         }
       }
     } catch (err) {
-      console.error("Load error:", err);
-      setError("Unable to load conversations.");
+      console.error(
+        "Load error:",
+        err
+      );
+
+      setError(
+        "Unable to load conversations."
+      );
     } finally {
       setLoading(false);
     }
-  };
+  }, [
+    activeTab,
+    location.search,
+    search,
+    selectedAccountId,
+  ]);
 
   useEffect(() => {
-  setSelectedId(null);     
-  setMessages([]);         
-  loadConversations();
-}, [activeTab, location.search, search, selectedAccountId]);
+    setSelectedId(null);
+    setMessages([]);
+
+    loadConversations();
+  }, [loadConversations]);
+
+  const loadConversationsRef =
+    useRef(loadConversations);
+
+  useEffect(() => {
+    loadConversationsRef.current =
+      loadConversations;
+  }, [loadConversations]);
 
   // =========================
   // REALTIME WEBSOCKET 🔥
@@ -146,9 +209,13 @@ export default function Inbox() {
     };
 
     socket.onmessage = (event) => {
-      console.log("Realtime update:", event.data);
-      loadConversations();
-    };
+    console.log(
+      "Realtime update:",
+      event.data
+    );
+
+    loadConversationsRef.current();
+  };
 
     socket.onerror = (err) => {
       console.error("WS Error ❌", err);

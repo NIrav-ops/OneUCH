@@ -10,6 +10,8 @@ import {
   ShieldCheck,
   Search,
   Bell,
+  GitBranch,
+  Workflow,
 } from "lucide-react";
 
 export default function AppLayout() {
@@ -19,22 +21,35 @@ export default function AppLayout() {
   const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
+    let cancelled = false;
+
+    const loadNotifications = async () => {
+      try {
+        const res = await axios.get(
+          "/api/notifications/"
+        );
+
+        if (!cancelled) {
+          setUnreadCount(
+            res.data?.unread_count || 0
+          );
+        }
+      } catch (err) {
+        if (!cancelled) {
+          console.error(
+            "Notification error:",
+            err
+          );
+        }
+      }
+    };
+
     loadNotifications();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
-
-  const loadNotifications = async () => {
-    try {
-      const res = await axios.get("/api/notifications/");
-      
-      console.log("Notification API:", res.data);
-
-      setUnreadCount(
-        res.data.unread_count || 0
-      );
-    } catch (err) {
-      console.error("Notification error:", err);
-    }
-  };
 
   const linkClass = ({ isActive }) =>
     `flex items-center gap-3 px-3 py-2 rounded ${
@@ -80,6 +95,11 @@ export default function AppLayout() {
           <NavLink to="/approvals" className={linkClass}>
             <ShieldCheck size={18} />
             Approval Center
+          </NavLink>
+
+          <NavLink to="/workflows" className={linkClass}>
+            <GitBranch size={18} />
+            Workflows
           </NavLink>
 
           <NavLink to="/settings" className={linkClass}>
