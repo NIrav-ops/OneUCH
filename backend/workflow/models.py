@@ -419,15 +419,60 @@ class WorkflowExecutionLog(models.Model):
         blank=True,
     )
 
+    sequence_number = models.PositiveBigIntegerField(
+        null=True,
+        blank=True,
+    )
+
+    previous_event_hash = models.CharField(
+        max_length=64,
+        null=True,
+        blank=True,
+    )
+
+    event_hash = models.CharField(
+        max_length=64,
+        null=True,
+        blank=True,
+        unique=True,
+    )
+
     created_at = models.DateTimeField(
         auto_now_add=True,
     )
 
     class Meta:
+
         ordering = [
-            "-created_at",
+            "sequence_number",
+            "created_at",
+            "id",
+        ]
+
+        constraints = [
+            models.UniqueConstraint(
+                fields=[
+                    "instance",
+                    "sequence_number",
+                ],
+                name=(
+                    "unique_execution_event_sequence"
+                ),
+            ),
+        ]
+
+        indexes = [
+            models.Index(
+                fields=[
+                    "instance",
+                    "sequence_number",
+                ],
+                name=(
+                    "workflow_exec_instance_seq_idx"
+                ),
+            ),
         ]
 
     def __str__(self):
-        return self.event
 
+        return self.event
