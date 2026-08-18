@@ -122,6 +122,22 @@ class WorkflowExecutionLogRepository:
         return log
 
     @staticmethod
+    def update(*args, **kwargs):
+
+        raise PermissionError(
+            "Workflow execution history is append-only "
+            "and cannot be updated."
+        )
+
+    @staticmethod
+    def delete(*args, **kwargs):
+
+        raise PermissionError(
+            "Workflow execution history is append-only "
+            "and cannot be deleted."
+        )
+
+    @staticmethod
     def instance_logs(instance):
 
         return WorkflowExecutionLog.objects.filter(

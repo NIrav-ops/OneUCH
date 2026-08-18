@@ -16,8 +16,8 @@ from workflow.services.runtime_governance import (
     WorkflowRuntimeGovernanceError,
 )
 
-from workflow.services.runtime_repository import (
-    WorkflowRuntimeRepository,
+from workflow.services.execution.execution_history import (
+    WorkflowExecutionHistoryService,
 )
 
 
@@ -112,9 +112,10 @@ class WorkflowExecutionHistoryAPIView(
             )
 
         logs = (
-            WorkflowRuntimeRepository
-            .log
-            .for_instance(instance)
+            WorkflowExecutionHistoryService
+            .get_for_instance(
+                instance
+            )
         )
 
         serializer = (

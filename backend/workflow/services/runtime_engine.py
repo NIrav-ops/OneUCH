@@ -32,6 +32,14 @@ from workflow.services.routing.diagnostics import (
     RoutingDiagnostics,
 )
 
+from workflow.services.runtime_lifecycle import (
+    WorkflowRuntimeLifecycleService,
+)
+
+from workflow.services.runtime_integrity import (
+    WorkflowRuntimeIntegrityError,
+    WorkflowRuntimeIntegrityService,
+)
 
 class WorkflowRuntimeEngine:
     """
@@ -83,6 +91,22 @@ class WorkflowRuntimeEngine:
         # execution lifecycle state.
         #
         self.controller = RuntimeController()
+
+    def _validate_runtime_integrity(self):
+        """
+        Validate the persisted runtime execution boundary.
+
+        Runtime integrity is enforced inside the execution engine
+        rather than only at the API layer so that every execution
+        entry point receives the same protection.
+        """
+
+        return (
+            WorkflowRuntimeIntegrityService
+            .validate_instance(
+                self.instance
+            )
+        )
 
     def _is_terminal(self):
         return self.instance.status in {
@@ -175,43 +199,29 @@ class WorkflowRuntimeEngine:
         It does not alter the workflow definition.
 
         The pinned WorkflowDefinition/version remains unchanged.
+
+        Runtime state and the cancellation audit event are
+        committed atomically.
         """
 
-        if self.instance.status in [
+        if self.instance.status in {
             WorkflowInstance.STATUS_COMPLETED,
             WorkflowInstance.STATUS_FAILED,
             WorkflowInstance.STATUS_CANCELLED,
-        ]:
+        }:
 
             return self.instance
 
         self.controller.cancel()
 
-        self.instance.status = (
-            WorkflowInstance.STATUS_CANCELLED
+        return (
+            WorkflowRuntimeLifecycleService.cancel(
+                self.instance,
+                actor=self.actor,
+                actor_type=self.actor_type,
+                source=self.source,
+            )
         )
-
-        self.instance.completed_at = timezone.now()
-
-        self.instance.save(
-            update_fields=[
-                "status",
-                "completed_at",
-            ]
-        )
-
-        self._record_event(
-            instance=self.instance,
-            event=(
-                WorkflowExecutionEventService
-                .WORKFLOW_CANCELLED
-            ),
-            details={
-                "reason": "Workflow execution cancelled.",
-            },
-        )
-
-        return self.instance
 
     def get_start_node(self):
 
@@ -268,6 +278,22 @@ class WorkflowRuntimeEngine:
                 node,
             )
 
+            self._record_event(
+                node=node,
+                event=(
+                    WorkflowExecutionEventService
+                    .TRANSITION_REJECTED
+                ),
+                details={
+                    "source_node_id": str(
+                        node.pk
+                    ),
+                    "evaluation": (
+                        "no_outgoing_transition"
+                    ),
+                },
+            )
+
             return None
 
         variables = {}
@@ -320,6 +346,28 @@ class WorkflowRuntimeEngine:
                     variables,
                 )
 
+                self._record_event(
+                    node=node,
+                    event=(
+                        WorkflowExecutionEventService
+                        .TRANSITION_SELECTED
+                    ),
+                    details={
+                        "transition_id": str(
+                            transition.pk
+                        ),
+                        "source_node_id": str(
+                            node.pk
+                        ),
+                        "target_node_id": str(
+                            transition.target_id
+                        ),
+                        "evaluation": (
+                            "condition_matched"
+                        ),
+                    },
+                )
+
                 return transition.target
 
         #
@@ -332,15 +380,57 @@ class WorkflowRuntimeEngine:
                 default_transition,
             )
 
+            self._record_event(
+                node=node,
+                event=(
+                    WorkflowExecutionEventService
+                    .TRANSITION_SELECTED
+                ),
+                details={
+                    "transition_id": str(
+                        default_transition.pk
+                    ),
+                    "source_node_id": str(
+                        node.pk
+                    ),
+                    "target_node_id": str(
+                        default_transition.target_id
+                    ),
+                    "evaluation": (
+                        "default_transition"
+                    ),
+                },
+            )
+
             return default_transition.target
 
         RoutingDiagnostics.no_transition(
             node,
         )
 
+        self._record_event(
+            node=node,
+            event=(
+                WorkflowExecutionEventService
+                .TRANSITION_REJECTED
+            ),
+            details={
+                "source_node_id": str(
+                    node.pk
+                ),
+                "evaluation": (
+                    "no_transition_available"
+                ),
+            },
+        )
+
         return None
 
     def execute_node(self, token):
+
+        WorkflowRuntimeIntegrityService.validate_token(
+            token
+        )
 
         executor_cls = (
             ExecutorFactory.get_executor(
@@ -396,6 +486,10 @@ class WorkflowRuntimeEngine:
 
     def advance(self, token):
 
+        WorkflowRuntimeIntegrityService.validate_token(
+            token
+        )
+
         if self.context.is_suspended:
             return None
 
@@ -425,49 +519,50 @@ class WorkflowRuntimeEngine:
                 "outgoing transition."
             )
 
-        return (
+        next_token = (
             WorkflowRuntimeRepository.token.create(
                 instance=self.instance,
                 node=next_node,
             )
         )
 
-    def _mark_failed(self):
+        WorkflowRuntimeIntegrityService.validate_token(
+            next_token
+        )
+
+        return next_token
+
+    def _mark_failed(
+        self,
+        *,
+        error_type,
+        error_message,
+    ):
 
         self.controller.fail()
 
-        self.instance.status = (
-            WorkflowInstance.STATUS_FAILED
-        )
-
-        self.instance.completed_at = (
-            timezone.now()
-        )
-
-        self.instance.save(
-            update_fields=[
-                "status",
-                "completed_at",
-            ]
+        return (
+            WorkflowRuntimeLifecycleService.fail(
+                self.instance,
+                error_type=error_type,
+                error_message=error_message,
+                actor=self.actor,
+                actor_type=self.actor_type,
+                source=self.source,
+            )
         )
 
     def _mark_completed(self):
 
         self.controller.complete()
 
-        self.instance.status = (
-            WorkflowInstance.STATUS_COMPLETED
-        )
-
-        self.instance.completed_at = (
-            timezone.now()
-        )
-
-        self.instance.save(
-            update_fields=[
-                "status",
-                "completed_at",
-            ]
+        return (
+            WorkflowRuntimeLifecycleService.complete(
+                self.instance,
+                actor=self.actor,
+                actor_type=self.actor_type,
+                source=self.source,
+            )
         )
 
     def resume(self):
@@ -528,6 +623,17 @@ class WorkflowRuntimeEngine:
             )
 
         #
+        # A resume operation must never trust persisted
+        # waiting state without validating it first.
+        #
+
+        self._validate_runtime_integrity()
+
+        WorkflowRuntimeIntegrityService.validate_token(
+            waiting_token
+        )
+
+        #
         # Clear persisted suspension state.
         #
 
@@ -550,6 +656,10 @@ class WorkflowRuntimeEngine:
         )
 
         WorkflowRuntimeRepository.token.save(
+            waiting_token
+        )
+
+        WorkflowRuntimeIntegrityService.validate_token(
             waiting_token
         )
 
@@ -654,14 +764,6 @@ class WorkflowRuntimeEngine:
 
         if not self.context.is_suspended:
 
-            self._record_event(
-                instance=self.instance,
-                event=(
-                    WorkflowExecutionEventService
-                    .WORKFLOW_COMPLETED
-                ),
-            )
-
             self._mark_completed()
 
         return self.instance    
@@ -694,6 +796,8 @@ class WorkflowRuntimeEngine:
         # A runtime that already has a waiting token must
         # be resumed rather than started again.
         #
+        # This is a lifecycle guard, not an integrity failure.
+        #
 
         if self._get_waiting_tokens():
 
@@ -702,8 +806,35 @@ class WorkflowRuntimeEngine:
             )
 
         #
-        # A runtime that already contains execution tokens
-        # has already started.
+        # Validate persisted runtime integrity BEFORE checking
+        # whether execution has already started.
+        #
+        # An integrity violation is a genuine runtime failure
+        # and must therefore transition the instance to FAILED.
+        #
+
+        try:
+
+            self._validate_runtime_integrity()
+
+        except WorkflowRuntimeIntegrityError as exc:
+
+            self._mark_failed(
+                error_type=(
+                    exc.__class__.__name__
+                ),
+                error_message=str(exc),
+            )
+
+            raise
+
+        #
+        # A valid runtime that already contains execution
+        # tokens has already started.
+        #
+        # This is intentionally outside the failure boundary.
+        #
+        # It must NOT transition the workflow to FAILED.
         #
 
         if self._has_started_execution():
@@ -741,6 +872,17 @@ class WorkflowRuntimeEngine:
                 )
             )
 
+            #
+            # Validate the token immediately after persistence.
+            #
+            # This guarantees that the first execution token
+            # also satisfies the runtime integrity boundary.
+            #
+
+            WorkflowRuntimeIntegrityService.validate_token(
+                current
+            )
+
             self._record_event(
                 event=(
                     WorkflowExecutionEventService
@@ -749,6 +891,18 @@ class WorkflowRuntimeEngine:
             )
 
             while current:
+
+                #
+                # Validate the token before allowing the node
+                # to execute.
+                #
+                # This prevents a corrupted or cross-workflow
+                # token from entering the executor layer.
+                #
+
+                WorkflowRuntimeIntegrityService.validate_token(
+                    current
+                )
 
                 #
                 # A node may suspend the workflow.
@@ -855,62 +1009,99 @@ class WorkflowRuntimeEngine:
 
             if not self.context.is_suspended:
 
-                self._record_event(
-                    event=(
-                        WorkflowExecutionEventService
-                        .WORKFLOW_COMPLETED
-                    ),
-                )
-
                 self._mark_completed()
 
             return self.instance
 
         except Exception as exc:
 
-            failure_details = {
-                "error_type": (
-                    exc.__class__.__name__
-                ),
-                "error_message": str(exc),
-            }
-
             #
-            # Record node failure when a current token
-            # exists.
+            # Failure evidence must cross the execution-history
+            # boundary through record_failure().
+            #
+            # This guarantees:
+            #
+            # - canonical failure classification
+            # - canonical failure stage
+            # - exception type
+            # - no raw exception message
+            # - no caller-controlled failure classification
+            #
+            # The exception itself remains in memory only so the
+            # original runtime error can be re-raised.
             #
 
             if current is not None:
 
-                self._record_event(
+                WorkflowExecutionEventService.record_failure(
+                    instance=self.instance,
                     node=current.node,
                     event=(
                         WorkflowExecutionEventService
                         .NODE_FAILED
                     ),
-                    details=failure_details,
+                    exception=exc,
+                    actor=getattr(
+                        self,
+                        "actor",
+                        None,
+                    ),
+                    actor_type=getattr(
+                        self,
+                        "actor_type",
+                        None,
+                    ),
+                    source=getattr(
+                        self,
+                        "source",
+                        None,
+                    ),
                 )
 
             #
-            # Persist workflow failure.
+            # Persist workflow failure state.
             #
 
-            self._mark_failed()
+            self._mark_failed(
+                error_type=(
+                    exc.__class__.__name__
+                ),
+                    error_message=str(exc),
+            )
 
             #
-            # Record workflow-level failure.
+            # Record canonical workflow-level failure evidence.
+            #
+            # record_failure() intentionally excludes the raw
+            # exception message from execution history.
             #
 
-            self._record_event(
+            WorkflowExecutionEventService.record_failure(
+                instance=self.instance,
                 event=(
                     WorkflowExecutionEventService
                     .WORKFLOW_FAILED
                 ),
-                details=failure_details,
+                exception=exc,
+                actor=getattr(
+                    self,
+                    "actor",
+                    None,
+                ),
+                actor_type=getattr(
+                    self,
+                    "actor_type",
+                    None,
+                ),
+                source=getattr(
+                    self,
+                    "source",
+                    None,
+                ),
             )
 
             #
-            # Preserve the original exception.
+            # Preserve the original exception for the caller.
             #
 
             raise

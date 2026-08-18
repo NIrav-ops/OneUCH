@@ -8,6 +8,7 @@ from workflow.models import (
     WorkflowDefinition,
     WorkflowInstance,
     WorkflowNode,
+    WorkflowTransition,
 )
 
 from workflow.services.runtime_engine import (
@@ -59,6 +60,45 @@ class WorkflowRuntimeFailureTests(
                 node_type=WorkflowNode.START,
                 configuration={},
             )
+        )
+
+        self.action_node = (
+            WorkflowNode.objects.create(
+                workflow=self.workflow,
+                name="Failing Action",
+                node_type=WorkflowNode.ACTION,
+                configuration={},
+            )
+        )
+
+        self.end_node = (
+            WorkflowNode.objects.create(
+                workflow=self.workflow,
+                name="End",
+                node_type=WorkflowNode.END,
+                configuration={},
+            )
+        )
+
+        #
+        # Valid executable workflow graph:
+        #
+        # START -> ACTION -> END
+        #
+        # The ACTION node is deliberately used as the
+        # failure injection point for this test.
+        #
+
+        WorkflowTransition.objects.create(
+            workflow=self.workflow,
+            source=self.start_node,
+            target=self.action_node,
+        )
+
+        WorkflowTransition.objects.create(
+            workflow=self.workflow,
+            source=self.action_node,
+            target=self.end_node,
         )
 
         self.instance = (
@@ -137,11 +177,12 @@ class WorkflowRuntimeFailureTests(
         "workflow.services.runtime_engine.ExecutorFactory.get_executor"
     )
     @patch(
-        "workflow.services.runtime_engine.WorkflowExecutionEventService.record"
+        "workflow.services.runtime_engine."
+        "WorkflowExecutionEventService.record_failure"
     )
     def test_runtime_failure_records_failure_events(
         self,
-        record_event,
+        record_failure,
         get_executor,
     ):
 
@@ -162,6 +203,15 @@ class WorkflowRuntimeFailureTests(
                     "Intentional runtime failure."
                 )
 
+        #
+        # The test must inject the same deterministic
+        # failing executor used by test_runtime_failure().
+        #
+        # Without this, the mocked executor factory does
+        # not produce a failure and the workflow completes
+        # normally.
+        #
+
         get_executor.return_value = (
             FailingExecutor
         )
@@ -172,76 +222,111 @@ class WorkflowRuntimeFailureTests(
 
         with self.assertRaises(
             RuntimeError
-        ):
+        ) as context:
 
             engine.run()
 
-        failure_calls = []
-
-        for call in record_event.call_args_list:
-
-            event = call.kwargs.get(
-                "event"
-            )
-
-            if event in [
-                WorkflowExecutionEventService.NODE_FAILED,
-                WorkflowExecutionEventService.WORKFLOW_FAILED,
-            ]:
-
-                failure_calls.append(
-                    call
-                )
+        #
+        # Confirm that the actual execution failure
+        # reached the runtime boundary.
+        #
 
         self.assertEqual(
-            len(failure_calls),
+            str(context.exception),
+            "Intentional runtime failure.",
+        )
+
+        #
+        # Failure evidence must contain exactly two
+        # canonical failure events:
+        #
+        # 1. NODE_FAILED
+        # 2. WORKFLOW_FAILED
+        #
+
+        self.assertEqual(
+            record_failure.call_count,
             2,
         )
 
-        node_failure = (
-            failure_calls[0]
+        calls = (
+            record_failure.call_args_list
         )
 
-        workflow_failure = (
-            failure_calls[1]
+        node_failure_call = None
+        workflow_failure_call = None
+
+        for call in calls:
+
+            kwargs = call.kwargs
+
+            if (
+                kwargs.get("event")
+                == (
+                    WorkflowExecutionEventService
+                    .NODE_FAILED
+                )
+            ):
+
+                node_failure_call = kwargs
+
+            elif (
+                kwargs.get("event")
+                == (
+                    WorkflowExecutionEventService
+                    .WORKFLOW_FAILED
+                )
+            ):
+
+                workflow_failure_call = kwargs
+
+        self.assertIsNotNone(
+            node_failure_call
         )
 
-        node_failure_details = (
-            node_failure.kwargs.get(
-                "details"
+        self.assertIsNotNone(
+            workflow_failure_call
+        )
+
+        #
+        # Both failure events must carry the original
+        # exception into record_failure().
+        #
+        # record_failure() remains responsible for
+        # safe classification and persistence.
+        #
+
+        self.assertIsInstance(
+            node_failure_call["exception"],
+            RuntimeError,
+        )
+
+        self.assertIsInstance(
+            workflow_failure_call["exception"],
+            RuntimeError,
+        )
+
+        #
+        # Node failure must identify the actual
+        # failing workflow node.
+        #
+
+        self.assertIsNotNone(
+            node_failure_call["node"]
+        )
+
+        self.assertEqual(
+            node_failure_call["node"].pk,
+            self.start_node.pk,
+        )
+
+        #
+        # Workflow failure is workflow-level and
+        # therefore must not be attached to a node.
+        #
+
+        self.assertIsNone(
+            workflow_failure_call.get(
+                "node"
             )
-        )
-
-        workflow_failure_details = (
-            workflow_failure.kwargs.get(
-                "details"
-            )
-        )
-
-        self.assertEqual(
-            node_failure_details[
-                "error_type"
-            ],
-            "RuntimeError",
-        )
-
-        self.assertEqual(
-            node_failure_details[
-                "error_message"
-            ],
-            "Intentional runtime failure.",
-        )
-
-        self.assertEqual(
-            workflow_failure_details[
-                "error_type"
-            ],
-            "RuntimeError",
-        )
-
-        self.assertEqual(
-            workflow_failure_details[
-                "error_message"
-            ],
-            "Intentional runtime failure.",
         )
