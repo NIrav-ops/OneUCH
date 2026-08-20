@@ -12,19 +12,18 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env")
 
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.environ.get(
-    "DJANGO_SECRET_KEY",
-    "django-insecure-8bwl0h2%9h!8t%8azhg&wc)0=u=mi5dlb&8q7v_5ckd+oq1loq",
-)
+SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get("DJANGO_DEBUG", "true").lower() in ("1", "true", "yes")
@@ -189,14 +188,10 @@ SIMPLE_JWT = {
 
 # GOOGLE OAUTH
 
-GOOGLE_CLIENT_ID = os.environ.get(
-    "GOOGLE_CLIENT_ID",
-    "137843131148-rld00nfntc95f1vrg5bcjd0vn9m7fd3d.apps.googleusercontent.com",
-)
-GOOGLE_CLIENT_SECRET = os.environ.get(
-    "GOOGLE_CLIENT_SECRET",
-    "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",
-)
+GOOGLE_CLIENT_ID = os.environ["GOOGLE_CLIENT_ID"]
+
+GOOGLE_CLIENT_SECRET = os.environ["GOOGLE_CLIENT_SECRET"]
+
 GOOGLE_REDIRECT_URI = os.environ.get(
     "GOOGLE_REDIRECT_URI",
     "http://127.0.0.1:8000/api/google/oauth/callback/",
@@ -204,18 +199,12 @@ GOOGLE_REDIRECT_URI = os.environ.get(
 
 # MICROSOFT OAUTH
 
-MICROSOFT_CLIENT_ID = os.environ.get(
-    "MICROSOFT_CLIENT_ID",
-    "ed59d346-fc88-4852-8b7c-32ce02e363d8",
-)
-MICROSOFT_CLIENT_SECRET = os.environ.get(
-    "MICROSOFT_CLIENT_SECRET",
-    "KE88Q~xiuuXUx.Sp5bdXx3U8HO~hnEYMui6RccLJ",
-)
-MICROSOFT_TENANT_ID = os.environ.get(
-    "MICROSOFT_TENANT_ID",
-    "82b3bee5-e565-4f02-8c21-49cb47d1e269",
-)
+MICROSOFT_CLIENT_ID = os.environ["MICROSOFT_CLIENT_ID"]
+
+MICROSOFT_CLIENT_SECRET = os.environ["MICROSOFT_CLIENT_SECRET"]
+
+MICROSOFT_TENANT_ID = os.environ["MICROSOFT_TENANT_ID"]
+
 MICROSOFT_REDIRECT_URI = os.environ.get(
     "MICROSOFT_REDIRECT_URI",
     "http://localhost:8000/api/microsoft/oauth/callback/",
