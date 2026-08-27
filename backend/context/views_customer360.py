@@ -1,8 +1,14 @@
+﻿from django.shortcuts import get_object_or_404
+
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 
 from context.models import BusinessObject
+
+from platform_core.api.tenant import (
+    get_user_organization_or_404,
+)
 
 from context.services.customer360 import (
     Customer360Service,
@@ -11,7 +17,7 @@ from context.services.customer360 import (
 from context.serializers import (
     Customer360Serializer,
 )
-from django.shortcuts import get_object_or_404
+
 
 class Customer360APIView(APIView):
 
@@ -19,17 +25,22 @@ class Customer360APIView(APIView):
         IsAuthenticated,
     ]
 
-    
-
     def get(
         self,
         request,
         business_object_id,
     ):
 
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
+
         business_object = get_object_or_404(
             BusinessObject,
             pk=business_object_id,
+            organization=organization,
         )
 
         try:
@@ -45,9 +56,13 @@ class Customer360APIView(APIView):
                 "object_type": business_object.object_type.name,
             }
 
-            serializer = Customer360Serializer(result)
+            serializer = Customer360Serializer(
+                result
+            )
 
-            return Response(serializer.data)
+            return Response(
+                serializer.data
+            )
 
         except Exception as exc:
 

@@ -1,47 +1,30 @@
-from django.shortcuts import get_object_or_404
-
-from rest_framework.views import APIView
+﻿from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from inbox.models import Organization
+from platform_core.api.tenant import get_scoped_organization_or_404
 
 from knowledge.services.communication_intelligence import (
     CommunicationIntelligenceService,
 )
-
 from knowledge.services.risk.executive_risk import (
     ExecutiveRiskService,
 )
-
-from context.serializers_risk import (
-    ExecutiveRiskSerializer,
-)
+from context.serializers_risk import ExecutiveRiskSerializer
 
 
 class ExecutiveRiskAPIView(APIView):
+    permission_classes = [IsAuthenticated]
 
-    permission_classes = [
-        IsAuthenticated,
-    ]
-
-    def get(
-        self,
-        request,
-        organization_id,
-    ):
-
-        organization = get_object_or_404(
-            Organization,
-            pk=organization_id,
+    def get(self, request, organization_id):
+        organization = get_scoped_organization_or_404(
+            request,
+            organization_id,
         )
 
         try:
-
-            communication = (
-                CommunicationIntelligenceService().build(
-                    organization=organization,
-                )
+            communication = CommunicationIntelligenceService().build(
+                organization=organization,
             )
 
             result = ExecutiveRiskService().build(
@@ -49,19 +32,12 @@ class ExecutiveRiskAPIView(APIView):
                 communication=communication,
             )
 
-            serializer = ExecutiveRiskSerializer(
-                result,
-            )
+            serializer = ExecutiveRiskSerializer(result)
 
-            return Response(
-                serializer.data,
-            )
+            return Response(serializer.data)
 
         except Exception as exc:
-
             return Response(
-                {
-                    "detail": str(exc),
-                },
+                {"detail": str(exc)},
                 status=500,
             )

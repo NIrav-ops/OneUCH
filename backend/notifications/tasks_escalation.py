@@ -123,7 +123,8 @@ def process_approvals(now):
 def process_followups(now):
 
     followups = FollowUpItem.objects.filter(
-        status="pending"
+        status="pending",
+        followup_due_at__isnull=False,
     )
 
     for item in followups:

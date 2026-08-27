@@ -23,8 +23,8 @@ class BulkMarkConversationReadAPIView(APIView):
             return Response({"error": "No conversation_ids provided"}, status=400)
 
         conversations = Conversation.objects.filter(
-            conversation_key__in=conversation_ids,
-            user=request.user
+            id__in=conversation_ids,
+            user=request.user,
         ).select_related("email_account")
 
         results = []
@@ -85,16 +85,16 @@ class BulkMarkConversationReadAPIView(APIView):
                 conv.messages.update(is_read=True)
 
                 results.append({
-                    "conversation_id": conv.conversation_key,
-                    "status": "read"
+                    "conversation_id": conv.id,
+                    "status": "read",
                 })
 
             except Exception as e:
                 print("❌ BULK READ ERROR:", str(e))
 
                 errors.append({
-                    "conversation_id": conv.conversation_key,
-                    "error": str(e)
+                    "conversation_id": conv.id,
+                    "error": str(e),
                 })
 
         return Response({
@@ -118,8 +118,8 @@ class BulkToggleConversationStarAPIView(APIView):
             return Response({"error": "No conversation_ids provided"}, status=400)
 
         conversations = Conversation.objects.filter(
-            conversation_key__in=conversation_ids,  # IMPORTANT
-            user=request.user
+            id__in=conversation_ids,
+            user=request.user,
         ).select_related("email_account")
 
         results = []
@@ -195,16 +195,16 @@ class BulkToggleConversationStarAPIView(APIView):
                 conv.messages.update(is_starred=new_state)
 
                 results.append({
-                    "conversation_id": conv.conversation_key,
-                    "is_starred": new_state
+                    "conversation_id": conv.id,
+                    "status": "read",
                 })
 
             except Exception as e:
                 print("❌ BULK STAR ERROR:", str(e))
 
                 errors.append({
-                    "conversation_id": conv.conversation_key,
-                    "error": str(e)
+                    "conversation_id": conv.id,
+                    "error": str(e),
                 })
 
         return Response({

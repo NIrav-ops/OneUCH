@@ -3,7 +3,7 @@ from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from inbox.models import Organization
+from inbox.models import Organization, OrganizationUser
 
 from context.models import (
     BusinessObject,
@@ -28,6 +28,12 @@ class SearchAPITests(APITestCase):
 
         self.organization = Organization.objects.create(
             name="Test Organization",
+        )
+
+        OrganizationUser.objects.create(
+            user=self.user,
+            organization=self.organization,
+            role="member",
         )
 
         self.object_type = BusinessObjectType.objects.create(

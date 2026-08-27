@@ -6,6 +6,7 @@ from inbox.utils.conversation_key import generate_conversation_key
 from oauth_tokens.models import OAuthToken
 from inbox.services.sync_status import update_sync_status
 from django.conf import settings
+from microsoftapis.utils import get_microsoft_access_token
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from inbox.services.conversation_cache import invalidate_conversation_cache
@@ -21,37 +22,24 @@ def fetch_outlook_emails(*, user, email_account, limit=20):
         progress=0,
     )
 
-    token = OAuthToken.objects.filter(
-        user=user,
-        provider="microsoft",
-        is_active=True
-    ).first()
-
-    if token.expires_at and token.expires_at <= timezone.now():
-
-        refresh_response = requests.post(
-            "https://login.microsoftonline.com/common/oauth2/v2.0/token",
-            data={
-                "client_id": settings.MICROSOFT_CLIENT_ID,
-                "client_secret": settings.MICROSOFT_CLIENT_SECRET,
-                "grant_type": "refresh_token",
-                "refresh_token": token.refresh_token,
-            },
-        ).json()
-
-        token.access_token = refresh_response["access_token"]
-        token.save()
-
-    if not token:
-        print("No active Microsoft OAuth token.")
-        return
+    try:
+        access_token = get_microsoft_access_token(user)
+    except Exception as exc:
+        update_sync_status(
+            user=user,
+            platform="outlook",
+            status="failed",
+            progress=0,
+            error_message=str(exc),
+        )
+        raise
 
     headers = {
-        "Authorization": f"Bearer {token.access_token}"
+        "Authorization": f"Bearer {access_token}"
     }
 
     response = requests.get(
-        "https://graph.microsoft.com/v1.0/me/messages",
+        "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages",
         headers=headers,
         params={
             "$top": limit,
@@ -67,9 +55,13 @@ def fetch_outlook_emails(*, user, email_account, limit=20):
             user=user,
             platform="outlook",
             status="failed",
+            progress=0,
             error_message=response.text,
         )
-        return
+        raise RuntimeError(
+            "Microsoft Graph Outlook sync failed "
+            f"with status {response.status_code}"
+        )
 
     messages = response.json().get("value", [])
     organization = user.organization_membership.organization
@@ -117,22 +109,33 @@ def fetch_outlook_emails(*, user, email_account, limit=20):
         is_read = msg.get("isRead", False)
         is_starred = False
 
-        # Skip duplicates
-        if InboxMessage.objects.filter(
-            external_message_id=external_id,
-            email_account=email_account
-        ).exists():
-            continue
-
         # =========================
-        # CONVERSATION FIX
+        # CONVERSATION ACCOUNT REPAIR
         # =========================
         conversation_key = f"outlook_{thread_id}"
 
         conversation = Conversation.objects.filter(
             user=user,
-            conversation_key=conversation_key
+            conversation_key=conversation_key,
         ).first()
+
+        if (
+            conversation
+            and conversation.email_account_id is None
+        ):
+            conversation.email_account = email_account
+            conversation.save(
+                update_fields=[
+                    "email_account",
+                ]
+            )
+
+        # Skip messages already synced for this account.
+        if InboxMessage.objects.filter(
+            external_message_id=external_id,
+            email_account=email_account,
+        ).exists():
+            continue
 
         if not conversation:
             conversation = Conversation.objects.create(
@@ -213,12 +216,14 @@ def fetch_outlook_emails(*, user, email_account, limit=20):
 
         invalidate_conversation_cache(user.id)
 
-        update_sync_status(
-            user=user,
-            platform="outlook",
-            status="success",
-            progress=100,
-        )
+# Sync completion must run even when there are
+# zero new messages or every fetched message is a duplicate.
+    update_sync_status(
+        user=user,
+        platform="outlook",
+        status="success",
+        progress=100,
+    )
 
 
 # Send realtime websocket event

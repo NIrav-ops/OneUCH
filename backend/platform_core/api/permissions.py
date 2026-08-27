@@ -100,35 +100,37 @@ class ReadOnlyPermission(BasePermission):
 class OrganizationPermission(BasePermission):
 
     """
-    Placeholder.
-
-    Later this checks
-
-    Organization
-
-    Membership
-
-    License
-
-    Subscription
-
-    RBAC
+    Require an authenticated user with an active
+    organization membership.
     """
 
     def has_permission(
-
         self,
-
         request,
-
         view,
-
     ):
 
+        user = getattr(
+            request,
+            "user",
+            None,
+        )
+
+        if (
+            user is None
+            or not user.is_authenticated
+        ):
+            return False
+
+        try:
+            membership = (
+                user.organization_membership
+            )
+        except Exception:
+            return False
+
         return bool(
-
-            request.user
-
-            and request.user.is_authenticated
-
+            membership
+            and membership.organization_id
+            and membership.organization.is_active
         )

@@ -44,6 +44,9 @@ class ConversationDetailAPIView(APIView):
                 {
                     "id": msg.id,
                     "sender": msg.sender,
+                    "recipients": msg.recipients,
+                    "direction": msg.direction,
+                    "platform": msg.platform,
                     "subject": msg.subject or "No Subject",
                     "body": msg.body or "",
                     "time": msg.received_at,

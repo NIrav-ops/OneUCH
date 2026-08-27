@@ -5,6 +5,10 @@ from rest_framework.views import APIView
 
 from django.shortcuts import get_object_or_404
 
+from platform_core.api.tenant import (
+    get_user_organization_or_404,
+)
+
 from workflow.models import WorkflowDefinition
 
 from workflow.serializers.workflow_definition import (
@@ -28,22 +32,12 @@ class WorkflowDefinitionAPIView(
 
     def _get_organization(
         self,
-        user,
+        request,
     ):
 
-        organization = getattr(
-            user,
-            "organization",
-            None,
+        return get_user_organization_or_404(
+            request
         )
-
-        if organization is None:
-
-            raise ValueError(
-                "Authenticated user is not associated with an organization."
-            )
-
-        return organization
 
     def get_workflow(
         self,
@@ -52,7 +46,7 @@ class WorkflowDefinitionAPIView(
     ):
 
         organization = self._get_organization(
-            request.user
+            request
         )
 
         workflow = get_object_or_404(
@@ -70,7 +64,7 @@ class WorkflowDefinitionAPIView(
     ):
 
         organization = self._get_organization(
-            request.user
+            request
         )
 
         if pk is not None:
@@ -88,7 +82,7 @@ class WorkflowDefinitionAPIView(
 
         workflows = (
             self.service.list_workflows(
-                organization
+                organization=organization
             )
         )
 
@@ -105,7 +99,7 @@ class WorkflowDefinitionAPIView(
     ):
 
         organization = self._get_organization(
-            request.user
+            request
         )
 
         serializer = WorkflowDefinitionSerializer(

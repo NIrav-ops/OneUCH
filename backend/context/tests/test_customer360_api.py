@@ -6,6 +6,7 @@ from rest_framework.test import APITestCase
 
 from inbox.models import (
     Organization,
+    OrganizationUser,
     Conversation,
     InboxMessage,
 )
@@ -39,6 +40,12 @@ class Customer360APITests(APITestCase):
 
         self.organization = Organization.objects.create(
             name="Test Org",
+        )
+
+        OrganizationUser.objects.create(
+            user=self.user,
+            organization=self.organization,
+            role="member",
         )
 
         self.object_type = BusinessObjectType.objects.create(

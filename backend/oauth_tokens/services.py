@@ -4,6 +4,7 @@ from django.utils import timezone
 from django.conf import settings
 
 from oauth_tokens.models import OAuthToken
+from microsoftapis.utils import refresh_microsoft_token
 
 
 def refresh_google_token(token: OAuthToken):
@@ -64,9 +65,17 @@ def get_valid_oauth_token(user, provider: str):
         )
 
     if token.is_expired():
+
         if provider == "google":
-            token = refresh_google_token(token)
-        else:
-            raise Exception(f"Token refresh not implemented for {provider}")
+
+            token = refresh_google_token(
+                token
+            )
+
+        elif provider == "microsoft":
+
+            refresh_microsoft_token(
+                token
+            )
 
     return token

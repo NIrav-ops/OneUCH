@@ -169,3 +169,5 @@ def scan_overdue_work_and_notify():
         created_count += 1
 
     return created_count
+# Ensure escalation task is registered by Celery autodiscovery.
+from notifications.tasks_escalation import run_escalation_engine  # noqa: F401

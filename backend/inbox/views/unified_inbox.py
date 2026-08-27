@@ -1,5 +1,6 @@
 from django.core.paginator import Paginator
 from django.db.models import Max
+from django.db.models.functions import Coalesce
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -137,9 +138,24 @@ class UnifiedConversationInboxAPIView(APIView):
                 ).distinct()
 
             conversations = (
-                conversations.select_related("last_message", "email_account")
-                .annotate(latest_message_at=Max("messages__received_at"))
-                .order_by("-last_message_at", "-latest_message_at", "-created_at")
+                conversations.select_related(
+                    "last_message",
+                    "email_account",
+                )
+                .annotate(
+                    latest_message_at=Max(
+                        "messages__received_at"
+                    ),
+                    effective_message_at=Coalesce(
+                        "last_message_at",
+                        Max("messages__received_at"),
+                        "created_at",
+                    ),
+                )
+                .order_by(
+                    "-effective_message_at",
+                    "-created_at",
+                )
                 .distinct()
             )
 
@@ -188,6 +204,16 @@ class UnifiedConversationInboxAPIView(APIView):
                     "unread_count": getattr(conv, "unread_count", 0),
                     "is_starred": getattr(conv, "is_starred", False),
                     "email_account_id": conv.email_account_id,
+                    "sender": (
+                        last.sender
+                        if last
+                        else ""
+                    ),
+                    "recipients": (
+                        last.recipients
+                        if last
+                        else ""
+                    ),
                 })
 
             return Response({

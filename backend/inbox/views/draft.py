@@ -68,7 +68,11 @@ class DraftSaveAPIView(APIView):
                 "platform": email_account.account_type if email_account else "gmail",
                 "direction": "outbound",
                 "email_account": email_account,
-                "sender": request.user.email,
+                "sender": (
+                    email_account.email_address
+                    if email_account
+                    else request.user.email
+                ),
                 "recipients": recipients,
                 "subject": subject,
                 "body": body,
@@ -107,9 +111,19 @@ class DraftListAPIView(APIView):
         data = [
             {
                 "id": d.id,
-                "conversation_id": d.conversation.id if d.conversation else None,
+                "conversation_id": (
+                    d.conversation.id
+                    if d.conversation
+                    else None
+                ),
                 "subject": d.subject,
                 "recipients": d.recipients,
+                "body": d.body,
+                "email_account_id": (
+                    d.email_account.id
+                    if d.email_account
+                    else None
+                ),
                 "updated_at": d.received_at,
             }
             for d in drafts

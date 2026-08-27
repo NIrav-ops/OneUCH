@@ -35,6 +35,77 @@ ALLOWED_HOSTS = [
 ]
 
 
+# ==================================================
+# Deployment Security
+# ==================================================
+#
+# Development remains unchanged by default.
+# Production deployments must explicitly enable
+# secure transport/cookie settings through environment
+# variables.
+#
+
+SECURE_SSL_REDIRECT = os.environ.get(
+    "DJANGO_SECURE_SSL_REDIRECT",
+    "false",
+).lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
+SESSION_COOKIE_SECURE = os.environ.get(
+    "DJANGO_SESSION_COOKIE_SECURE",
+    "false",
+).lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
+CSRF_COOKIE_SECURE = os.environ.get(
+    "DJANGO_CSRF_COOKIE_SECURE",
+    "false",
+).lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
+SECURE_HSTS_SECONDS = int(
+    os.environ.get(
+        "DJANGO_SECURE_HSTS_SECONDS",
+        "0",
+    )
+)
+
+SECURE_HSTS_INCLUDE_SUBDOMAINS = (
+    os.environ.get(
+        "DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS",
+        "false",
+    ).lower()
+    in (
+        "1",
+        "true",
+        "yes",
+    )
+)
+
+SECURE_HSTS_PRELOAD = os.environ.get(
+    "DJANGO_SECURE_HSTS_PRELOAD",
+    "false",
+).lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
+SECURE_PROXY_SSL_HEADER = (
+    "HTTP_X_FORWARDED_PROTO",
+    "https",
+)
+
+
 # Application definition
 
 INSTALLED_APPS = [
@@ -113,12 +184,62 @@ WSGI_APPLICATION = 'backend.wsgi.application'
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+# ==================================================
+# Database Configuration
+# ==================================================
+#
+# SQLite remains the default for local development.
+#
+# Pilot / production environments can explicitly
+# enable PostgreSQL with:
+#
+# DJANGO_DB_ENGINE=postgresql
+#
+# and the DB_* environment variables below.
+#
+
+DB_ENGINE = os.environ.get(
+    "DJANGO_DB_ENGINE",
+    "sqlite",
+).strip().lower()
+
+
+if DB_ENGINE in {
+    "postgres",
+    "postgresql",
+}:
+
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": os.environ["DB_NAME"],
+            "USER": os.environ["DB_USER"],
+            "PASSWORD": os.environ["DB_PASSWORD"],
+            "HOST": os.environ.get(
+                "DB_HOST",
+                "127.0.0.1",
+            ),
+            "PORT": os.environ.get(
+                "DB_PORT",
+                "5432",
+            ),
+            "CONN_MAX_AGE": int(
+                os.environ.get(
+                    "DB_CONN_MAX_AGE",
+                    "60",
+                )
+            ),
+        }
     }
-}
+
+else:
+
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+        }
+    }
 
 
 # Password validation
@@ -168,24 +289,6 @@ AUTH_USER_MODEL = 'accounts.User'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
-from datetime import timedelta
-
-REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
-    ),
-    'DEFAULT_PERMISSION_CLASSES': (
-        'rest_framework.permissions.IsAuthenticated',
-    ),
-    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
-}
-
-SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
-    'AUTH_HEADER_TYPES': ('Bearer',),
-}
-
 # GOOGLE OAUTH
 
 GOOGLE_CLIENT_ID = os.environ["GOOGLE_CLIENT_ID"]
@@ -210,17 +313,28 @@ MICROSOFT_REDIRECT_URI = os.environ.get(
     "http://localhost:8000/api/microsoft/oauth/callback/",
 )
 
-CRONJOBS = [
-    ('*/10 * * * *', 'background_jobs.tasks.refresh_oauth_tokens'),
-    ('*/5 * * * *', 'background_jobs.tasks.fetch_all_imap_inboxes'),
-]
+# ===============================
+# Redis / Celery Configuration
+# ===============================
 
-CELERY_BROKER_URL = "redis://localhost:6379/0"
+REDIS_URL = os.environ.get(
+    "REDIS_URL",
+    "redis://127.0.0.1:6379/0",
+)
+
+CELERY_BROKER_URL = REDIS_URL
+CELERY_RESULT_BACKEND = REDIS_URL
+
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
-CELERY_RESULT_BACKEND = "redis://127.0.0.1:6379/0"
+CELERY_RESULT_SERIALIZER = "json"
+
 CELERY_TASK_ALWAYS_EAGER = False
-CELERY_WORKER_POOL = "solo"
+
+CELERY_WORKER_POOL = os.environ.get(
+    "CELERY_WORKER_POOL",
+    "solo",
+)
 
 
 INSTALLED_APPS += ["django_celery_beat"]
@@ -268,14 +382,6 @@ SPECTACULAR_SETTINGS = {
 RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "rzp_test_dummy")
 RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "dummy_secret")
 
-# ===============================
-# Celery Configuration
-# ===============================
-
-CELERY_BROKER_URL = "redis://localhost:6379/0"
-CELERY_ACCEPT_CONTENT = ["json"]
-CELERY_TASK_SERIALIZER = "json"
-CELERY_RESULT_SERIALIZER = "json"
 
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 CELERY_TIMEZONE = "Asia/Kolkata"
@@ -286,7 +392,7 @@ CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
         "CONFIG": {
-            "hosts": [("127.0.0.1", 6379)],
+            "hosts": [REDIS_URL],
         },
     },
 }
@@ -297,16 +403,44 @@ AUTHENTICATION_BACKENDS = [
 
 import redis
 
-REDIS_CLIENT = redis.Redis(
-    host="127.0.0.1",
-    port=6379,
-    db=0,
-    decode_responses=True
+REDIS_CLIENT = redis.Redis.from_url(
+    REDIS_URL,
+    decode_responses=True,
 )
 
 from celery.schedules import crontab
 
 CELERY_BEAT_SCHEDULE = {
+    "sync-all-email-accounts": {
+        "task": "inbox.tasks.periodic_sync_all_users",
+        "schedule": crontab(minute="*/5"),
+    },
+
+    "refresh-expired-oauth-tokens": {
+        "task": "oauth_tokens.tasks.refresh_expired_tokens",
+        "schedule": crontab(minute="*/10"),
+    },
+
+    "analyze-new-messages": {
+        "task": "actions.tasks.analyze_new_messages",
+        "schedule": crontab(minute="2-57/5"),
+    },
+
+    "analyze-new-approvals": {
+        "task": "approvals.tasks.analyze_new_approvals",
+        "schedule": crontab(minute="3-58/5"),
+    },
+
+    "analyze-new-followups": {
+        "task": "actions.followup_tasks.analyze_new_followups",
+        "schedule": crontab(minute="4-59/5"),
+    },
+
+    "analyze-new-expected-responses": {
+        "task": "actions.expected_response_tasks.analyze_new_expected_responses",
+        "schedule": crontab(minute="5-59/5"),
+    },
+
     "scan-overdue-work-every-hour": {
         "task": "notifications.tasks.scan_overdue_work_and_notify",
         "schedule": crontab(minute=0),
@@ -354,4 +488,129 @@ LOGGING = {
             "propagate": False,
         },
     },
+}
+
+# ------------------------------------------------------------
+# One UCH AI / Action Intelligence
+# ------------------------------------------------------------
+
+ONEUCH_AI_PROVIDER = os.getenv(
+    "ONEUCH_AI_PROVIDER",
+    "mock",
+)
+
+ONEUCH_AI_MODEL = os.getenv(
+    "ONEUCH_AI_MODEL",
+    "gpt-5.6-luna",
+)
+
+ONEUCH_AI_TIMEOUT_SECONDS = float(
+    os.getenv(
+        "ONEUCH_AI_TIMEOUT_SECONDS",
+        "30",
+    )
+)
+
+ACTION_AI_ENABLED = (
+    os.getenv(
+        "ACTION_AI_ENABLED",
+        "false",
+    ).lower()
+    in {"1", "true", "yes", "on"}
+)
+
+ACTION_AI_AUTO_CREATE_THRESHOLD = int(
+    os.getenv(
+        "ACTION_AI_AUTO_CREATE_THRESHOLD",
+        "90",
+    )
+)
+
+ACTION_AI_REVIEW_THRESHOLD = int(
+    os.getenv(
+        "ACTION_AI_REVIEW_THRESHOLD",
+        "75",
+    )
+)
+
+ACTION_AI_MAX_ATTEMPTS = int(
+    os.getenv(
+        "ACTION_AI_MAX_ATTEMPTS",
+        "3",
+    )
+)
+
+ACTION_AI_RETRY_BASE_SECONDS = int(
+    os.getenv(
+        "ACTION_AI_RETRY_BASE_SECONDS",
+        "300",
+    )
+)
+
+ACTION_AI_RETRY_MAX_SECONDS = int(
+    os.getenv(
+        "ACTION_AI_RETRY_MAX_SECONDS",
+        "3600",
+    )
+)
+
+ACTION_AI_ALLOWED_ACCOUNT_IDS = {
+    int(value.strip())
+    for value in os.getenv(
+        "ACTION_AI_ALLOWED_ACCOUNT_IDS",
+        "",
+    ).split(",")
+    if value.strip().isdigit()
+}
+
+APPROVAL_AI_ENABLED = (
+    os.getenv(
+        "APPROVAL_AI_ENABLED",
+        "false",
+    ).lower()
+    == "true"
+)
+
+APPROVAL_AI_AUTO_CREATE_THRESHOLD = int(
+    os.getenv(
+        "APPROVAL_AI_AUTO_CREATE_THRESHOLD",
+        "95",
+    )
+)
+
+APPROVAL_AI_REVIEW_THRESHOLD = int(
+    os.getenv(
+        "APPROVAL_AI_REVIEW_THRESHOLD",
+        "85",
+    )
+)
+
+APPROVAL_AI_MAX_ATTEMPTS = int(
+    os.getenv(
+        "APPROVAL_AI_MAX_ATTEMPTS",
+        "3",
+    )
+)
+
+APPROVAL_AI_RETRY_BASE_SECONDS = int(
+    os.getenv(
+        "APPROVAL_AI_RETRY_BASE_SECONDS",
+        "300",
+    )
+)
+
+APPROVAL_AI_RETRY_MAX_SECONDS = int(
+    os.getenv(
+        "APPROVAL_AI_RETRY_MAX_SECONDS",
+        "3600",
+    )
+)
+
+APPROVAL_AI_ALLOWED_ACCOUNT_IDS = {
+    int(value.strip())
+    for value in os.getenv(
+        "APPROVAL_AI_ALLOWED_ACCOUNT_IDS",
+        "",
+    ).split(",")
+    if value.strip().isdigit()
 }

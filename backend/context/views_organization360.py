@@ -1,10 +1,10 @@
-from django.shortcuts import get_object_or_404
-
-from rest_framework.views import APIView
+﻿from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 
-from inbox.models import Organization
+from platform_core.api.tenant import (
+    get_scoped_organization_or_404,
+)
 
 from knowledge.services.organization360 import (
     Organization360Service,
@@ -27,23 +27,30 @@ class Organization360APIView(APIView):
         organization_id,
     ):
 
-        organization = get_object_or_404(
-            Organization,
-            pk=organization_id,
+        organization = (
+            get_scoped_organization_or_404(
+                request,
+                organization_id,
+            )
         )
 
         try:
 
-            result = Organization360Service().build(
-                organization=organization,
+            result = (
+                Organization360Service()
+                .build(
+                    organization=organization,
+                )
             )
 
-            serializer = Organization360Serializer(
-                result
+            serializer = (
+                Organization360Serializer(
+                    result
+                )
             )
 
             return Response(
-                serializer.data,
+                serializer.data
             )
 
         except Exception as exc:

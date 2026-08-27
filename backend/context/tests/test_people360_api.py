@@ -5,7 +5,7 @@ from rest_framework.test import APITestCase
 
 from context.models import Person
 
-from inbox.models import Organization
+from inbox.models import Organization, OrganizationUser
 
 
 class People360APITests(APITestCase):
@@ -25,6 +25,12 @@ class People360APITests(APITestCase):
 
         self.organization = Organization.objects.create(
             name="Test Organization",
+        )
+
+        OrganizationUser.objects.create(
+            user=self.user,
+            organization=self.organization,
+            role="member",
         )
 
         self.person = Person.objects.create(

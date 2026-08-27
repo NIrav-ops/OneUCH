@@ -1,5 +1,9 @@
 from django.shortcuts import get_object_or_404
 
+from platform_core.api.tenant import (
+    get_user_organization_or_404,
+)
+
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -29,66 +33,28 @@ class WorkflowPublishAPIView(
     ):
 
         #
-        # First resolve the workflow itself.
+        # Tenant identity is derived exclusively from
+        # the authenticated user's membership.
         #
-        # This guarantees that a genuinely missing
-        # workflow returns HTTP 404 before any
-        # organization authorization logic is evaluated.
+
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
+
+        #
+        # Resolve the workflow inside that tenant.
+        #
+        # Cross-tenant IDs intentionally return 404
+        # so resource existence is not disclosed.
         #
 
         workflow = get_object_or_404(
             WorkflowDefinition,
             pk=workflow_id,
+            organization=organization,
         )
-
-        #
-        # Resolve the authenticated user's organization.
-        #
-
-        organization = getattr(
-            request.user,
-            "organization",
-            None,
-        )
-
-        #
-        # The current User model does not expose an
-        # organization field directly.
-        #
-        # Therefore an authenticated user without an
-        # organization cannot publish a workflow.
-        #
-
-        if organization is None:
-
-            return Response(
-                {
-                    "detail": (
-                        "Authenticated user is not "
-                        "associated with an organization."
-                    )
-                },
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        #
-        # Enforce tenant isolation.
-        #
-        # A workflow belonging to another organization
-        # cannot be published by this user.
-        #
-
-        if workflow.organization_id != organization.id:
-
-            return Response(
-                {
-                    "detail": (
-                        "You do not have permission "
-                        "to publish this workflow."
-                    )
-                },
-                status=status.HTTP_403_FORBIDDEN,
-            )
 
         #
         # Execute workflow lifecycle validation.

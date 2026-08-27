@@ -165,6 +165,8 @@ class InboxMessage(models.Model):
     
     action_analyzed = models.BooleanField(default=False)
     approval_analyzed = models.BooleanField(default=False)
+    followup_analyzed = models.BooleanField(default=False)
+    expected_response_analyzed = models.BooleanField(default=False)
 
     STATUS_CHOICES = [
     ("queued", "Queued"),

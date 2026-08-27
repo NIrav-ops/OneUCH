@@ -1,12 +1,14 @@
 from workflow.services.ai.exceptions import ProviderNotFound
 
 from workflow.services.ai.providers.mock import MockAIProvider
+from workflow.services.ai.providers.openai import OpenAIProvider
 
 
 class AIProviderRouter:
 
     PROVIDERS = {
         "mock": MockAIProvider,
+        "openai": OpenAIProvider,
     }
 
     @classmethod

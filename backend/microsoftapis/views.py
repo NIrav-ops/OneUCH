@@ -18,50 +18,103 @@ from rest_framework.exceptions import AuthenticationFailed
 import urllib.parse
 from timeline.services import create_timeline_event
 from knowledge.services.message_processor import MessageProcessor
+from oauth_tokens.oauth_state import (OAuthStateError,create_oauth_state,resolve_oauth_state,)
 
 
 class MicrosoftOAuthStart(APIView):
 
-    permission_classes = [AllowAny]
+
+    authentication_classes = [
+        JWTAuthentication,
+    ]
+
+    permission_classes = [
+        IsAuthenticated,
+    ]
 
     def get(self, request):
+
+        state = create_oauth_state(
+            user_id=request.user.id,
+            provider="microsoft",
+        )
 
         params = {
             "client_id": settings.MICROSOFT_CLIENT_ID,
             "response_type": "code",
             "redirect_uri": settings.MICROSOFT_REDIRECT_URI,
             "response_mode": "query",
-            "scope": "offline_access Mail.Read User.Read",
-            "state": request.user.id if request.user.is_authenticated else "1",
+            "scope": "offline_access Mail.Read Mail.Send User.Read",
+            "state": state,
         }
 
         auth_url = (
-            "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?"
+            "https://login.microsoftonline.com/"
+            "common/oauth2/v2.0/authorize?"
             + urllib.parse.urlencode(params)
         )
 
-        return redirect(auth_url)
+        return Response(
+        {
+            "authorization_url": auth_url,
+            "provider": "microsoft",
+        },
+        status=200,
+    )
 
 from django.contrib.auth import get_user_model
 from email_accounts.models import EmailAccount
 
 class MicrosoftOAuthCallback(APIView):
-    permission_classes = [AllowAny]
+
+    authentication_classes = []
+
+    permission_classes = [
+        AllowAny,
+    ]
 
     def get(self, request):
 
         code = request.GET.get("code")
-        state = request.GET.get("state")  # 🔥 retrieve user id
+        state = request.GET.get("state")
 
-        if not code or not state:
-            return Response({"error": "Missing code or state"}, status=400)
+        if not code:
+            return Response(
+                {
+                    "error": "Missing authorization code",
+                },
+                status=400,
+            )
+
+        try:
+            state_data = resolve_oauth_state(
+                state=state,
+                provider="microsoft",
+            )
+
+        except OAuthStateError as exc:
+            return Response(
+                {
+                    "error": str(exc),
+                },
+                status=400,
+            )
 
         User = get_user_model()
 
         try:
-            user = User.objects.get(id=state)
+            user = User.objects.get(
+                id=state_data["user_id"],
+                is_active=True,
+            )
+
         except User.DoesNotExist:
-            return Response({"error": "Invalid user"}, status=400)
+            return Response(
+                {
+                    "error": "OAuth user is unavailable",
+                },
+                status=400,
+            )
 
         token_response = requests.post(
             "https://login.microsoftonline.com/common/oauth2/v2.0/token",
@@ -124,254 +177,63 @@ class OutlookSyncAPIView(APIView):
 
     @transaction.atomic
     def post(self, request):
-        user = request.user
-        organization = user.organization_membership.organization
-
-        sync_status, _ = InboxSyncStatus.objects.get_or_create(
-            user=user,
-            platform="outlook",
-            defaults={"status": "idle"},
+        from email_accounts.models import EmailAccount
+        from microsoftapis.services.outlook_sync import (
+            fetch_outlook_emails,
+        )
+        from inbox.services.sync_status import (
+            update_sync_status,
         )
 
+        user = request.user
+
+        email_account = EmailAccount.objects.filter(
+            user=user,
+            account_type="outlook",
+            is_active=True,
+        ).first()
+
+        if not email_account:
+            return Response(
+                {
+                    "error": (
+                        "No active Outlook account found"
+                    )
+                },
+                status=404,
+            )
+
         try:
-            sync_status.status = "syncing"
-            sync_status.progress = 5
-            sync_status.save()
-
-            access_token = get_microsoft_access_token(user)
-
-            headers = {
-                "Authorization": f"Bearer {access_token}"
-            }
-
-            # -----------------------------
-            # INCREMENTAL LOGIC
-            # -----------------------------
-            filter_query = ""
-
-            if sync_status.last_synced_at and InboxMessage.objects.filter(
+            fetch_outlook_emails(
                 user=user,
-                platform="outlook"
-            ).exists():
-                
-                buffer_time = sync_status.last_synced_at - timedelta(minutes=2)
-
-                # Ensure UTC
-                buffer_time = buffer_time.astimezone(dt_timezone.utc)
-
-                # Remove microseconds
-                buffer_time = buffer_time.replace(microsecond=0)
-
-                # Format properly
-                iso_time = buffer_time.isoformat().replace("+00:00", "Z")
-
-                filter_query = f"&$filter=receivedDateTime ge {iso_time}"
-
-            url = (
-                "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages"
-                f"?$top=50{filter_query}"
+                email_account=email_account,
             )
 
-            messages = []
-
-            while url:
-                response = requests.get(url, headers=headers)
-                data = response.json()
-
-                if "value" not in data:
-                    raise Exception(f"Graph API Error: {data}")
-
-                messages.extend(data.get("value", []))
-
-        # Microsoft pagination link
-                url = data.get("@odata.nextLink")
-
-            created_messages = 0
-            created_conversations = 0
-            print("TOTAL MICROSOFT MESSAGES:", len(messages))
-
-            for msg in messages:
-
-                external_message_id = msg["id"]
-                conversation_id = msg.get("conversationId")
-
-                existing = InboxMessage.objects.filter(
-                    external_message_id=external_message_id
-                ).first()
-
-                is_read = msg.get("isRead", False)
-
-                if existing:
-                    if existing.is_read != is_read:
-                        existing.is_read = is_read
-                        existing.save(update_fields=["is_read"])
-                    continue
-
-                # Create / Get Conversation
-                conversation_key = f"outlook_{conversation_id}"
-
-                conversation = Conversation.objects.filter(
-                    user=user,
-                    conversation_key=conversation_key
-                ).first()
-
-                if not conversation:
-                    conversation = Conversation.objects.create(
-                        user=user,
-                        organization=organization,
-                        conversation_key=conversation_key,
-                        subject=msg.get("subject") or "No Subject",
-                    )
-                    created_conversations += 1
-
-                received_at = datetime.fromisoformat(
-                    msg["receivedDateTime"].replace("Z", "+00:00")
-                )
-                
-
-                message_obj = InboxMessage.objects.create(
-                    user=user,
-                    organization=organization,
-                    conversation=conversation,
-                    platform="outlook",
-                    external_message_id=external_message_id,
-                    external_conversation_id=conversation_id,
-                    folder="inbox",
-                    direction="inbound",
-                    sender=msg.get("from", {}).get("emailAddress", {}).get("address", ""),
-                    recipients="",
-                    subject=msg.get("subject") or "",
-                    body=msg.get("bodyPreview") or "",
-                    received_at=received_at,
-                    is_read=is_read,
-                )
-
-                # ==========================================================
-                # Enterprise Knowledge Processing
-                # ==========================================================
-
-                try:
-
-                    processor = MessageProcessor()
-
-                    processor.process_message(
-                        organization=organization,
-                        message=message_obj,
-                        sender=msg.get(
-                            "from",
-                            {}
-                        ).get(
-                            "emailAddress",
-                            {}
-                        ).get(
-                            "address",
-                            "",
-                        ),
-                        subject=msg.get("subject") or "",
-                        body=msg.get("bodyPreview") or "",
-                        source_channel="outlook",
-                    )
-
-                    print(
-                        "🧠 Outlook Knowledge Processed:",
-                        msg.get("subject"),
-                    )
-
-                except Exception as exc:
-
-                    print(
-                        "❌ Outlook Knowledge Error:",
-                    exc,
-                )
-
-                created_messages += 1
-
-                print("TIMELINE OUTLOOK EVENT", conversation.id)
-
-                create_timeline_event(
-                    conversation=conversation,
-                    event_type="message_received",
-                    title="New Outlook email received",
-                    details={
-                        "platform":"outlook",
-                        "sender":msg.get(
-                            "from",
-                            {}
-                        ).get(
-                            "emailAddress",
-                            {}
-                        ).get(
-                            "address"
-                        ),
-                        "subject":msg.get("subject"),
-                    },
-                    event_at=received_at,
-                )
-
-
-            # Safely rebuild Outlook conversation metadata
-
-            conversation_ids = (
-                InboxMessage.objects.filter(
-                    user=user,
-                    platform="outlook",
-                )
-                .values_list(
-                    "conversation_id",
-                    flat=True,
-                )
-                .distinct()
+            return Response(
+                {
+                    "status": (
+                        "outlook_sync_complete"
+                    ),
+                    "email_account_id": (
+                        email_account.id
+                    ),
+                }
             )
 
-            for conv in Conversation.objects.filter(
-                id__in=conversation_ids
-            ):
-
-                last_message = (
-                    InboxMessage.objects.filter(
-                    conversation=conv
-                )
-                .order_by("-received_at")
-                .first()
+        except Exception as exc:
+            update_sync_status(
+                user=user,
+                platform="outlook",
+                status="failed",
+                progress=0,
+                error_message=str(exc),
             )
 
-            conv.last_message = last_message
-
-            conv.last_message_at = (
-                last_message.received_at
-                if last_message
-                else None
+            return Response(
+                {
+                    "status": "sync_failed",
+                    "error": str(exc),
+                },
+                status=500,
             )
 
-            if last_message:
-                conv.subject = (
-                last_message.subject
-                or conv.subject
-            )
-
-            conv.save(
-                update_fields=[
-                    "last_message",
-                    "last_message_at",
-                    "subject",
-                ]
-            )
-
-            return Response({
-                "status": "outlook_sync_complete",
-                "new_conversations": created_conversations,
-                "new_messages": created_messages,
-            })
-
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            sync_status.status="failed"
-            sync_status.error_message=str(e)
-            sync_status.save()
-            return Response({
-
-                "status":"sync_failed",
-                "error":str(e),
-
-            },status=500)

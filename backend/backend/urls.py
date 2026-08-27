@@ -23,6 +23,16 @@ from inbox.views.dashboard import (
     InboxDashboardAPIView,
 )
 
+from rest_framework.permissions import (
+    AllowAny,
+    IsAdminUser,
+)
+
+api_documentation_permissions = (
+    [AllowAny]
+    if settings.DEBUG
+    else [IsAdminUser]
+)
 
 urlpatterns = [
     path(
@@ -172,7 +182,9 @@ urlpatterns += [
 urlpatterns += [
     path(
         "api/schema/",
-        SpectacularAPIView.as_view(),
+        SpectacularAPIView.as_view(
+            permission_classes=api_documentation_permissions,
+        ),
         name="schema",
     ),
 
@@ -180,6 +192,7 @@ urlpatterns += [
         "api/docs/",
         SpectacularSwaggerView.as_view(
             url_name="schema",
+            permission_classes=api_documentation_permissions,
         ),
         name="swagger-ui",
     ),

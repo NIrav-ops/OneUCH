@@ -7,6 +7,7 @@ from channels.layers import get_channel_layer
 
 from googleapiclient.discovery import build
 from email.mime.text import MIMEText
+from email.utils import getaddresses
 import base64
 import requests
 
@@ -20,14 +21,20 @@ class UnifiedSendMessageAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        return self.send_with_data(
+            request=request,
+            data=request.data,
+        )
+
+    def send_with_data(self, *, request, data):
 
         try:
             user = request.user
 
-            to = request.data.get("to")
-            subject = request.data.get("subject", "")
-            body = request.data.get("body", "")
-            conversation_id = request.data.get("conversation_id")
+            to = data.get("to")
+            subject = data.get("subject", "")
+            body = data.get("body", "")
+            conversation_id = data.get("conversation_id")
 
             if not to:
                 return Response({"error": "Recipient required"}, status=400)
@@ -35,7 +42,7 @@ class UnifiedSendMessageAPIView(APIView):
             # =========================
             # ACCOUNT
             # =========================
-            account_id = request.data.get("account_id")
+            account_id = data.get("account_id")
 
             if account_id:
                 account = user.email_accounts.filter(id=account_id).first()
@@ -93,16 +100,50 @@ class UnifiedSendMessageAPIView(APIView):
 
                 raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
 
-                service.users().messages().send(
-                    userId="me",
-                    body={"raw": raw}
-                ).execute()
+                gmail_result = (
+                    service.users()
+                    .messages()
+                    .send(
+                        userId="me",
+                        body={"raw": raw},
+                    )
+                    .execute()
+                )
+
+                provider_message_id = (
+                    gmail_result.get("id")
+                    or "sent"
+                )
 
             elif account_type == "outlook":
 
                 token = get_microsoft_access_token(user)
 
-                requests.post(
+                recipient_source = str(to).replace(
+                    ";",
+                    ",",
+                )
+
+                recipients = [
+                    address
+                    for _, address in getaddresses(
+                        [recipient_source]
+                    )
+                    if address
+                ]
+
+                if not recipients:
+                    return Response(
+                        {
+                            "error": (
+                                "No valid recipient email "
+                                "address found"
+                            )
+                        },
+                        status=400,
+                    )
+
+                response = requests.post(
                     "https://graph.microsoft.com/v1.0/me/sendMail",
                     headers={
                         "Authorization": f"Bearer {token}",
@@ -116,11 +157,38 @@ class UnifiedSendMessageAPIView(APIView):
                                 "content": body,
                             },
                             "toRecipients": [
-                                {"emailAddress": {"address": to}}
+                                {
+                                    "emailAddress": {
+                                        "address": address
+                                    }
+                                }
+                                for address in recipients
                             ],
                         }
                     },
                 )
+
+                if response.status_code >= 400:
+
+                    try:
+                        graph_error = response.json()
+                        graph_message = (
+                            graph_error
+                            .get("error", {})
+                            .get("message")
+                        )
+                    except Exception:
+                        graph_message = None
+
+                    raise Exception(
+                        "Microsoft Graph sendMail failed "
+                        f"with status {response.status_code}"
+                        + (
+                            f": {graph_message}"
+                            if graph_message
+                            else ""
+                        )
+                    )
 
             # =========================
             # SAVE MESSAGE (ONE TIME ONLY ✅)
@@ -129,7 +197,11 @@ class UnifiedSendMessageAPIView(APIView):
                 user=user,
                 organization=user.organization_membership.organization,
                 platform=account_type,
-                external_message_id="sent",
+                external_message_id=(
+                    provider_message_id
+                    if account_type == "gmail"
+                    else "sent"
+                ),
                 sender=account.email_address,
                 recipients=to,
                 subject=subject or "No Subject",
@@ -138,6 +210,7 @@ class UnifiedSendMessageAPIView(APIView):
                 email_account=account,
                 direction="outbound",
                 is_draft=False,
+                status="sent",
                 received_at=timezone.now(),
                 conversation=conversation   # 🔥 THIS IS THE FIX
             )

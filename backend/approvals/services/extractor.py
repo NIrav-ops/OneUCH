@@ -1,78 +1,113 @@
 import re
-from datetime import timedelta
-from django.utils import timezone
 
 
 APPROVAL_PATTERNS = [
     {
-        "pattern": r"\bapprove\b",
+        "pattern": (
+            r"\b(?:please|kindly)\s+approve\b"
+            r"|\bapproval\s+(?:is\s+)?required\b"
+            r"|\brequires?\s+(?:your\s+)?approval\b"
+            r"|\bneed\s+(?:your\s+)?approval\b"
+        ),
         "title": "Approval Required",
         "priority": 90,
     },
     {
-        "pattern": r"\bapproval\b",
-        "title": "Approval Required",
-        "priority": 90,
-    },
-    {
-        "pattern": r"sign off|sign-off",
+        "pattern": (
+            r"\b(?:please|kindly)\s+sign[\s-]?off\b"
+            r"|\bsign[\s-]?off\s+(?:is\s+)?required\b"
+            r"|\bneed\s+(?:your\s+)?sign[\s-]?off\b"
+        ),
         "title": "Sign Off Required",
         "priority": 85,
     },
     {
-        "pattern": r"review and confirm|confirm",
-        "title": "Confirmation Required",
-        "priority": 80,
-    },
-    {
-        "pattern": r"ok to proceed|okay to proceed|can we proceed",
+        "pattern": (
+            r"\bcan\s+we\s+proceed\b"
+            r"|\bok(?:ay)?\s+to\s+proceed\b"
+            r"|\b(?:please|kindly)\s+confirm\s+"
+            r"(?:that\s+)?we\s+can\s+proceed\b"
+        ),
         "title": "Proceed Approval",
         "priority": 80,
-    },
-    {
-        "pattern": r"permission|required approval|need your approval",
-        "title": "Approval Required",
-        "priority": 90,
-    },
-    {
-        "pattern": r"please review|kindly review",
-        "title": "Review Before Approval",
-        "priority": 75,
     },
 ]
 
 
-def extract_approvals(subject, body):
-    text = f"{subject} {body}".lower()
-    approvals = []
+NON_APPROVAL_PATTERNS = [
+    r"\balready\s+approved\b",
+    r"\bapproval\s+(?:was|has\s+been)\s+completed\b",
+    r"\bapproved\s+(?:yesterday|today|previously|already)\b",
+    r"\bpermission\s+(?:was|has\s+been)\s+(?:already\s+)?granted\b",
+    r"\bno\s+(?:further\s+)?approval\s+(?:is\s+)?required\b",
+    r"\bapproval\s+(?:received|completed|granted)\b",
+    r"\bthis\s+has\s+now\s+been\s+completed\b",
+]
+
+
+def _normalize_text(
+    subject,
+    body,
+):
+    return " ".join(
+        f"{subject or ''} {body or ''}".split()
+    ).lower()
+
+
+def extract_approvals(
+    subject,
+    body,
+):
+    text = _normalize_text(
+        subject,
+        body,
+    )
+
+    if any(
+        re.search(
+            pattern,
+            text,
+            flags=re.IGNORECASE,
+        )
+        for pattern in NON_APPROVAL_PATTERNS
+    ):
+        return []
 
     for item in APPROVAL_PATTERNS:
-        if re.search(item["pattern"], text):
-            approvals.append({
-                "title": item["title"],
-                "description": subject or body[:200],
-                "priority": item["priority"],
-                "confidence_score": 85,
-                "due_date": timezone.now() + timedelta(days=2),
-            })
 
-    return approvals
+        if re.search(
+            item["pattern"],
+            text,
+            flags=re.IGNORECASE,
+        ):
+            return [
+                {
+                    "title": item["title"],
+                    "description": (
+                        subject
+                        or (body or "")[:200]
+                    ),
+                    "priority": item[
+                        "priority"
+                    ],
+                    "confidence_score": 85,
+                    "due_date": None,
+                }
+            ]
+
+    return []
 
 
-def detect_approval_followup(subject, body):
-    text = f"{subject} {body}".lower()
+def detect_approval_followup(
+    subject,
+    body,
+):
+    """
+    Follow-up semantics are handled separately.
 
-    followup_keywords = [
-        "approve",
-        "approval",
-        "sign off",
-        "confirm",
-        "proceed",
-        "permission",
-        "review",
-    ]
-
-    if any(word in text for word in followup_keywords):
-        return timezone.now() + timedelta(days=2)
+    Keep this compatibility function so the existing
+    worker import does not break, but do not fabricate
+    an approval deadline.
+    """
 
     return None

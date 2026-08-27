@@ -27,6 +27,9 @@ from timeline.services import create_timeline_event
 
 from knowledge.services.message_processor import MessageProcessor
 
+from email_accounts.models import EmailAccount
+from inbox.services.sync_status import update_sync_status
+
 
 
 class GmailConversationPreviewAPIView(APIView):
@@ -150,180 +153,524 @@ class GmailSyncAPIView(APIView):
         user = request.user
         organization = user.organization_membership.organization
 
-# ---------------------------------------------------------
-# Enterprise OAuth Handling
-# ---------------------------------------------------------
+        # ---------------------------------------------------------
+        # Resolve active Gmail account
+        # ---------------------------------------------------------
+
+        email_account = (
+            EmailAccount.objects
+            .filter(
+                user=user,
+                account_type="gmail",
+                is_active=True,
+            )
+            .order_by("-id")
+            .first()
+        )
+
+        if email_account is None:
+            return Response(
+                {
+                    "error": "No active Gmail account is connected."
+                },
+                status=400,
+            )
+
+        # ---------------------------------------------------------
+        # Mark sync as started
+        # ---------------------------------------------------------
+
+        update_sync_status(
+            user=user,
+            platform="gmail",
+            status="syncing",
+            progress=0,
+            error_message="",
+        )
+
+        # ---------------------------------------------------------
+        # OAuth / Gmail Service
+        # ---------------------------------------------------------
 
         try:
-
             credentials = get_gmail_credentials(user)
 
             service = build(
                 "gmail",
                 "v1",
-            credentials=credentials,
+                credentials=credentials,
             )
 
         except Exception as exc:
+            print(
+                "❌ Gmail OAuth Error:",
+                exc,
+            )
 
-            print("❌ Gmail OAuth Error:", exc)
+            update_sync_status(
+                user=user,
+                platform="gmail",
+                status="failed",
+                progress=0,
+                error_message=str(exc),
+            )
 
-        return Response(
-            {
-                "status": "oauth_failed",
-                "message": str(exc),
-                "action": "Reconnect Gmail account",
-            },
-            status=401,
+            return Response(
+                {
+                    "status": "oauth_failed",
+                    "message": str(exc),
+                    "action": "Reconnect Gmail account",
+                },
+                status=401,
+            )
+
+        # ---------------------------------------------------------
+        # Fetch Gmail Messages
+        # ---------------------------------------------------------
+
+        try:
+            results = (
+                service.users()
+                .messages()
+                .list(
+                    userId="me",
+                    maxResults=50,
+                    q="in:inbox OR in:sent",
+                )
+                .execute()
+            )
+
+        except Exception as exc:
+            print(
+                "❌ Gmail message listing failed:",
+                exc,
+            )
+
+            update_sync_status(
+                user=user,
+                platform="gmail",
+                status="failed",
+                progress=0,
+                error_message=str(exc),
+            )
+
+            return Response(
+                {
+                    "status": "gmail_sync_failed",
+                    "message": str(exc),
+                },
+                status=502,
+            )
+
+        messages = results.get(
+            "messages",
+            [],
         )
 
-        results = service.users().messages().list(
-            userId="me",
-            maxResults=50,
-            q="in:inbox OR in:sent"
-        ).execute()
+        print(
+            "📊 MESSAGES FOUND:",
+            len(messages),
+        )
 
-        print("📊 RAW LIST RESPONSE:", results)
-        messages = results.get("messages",[])
-        print("📊 MESSAGES FOUND:", len(messages))
-        
+        created_count = 0
+        skipped_count = 0
+        processed_count = 0
+        failed_count = 0
 
-        for m in messages:
+        total_messages = len(messages)
 
-            msg = service.users().messages().get(
-                userId="me",
-                id=m["id"],
-                format="full",
-                metadataHeaders=["Subject", "From", "To"],
-            ).execute()
+        # ---------------------------------------------------------
+        # Process Gmail Messages
+        # ---------------------------------------------------------
 
-            print("FULL MESSAGE RAW ↓↓↓")
-            print(msg)
-            print("HEADERS ↓↓↓")
-            print(msg.get("payload", {}).get("headers"))
-
-            # -------------------------
-            # SUBJECT + SENDER EXTRACTION (FINAL FIX)
-            # -------------------------
-
-            subject = None
-            sender = ""
-            recipients = ""
-
-            headers = msg.get("payload", {}).get("headers", [])   # ✅ THIS FIXES YELLOW LINE
-
-            for h in headers:
-                name = h.get("name", "").lower()   # ✅ case-insensitive
-                value = h.get("value", "")
-
-                if name == "subject":
-                    subject = value
-
-                elif name == "from":
-                    sender = value
-
-                elif name == "to":
-                    recipients = value
-
-            # -------------------------
-            # FALLBACK (IMPORTANT)
-            # -------------------------
-
-            if not subject:
-                subject = msg.get("snippet")   # ✅ Gmail always gives snippet
-
-            if not subject:
-                subject = "No Subject"
-            # -------------------------
-            # DEBUG (YOU ASKED WHERE TO SEE IT)
-            # -------------------------
-
-            print("🔥 EXTRACTED SUBJECT:", subject)    
-
-            # ✅ CREATE CONVERSATION (1 thread = 1 conversation)
-            thread_id = msg.get("threadId") or m.get("id")
-
-            conversation_key = f"gmail_{thread_id}"
-
-            conversation, _ = Conversation.objects.get_or_create(
-                user=user,
-                conversation_key=conversation_key,
-                defaults={
-                    "organization": organization,
-                    "subject": subject
-                }
-            )
-
-            # ✅ SAVE MESSAGE (NO DUPLICATE)
-            if InboxMessage.objects.filter(
-                external_message_id=msg["id"]
-            ).exists():
-                continue
-
-            message_obj = InboxMessage.objects.create(
-                user=user,
-                organization=organization,
-                conversation=conversation,
-                platform="gmail",
-                direction="inbound",
-                external_message_id=msg["id"],
-                external_conversation_id=thread_id,
-                sender=sender,
-                recipients=recipients,
-                subject=subject,
-                body=msg.get("snippet", ""),
-                received_at=timezone.now(),
-                is_read="UNREAD" not in msg.get("labelIds", []),
-            )
-
-            print("TIMELINE GMAIL EVENT",conversation.id)
-
-            create_timeline_event(
-                conversation=conversation,
-                event_type="message_received",
-                title="New email received",
-                details={
-                    "platform":"gmail",
-                    "sender":msg.get("sender"),
-                    "subject":msg.get("subject"),
-                },
-                event_at=message_obj.received_at,
-            )
-
-            # ✅ UPDATE CONVERSATION (ONLY IF SUBJECT VALID)
-            if subject and subject.strip().lower() != "no subject":
-                conversation.subject = subject
-
-            conversation.last_message = message_obj
-            conversation.last_message_at = message_obj.received_at
-
-            conversation.save()
-
-            # ---------------------------------------------------------
-            # Enterprise Knowledge Processing
-            # ---------------------------------------------------------
+        for index, message_reference in enumerate(
+            messages,
+            start=1,
+        ):
 
             try:
 
-                processor = MessageProcessor()
+                # -------------------------------------------------
+                # Fetch full Gmail message
+                # -------------------------------------------------
 
-                processor.process_message(
-                    organization=organization,
-                    message=message_obj,
-                    sender=sender,
-                    subject=subject,
-                    body=msg.get("snippet", ""),
-                    source_channel="gmail",
+                msg = (
+                    service.users()
+                    .messages()
+                    .get(
+                        userId="me",
+                        id=message_reference["id"],
+                        format="full",
+                    )
+                    .execute()
                 )
+
+                processed_count += 1
+
+                # -------------------------------------------------
+                # Headers
+                # -------------------------------------------------
+
+                subject = ""
+                sender = ""
+                recipients = ""
+
+                headers = (
+                    msg.get(
+                        "payload",
+                        {},
+                    ).get(
+                        "headers",
+                        [],
+                    )
+                )
+
+                for header in headers:
+
+                    name = (
+                        header.get(
+                            "name",
+                            "",
+                        )
+                        .lower()
+                    )
+
+                    value = header.get(
+                        "value",
+                        "",
+                    )
+
+                    if name == "subject":
+                        subject = value
+
+                    elif name == "from":
+                        sender = value
+
+                    elif name == "to":
+                        recipients = value
+
+                # -------------------------------------------------
+                # Subject fallback
+                # -------------------------------------------------
+
+                if not subject:
+                    subject = msg.get(
+                        "snippet",
+                        "",
+                    )
+
+                if not subject:
+                    subject = "No Subject"
+
+                print(
+                    "🔥 EXTRACTED SUBJECT:",
+                    subject,
+                )
+
+                # -------------------------------------------------
+                # Gmail Thread -> One UCH Conversation
+                # -------------------------------------------------
+
+                thread_id = (
+                    msg.get("threadId")
+                    or message_reference.get("id")
+                )
+
+                conversation_key = (
+                    f"gmail_{thread_id}"
+                )
+
+                conversation, _ = (
+                    Conversation.objects.get_or_create(
+                        user=user,
+                        conversation_key=conversation_key,
+                        defaults={
+                            "organization": organization,
+                            "email_account": email_account,
+                            "subject": subject,
+                        },
+                    )
+                )
+
+                # -------------------------------------------------
+                # Repair / enforce account ownership
+                # -------------------------------------------------
+
+                if (
+                    conversation.email_account_id
+                    != email_account.id
+                ):
+                    conversation.email_account = (
+                        email_account
+                    )
+
+                    conversation.organization = (
+                        organization
+                    )
+
+                    conversation.save(
+                        update_fields=[
+                            "email_account",
+                            "organization",
+                        ]
+                    )
+
+                # -------------------------------------------------
+                # Determine message direction
+                # -------------------------------------------------
+
+                label_ids = msg.get(
+                    "labelIds",
+                    [],
+                )
+
+                is_sent = (
+                    "SENT" in label_ids
+                )
+
+                direction = (
+                    "outbound"
+                    if is_sent
+                    else "inbound"
+                )
+
+                folder = (
+                    "sent"
+                    if is_sent
+                    else "inbox"
+                )
+
+                is_read = (
+                    "UNREAD" not in label_ids
+                )
+
+                # -------------------------------------------------
+                # Duplicate protection
+                #
+                # Scope duplicate detection to the current
+                # user/account instead of globally matching only
+                # external_message_id.
+                # -------------------------------------------------
+
+                existing_message = (
+                    InboxMessage.objects.filter(
+                        user=user,
+                        email_account=email_account,
+                        external_message_id=msg["id"],
+                    )
+                    .first()
+                )
+
+                if existing_message:
+
+                    skipped_count += 1
+
+                    # Repair legacy records that may have been
+                    # created before email_account was assigned.
+                    changed_fields = []
+
+                    if (
+                        existing_message.email_account_id
+                        != email_account.id
+                    ):
+                        existing_message.email_account = (
+                            email_account
+                        )
+                        changed_fields.append(
+                            "email_account"
+                        )
+
+                    if (
+                        existing_message.conversation_id
+                        != conversation.id
+                    ):
+                        existing_message.conversation = (
+                            conversation
+                        )
+                        changed_fields.append(
+                            "conversation"
+                        )
+
+                    if changed_fields:
+                        existing_message.save(
+                            update_fields=changed_fields
+                        )
+
+                    continue
+
+                # -------------------------------------------------
+                # Create Inbox Message
+                # -------------------------------------------------
+
+                message_obj = InboxMessage.objects.create(
+                    user=user,
+                    organization=organization,
+                    email_account=email_account,
+                    conversation=conversation,
+                    platform="gmail",
+                    direction=direction,
+                    folder=folder,
+                    external_message_id=msg["id"],
+                    external_conversation_id=thread_id,
+                    sender=sender,
+                    recipients=recipients,
+                    subject=subject,
+                    body=msg.get(
+                        "snippet",
+                        "",
+                    ),
+                    received_at=timezone.now(),
+                    is_read=is_read,
+                )
+
+                created_count += 1
+
+                print(
+                    "📨 Gmail message created:",
+                    message_obj.id,
+                    "account=",
+                    email_account.id,
+                    "conversation=",
+                    conversation.id,
+                    "direction=",
+                    direction,
+                )
+
+                # -------------------------------------------------
+                # Timeline
+                # -------------------------------------------------
+
+                create_timeline_event(
+                    conversation=conversation,
+                    event_type="message_received",
+                    title="New email received",
+                    details={
+                        "platform": "gmail",
+                        "sender": sender,
+                        "subject": subject,
+                    },
+                    event_at=message_obj.received_at,
+                )
+
+                # -------------------------------------------------
+                # Update Conversation
+                # -------------------------------------------------
+
+                if (
+                    subject
+                    and subject.strip().lower()
+                    != "no subject"
+                ):
+                    conversation.subject = subject
+
+                conversation.last_message = (
+                    message_obj
+                )
+
+                conversation.last_message_at = (
+                    message_obj.received_at
+                )
+
+                conversation.last_message_preview = (
+                    message_obj.body[:120]
+                    if message_obj.body
+                    else ""
+                )
+
+                # Maintain unread count for inbound messages.
+                if not is_sent and not is_read:
+                    conversation.unread_count = (
+                        InboxMessage.objects.filter(
+                            conversation=conversation,
+                            is_read=False,
+                        ).count()
+                    )
+
+                conversation.save()
+
+                # -------------------------------------------------
+                # Enterprise Knowledge Processing
+                # -------------------------------------------------
+
+                try:
+
+                    processor = MessageProcessor()
+
+                    processor.process_message(
+                        organization=organization,
+                        message=message_obj,
+                        sender=sender,
+                        subject=subject,
+                        body=msg.get(
+                            "snippet",
+                            "",
+                        ),
+                        source_channel="gmail",
+                    )
+
+                except Exception as exc:
+
+                    # Knowledge processing failure must not
+                    # invalidate successful Gmail ingestion.
+
+                    print(
+                        "⚠️ Knowledge Processing Error:",
+                        exc,
+                    )
 
             except Exception as exc:
 
+                # -------------------------------------------------
+                # Individual Gmail message failure
+                #
+                # One malformed message must not stop the
+                # complete synchronization run.
+                # -------------------------------------------------
+
+                failed_count += 1
+
                 print(
-                    "Knowledge Processing Error:",
+                    "⚠️ Gmail message processing failed:",
                     exc,
                 )
 
-        return Response({"status": "gmail sync complete"})
+                continue
+
+        # ---------------------------------------------------------
+        # Final Sync Status
+        # ---------------------------------------------------------
+
+        print(
+            "✅ Gmail sync complete:",
+            {
+                "processed": processed_count,
+                "created": created_count,
+                "skipped": skipped_count,
+                "failed": failed_count,
+            },
+        )
+
+        update_sync_status(
+            user=user,
+            platform="gmail",
+            status="success",
+            progress=100,
+            error_message=(
+                f"{failed_count} message(s) failed."
+                if failed_count
+                else ""
+            ),
+        )
+
+        return Response(
+            {
+                "status": "gmail_sync_complete",
+                "processed_messages": processed_count,
+                "created_messages": created_count,
+                "skipped_messages": skipped_count,
+                "failed_messages": failed_count,
+            }
+        )
 
 from rest_framework import status
 
@@ -438,12 +785,39 @@ class GmailBulkConversationActionAPIView(APIView):
         })
 
 from urllib.parse import urlencode
-from django.http import HttpResponseRedirect
 from django.conf import settings
+from rest_framework.decorators import (
+    api_view,
+    authentication_classes,
+    permission_classes,
+)
+from rest_framework.permissions import (
+    AllowAny,
+    IsAuthenticated,
+)
+from rest_framework_simplejwt.authentication import (
+    JWTAuthentication,
+)
 
+from oauth_tokens.oauth_state import (
+    OAuthStateError,
+    create_oauth_state,
+    resolve_oauth_state,
+)
+
+@api_view(["GET"])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
 def google_oauth_start(request):
 
-    base_url = "https://accounts.google.com/o/oauth2/v2/auth"
+    state = create_oauth_state(
+        user_id=request.user.id,
+        provider="google",
+    )
+
+    base_url = (
+        "https://accounts.google.com/o/oauth2/v2/auth"
+    )
 
     params = {
         "client_id": settings.GOOGLE_CLIENT_ID,
@@ -456,12 +830,18 @@ def google_oauth_start(request):
         ),
         "access_type": "offline",
         "prompt": "consent",
-        "state": request.user.id if request.user.is_authenticated else "1",
+        "state": state,
     }
 
     url = f"{base_url}?{urlencode(params)}"
 
-    return HttpResponseRedirect(url)
+    return JsonResponse(
+        {
+            "authorization_url": url,
+            "provider": "google",
+        },
+        status=200,
+    )
 
 import requests
 from django.http import JsonResponse
@@ -472,29 +852,51 @@ from oauth_tokens.models import OAuthToken
 from django.contrib.auth import get_user_model
 
 
+@api_view(["GET"])
+@authentication_classes([])
+@permission_classes([AllowAny])
 def google_oauth_callback(request):
 
     code = request.GET.get("code")
     state = request.GET.get("state")
 
-    if not state:
+    if not code:
         return JsonResponse(
-            {"error": "Missing state"},
-            status=400
+            {
+                "error": "Missing authorization code",
+            },
+            status=400,
+        )
+
+    try:
+        state_data = resolve_oauth_state(
+            state=state,
+            provider="google",
+        )
+
+    except OAuthStateError as exc:
+        return JsonResponse(
+            {
+                "error": str(exc),
+            },
+            status=400,
         )
 
     User = get_user_model()
 
     try:
-        user = User.objects.get(id=state)
-    except User.DoesNotExist:
-        return JsonResponse(
-            {"error": "Invalid user"},
-            status=400
+        user = User.objects.get(
+            id=state_data["user_id"],
+            is_active=True,
         )
 
-    if not code:
-        return JsonResponse({"error": "Missing code"}, status=400)
+    except User.DoesNotExist:
+        return JsonResponse(
+            {
+                "error": "OAuth user is unavailable",
+            },
+            status=400,
+        )
 
     token_url = "https://oauth2.googleapis.com/token"
 
@@ -505,6 +907,9 @@ def google_oauth_callback(request):
         "redirect_uri": settings.GOOGLE_REDIRECT_URI,
         "grant_type": "authorization_code",
     }
+
+    # KEEP THE REMAINDER OF YOUR EXISTING CALLBACK
+    # FROM THE requests.post(...) SECTION ONWARD.
 
     response = requests.post(token_url, data=data)
     token_data = response.json()

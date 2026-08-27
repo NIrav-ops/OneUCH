@@ -3,7 +3,7 @@ from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from inbox.models import Organization
+from inbox.models import Organization, OrganizationUser
 
 
 class WorkflowIntelligenceAPITests(APITestCase):
@@ -23,6 +23,12 @@ class WorkflowIntelligenceAPITests(APITestCase):
 
         self.organization = Organization.objects.create(
             name="Workflow Test Organization",
+        )
+
+        OrganizationUser.objects.create(
+            user=self.user,
+            organization=self.organization,
+            role="member",
         )
 
     def test_status_code(self):

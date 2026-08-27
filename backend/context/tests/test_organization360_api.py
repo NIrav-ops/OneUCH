@@ -2,7 +2,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 from django.contrib.auth import get_user_model
 
-from inbox.models import Organization
+from inbox.models import Organization, OrganizationUser
 
 
 class Organization360APITests(APITestCase):
@@ -22,6 +22,12 @@ class Organization360APITests(APITestCase):
 
         self.organization = Organization.objects.create(
             name="Test Organization",
+        )
+
+        OrganizationUser.objects.create(
+            user=self.user,
+            organization=self.organization,
+            role="member",
         )
 
     def test_status_code(self):

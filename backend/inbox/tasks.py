@@ -16,6 +16,7 @@ from inbox.utils.sync_lock import acquire_sync_lock, release_sync_lock
 from notifications.services import create_notification
 
 from email_accounts.services.gmail_api import send_gmail_reply
+from email_accounts.services.microsoft_api import send_outlook_reply
 from email_accounts.services.imap_smtp import send_via_smtp, fetch_imap_emails
 
 from googleapis.services.gmail_sync import fetch_gmail_emails
@@ -106,41 +107,123 @@ def periodic_sync_all_users():
 # ============================================
 
 @shared_task(bind=True, max_retries=3)
-def send_email_task(self, email_account_id, to_email, subject, body, inbox_message_id):
+def send_email_task(
+    self,
+    email_account_id,
+    to_email,
+    subject,
+    body,
+    inbox_message_id,
+):
+
+    inbox_message = None
 
     try:
 
-        email_account = EmailAccount.objects.get(id=email_account_id)
-        inbox_message = InboxMessage.objects.get(id=inbox_message_id)
-
-        send_via_smtp(
-            email_account=email_account,
-            to_email=to_email,
-            subject=subject,
-            body=body,
-            inbox_message=inbox_message,
-            password=email_account.smtp_password,
+        email_account = EmailAccount.objects.get(
+            id=email_account_id
         )
 
-        inbox_message.status = "sent"
-        inbox_message.last_attempt_at = timezone.now()
-        inbox_message.save()
+        inbox_message = InboxMessage.objects.get(
+            id=inbox_message_id
+        )
 
-    except Exception as e:
+        # -----------------------------
+        # Gmail
+        # -----------------------------
+        if email_account.account_type == "gmail":
+
+            send_gmail_reply(
+                user=email_account.user,
+                to_email=to_email,
+                subject=subject,
+                body=body,
+            )
+
+        # -----------------------------
+        # Outlook / Microsoft Graph
+        # -----------------------------
+        elif email_account.account_type == "outlook":
+
+            send_outlook_reply(
+                user=email_account.user,
+                to_email=to_email,
+                subject=subject,
+                body=body,
+            )
+
+        # -----------------------------
+        # IMAP / SMTP
+        # -----------------------------
+        elif email_account.account_type == "imap":
+
+            send_via_smtp(
+                email_account=email_account,
+                to_email=to_email,
+                subject=subject,
+                body=body,
+                inbox_message=inbox_message,
+                password=email_account.smtp_password,
+            )
+
+        else:
+
+            raise ValueError(
+                "Unsupported email account type: "
+                f"{email_account.account_type}"
+            )
+
+        inbox_message.status = "sent"
+        inbox_message.error_reason = ""
+        inbox_message.last_attempt_at = timezone.now()
+
+        inbox_message.save(
+            update_fields=[
+                "status",
+                "error_reason",
+                "last_attempt_at",
+            ]
+        )
+
+    except Exception as exc:
+
+        if inbox_message is None:
+            raise
 
         inbox_message.retry_count += 1
-        inbox_message.error_reason = str(e)
+        inbox_message.error_reason = str(exc)
         inbox_message.last_attempt_at = timezone.now()
 
         if inbox_message.retry_count >= MAX_RETRIES:
+
             inbox_message.status = "failed"
-            inbox_message.save()
+
+            inbox_message.save(
+                update_fields=[
+                    "retry_count",
+                    "error_reason",
+                    "last_attempt_at",
+                    "status",
+                ]
+            )
+
             return
 
         inbox_message.status = "queued"
-        inbox_message.save()
 
-        raise self.retry(exc=e, countdown=30)
+        inbox_message.save(
+            update_fields=[
+                "retry_count",
+                "error_reason",
+                "last_attempt_at",
+                "status",
+            ]
+        )
+
+        raise self.retry(
+            exc=exc,
+            countdown=30,
+        )
 
 
 # ============================================
@@ -163,24 +246,38 @@ def retry_failed_messages():
 
         try:
 
-            if msg.platform == "gmail":
+            email_account = msg.email_account
+
+            if not email_account:
+
+                email_account = (
+                    msg.user.email_accounts.filter(
+                        is_active=True
+                    ).first()
+                )
+
+            if not email_account:
+                continue
+
+            if email_account.account_type == "gmail":
 
                 send_gmail_reply(
                     user=msg.user,
                     to_email=msg.recipients,
                     subject=msg.subject,
                     body=msg.body,
-                    inbox_message=msg,
                 )
 
-            else:
+            elif email_account.account_type == "outlook":
 
-                email_account = msg.user.email_accounts.filter(
-                    is_active=True
-                ).first()
+                send_outlook_reply(
+                    user=msg.user,
+                    to_email=msg.recipients,
+                    subject=msg.subject,
+                    body=msg.body,
+                )
 
-                if not email_account:
-                    continue
+            elif email_account.account_type == "imap":
 
                 send_via_smtp(
                     email_account=email_account,
@@ -189,6 +286,13 @@ def retry_failed_messages():
                     body=msg.body,
                     inbox_message=msg,
                     password=email_account.smtp_password,
+                )
+
+            else:
+
+                raise ValueError(
+                    "Unsupported email account type: "
+                    f"{email_account.account_type}"
                 )
 
             create_notification(

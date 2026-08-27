@@ -27,3 +27,25 @@ node_modules/
 # OS
 Thumbs.db
 .DS_Store
+!.env.example
+!backend/.env.example
+
+# ==================================================
+# One UCH - local/runtime/sensitive files
+# ==================================================
+*.sqlite
+*.db
+db.sqlite3
+celerybeat-schedule
+celerybeat-schedule.*
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+frontend/dist/
+artifacts/
+*.pem
+*.key
+credentials*.json
+client_secret*.json
+token*.json
