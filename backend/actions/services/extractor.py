@@ -78,6 +78,46 @@ NON_ACTION_PATTERNS = [
 ]
 
 
+def _extract_matching_evidence(
+    subject,
+    body,
+    patterns,
+):
+    """
+    Return an exact sentence from the original source text
+    matching one of the supplied semantic patterns.
+    """
+
+    for value in (
+        body or "",
+        subject or "",
+    ):
+        sentences = re.split(
+            r"(?<=[.!?])\s+|\r?\n+",
+            value.strip(),
+        )
+
+        for sentence in sentences:
+            sentence = (
+                sentence.strip()
+            )
+
+            if not sentence:
+                continue
+
+            if any(
+                re.search(
+                    pattern,
+                    sentence,
+                    flags=re.IGNORECASE,
+                )
+                for pattern in patterns
+            ):
+                return sentence
+
+    return ""
+
+
 def _extract_due_date(text, reference_time=None):
 
     reference_time = reference_time or timezone.now()
@@ -188,6 +228,14 @@ def extract_actions(
                 "priority": item["priority"],
                 "confidence_score": 80,
                 "due_date": due_date,
+                "evidence":
+                    _extract_matching_evidence(
+                        subject,
+                        body,
+                        [
+                            item["intent"]
+                        ],
+                    ),
             })
 
     return actions
@@ -395,5 +443,11 @@ def detect_followup(
 
     return {
         "followup_due_at": due_at,
+        "evidence_text":
+            _extract_matching_evidence(
+                subject,
+                body,
+                explicit_patterns,
+            ),
     }
 

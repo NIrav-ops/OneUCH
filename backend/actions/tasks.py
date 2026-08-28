@@ -36,6 +36,10 @@ from actions.services.ai_account_policy import (
     is_ai_allowed_for_message,
 )
 
+from knowledge.services.intelligence_evidence_persistence import (
+    persist_intelligence_evidence,
+)
+
 def _create_action(
     *,
     msg,
@@ -74,6 +78,47 @@ def _create_action(
                 "source_type": source_type,
             },
         )
+    )
+
+    persist_intelligence_evidence(
+        action_obj,
+        evidence_text=(
+            item.get(
+                "evidence",
+                "",
+            )
+        ),
+        extraction_method=(
+            "ai"
+            if source_type == "ai"
+            else "deterministic"
+        ),
+        processing_mode=(
+            item.get(
+                "processing_mode"
+            )
+            or (
+                "unknown"
+                if source_type == "ai"
+                else "deterministic"
+            )
+        ),
+        provider=(
+            item.get(
+                "provider"
+            )
+        ),
+        model=(
+            item.get(
+                "model"
+            )
+        ),
+        confidence=(
+            item.get(
+                "confidence_score",
+                action_obj.confidence_score,
+            )
+        ),
     )
 
     if created and msg.conversation:

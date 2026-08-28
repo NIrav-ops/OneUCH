@@ -5,6 +5,10 @@ from inbox.models import InboxMessage
 from actions.models import FollowUpItem
 from actions.services.extractor import detect_followup
 
+from knowledge.services.intelligence_evidence_persistence import (
+    persist_intelligence_evidence,
+)
+
 
 @shared_task
 def analyze_new_followups(
@@ -13,9 +17,6 @@ def analyze_new_followups(
     """
     Analyze inbound, non-draft messages for explicit
     deterministic follow-up obligations.
-
-    Follow-up analysis has its own lifecycle and does not
-    reuse action_analyzed or approval_analyzed.
     """
 
     messages = InboxMessage.objects.filter(
@@ -82,17 +83,46 @@ def analyze_new_followups(
                     ]
                 )
 
+                followup_item = existing
+
             else:
-                FollowUpItem.objects.create(
-                    conversation=msg.conversation,
-                    last_message=msg,
-                    user=msg.user,
-                    organization=msg.organization,
-                    followup_due_at=result.get(
-                        "followup_due_at"
-                    ),
-                    status="pending",
+                followup_item = (
+                    FollowUpItem.objects.create(
+                        conversation=(
+                            msg.conversation
+                        ),
+                        last_message=msg,
+                        user=msg.user,
+                        organization=(
+                            msg.organization
+                        ),
+                        followup_due_at=(
+                            result.get(
+                                "followup_due_at"
+                            )
+                        ),
+                        status="pending",
+                    )
                 )
+
+            persist_intelligence_evidence(
+                followup_item,
+                evidence_text=(
+                    result.get(
+                        "evidence_text"
+                    )
+                    or ""
+                ),
+                extraction_method=(
+                    "deterministic"
+                ),
+                processing_mode=(
+                    "deterministic"
+                ),
+                provider=None,
+                model=None,
+                confidence=100,
+            )
 
         msg.followup_analyzed = True
 

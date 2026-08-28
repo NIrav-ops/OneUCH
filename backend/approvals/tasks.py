@@ -32,6 +32,10 @@ from approvals.services.ai_account_policy import (
 )
 
 
+from knowledge.services.intelligence_evidence_persistence import (
+    persist_intelligence_evidence,
+)
+
 User = get_user_model()
 
 
@@ -78,6 +82,47 @@ def _create_approval(
                 ),
             },
         )
+    )
+
+    persist_intelligence_evidence(
+        approval_obj,
+        evidence_text=(
+            item.get(
+                "evidence",
+                "",
+            )
+        ),
+        extraction_method=(
+            "ai"
+            if source_type == "ai"
+            else "deterministic"
+        ),
+        processing_mode=(
+            item.get(
+                "processing_mode"
+            )
+            or (
+                "unknown"
+                if source_type == "ai"
+                else "deterministic"
+            )
+        ),
+        provider=(
+            item.get(
+                "provider"
+            )
+        ),
+        model=(
+            item.get(
+                "model"
+            )
+        ),
+        confidence=(
+            item.get(
+                "confidence_score",
+                approval_obj.confidence_score,
+            )
+        ),
     )
 
     if (

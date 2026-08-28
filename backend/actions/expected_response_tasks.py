@@ -13,6 +13,10 @@ from actions.services.reply_text import (
     extract_new_reply_text,
 )
 
+from knowledge.services.intelligence_evidence_persistence import (
+    persist_intelligence_evidence,
+)
+
 
 @shared_task
 def analyze_new_expected_responses(
@@ -20,25 +24,6 @@ def analyze_new_expected_responses(
 ):
     """
     Analyze messages for expected-response lifecycle.
-
-    Lifecycle rules:
-
-    1. Drafts are excluded.
-
-    2. A new explicit commitment in a conversation updates
-       the existing active waiting obligation instead of
-       creating another active waiting row.
-
-    3. A later inbound message that is not itself a new
-       expected-response commitment may resolve existing
-       waiting obligations.
-
-    4. Outbound messages never resolve a waiting obligation.
-
-    5. Outbound messages create expected-response state only
-       when they explicitly request a later response.
-
-    6. Every processed eligible message is marked analyzed.
     """
 
     messages = InboxMessage.objects.filter(
@@ -96,16 +81,6 @@ def analyze_new_expected_responses(
                     )
                 )
 
-        # --------------------------------------------------
-        # Resolution
-        #
-        # A message carrying a fresh commitment should update
-        # the existing wait rather than resolve it first.
-        #
-        # Only a later inbound non-commitment message is
-        # eligible to close existing waiting state.
-        # --------------------------------------------------
-
         if (
             msg.direction == "inbound"
             and not should_create
@@ -113,13 +88,6 @@ def analyze_new_expected_responses(
             resolve_expected_responses_for_message(
                 msg
             )
-
-        # --------------------------------------------------
-        # Persistence
-        #
-        # At most one active waiting ExpectedResponseItem is
-        # maintained per conversation at application level.
-        # --------------------------------------------------
 
         if should_create:
             existing = (
@@ -184,34 +152,58 @@ def analyze_new_expected_responses(
                     ]
                 )
 
+                response_item = existing
+
             else:
-                ExpectedResponseItem.objects.create(
-                    user=msg.user,
-                    organization=(
-                        msg.organization
-                    ),
-                    conversation=(
-                        msg.conversation
-                    ),
-                    source_message=msg,
-                    expected_from=(
-                        result.get(
-                            "expected_from"
-                        )
-                    ),
-                    evidence_text=(
-                        result.get(
-                            "evidence_text"
-                        )
-                        or ""
-                    ),
-                    response_due_at=(
-                        result.get(
-                            "response_due_at"
-                        )
-                    ),
-                    status="waiting",
+                response_item = (
+                    ExpectedResponseItem
+                    .objects.create(
+                        user=msg.user,
+                        organization=(
+                            msg.organization
+                        ),
+                        conversation=(
+                            msg.conversation
+                        ),
+                        source_message=msg,
+                        expected_from=(
+                            result.get(
+                                "expected_from"
+                            )
+                        ),
+                        evidence_text=(
+                            result.get(
+                                "evidence_text"
+                            )
+                            or ""
+                        ),
+                        response_due_at=(
+                            result.get(
+                                "response_due_at"
+                            )
+                        ),
+                        status="waiting",
+                    )
                 )
+
+            persist_intelligence_evidence(
+                response_item,
+                evidence_text=(
+                    result.get(
+                        "evidence_text"
+                    )
+                    or ""
+                ),
+                extraction_method=(
+                    "deterministic"
+                ),
+                processing_mode=(
+                    "deterministic"
+                ),
+                provider=None,
+                model=None,
+                confidence=100,
+            )
 
         msg.expected_response_analyzed = True
 

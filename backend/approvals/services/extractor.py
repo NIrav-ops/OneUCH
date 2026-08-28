@@ -54,6 +54,38 @@ def _normalize_text(
     ).lower()
 
 
+def _extract_matching_evidence(
+    subject,
+    body,
+    pattern,
+):
+    for value in (
+        body or "",
+        subject or "",
+    ):
+        sentences = re.split(
+            r"(?<=[.!?])\s+|\r?\n+",
+            value.strip(),
+        )
+
+        for sentence in sentences:
+            sentence = (
+                sentence.strip()
+            )
+
+            if not sentence:
+                continue
+
+            if re.search(
+                pattern,
+                sentence,
+                flags=re.IGNORECASE,
+            ):
+                return sentence
+
+    return ""
+
+
 def extract_approvals(
     subject,
     body,
@@ -92,6 +124,12 @@ def extract_approvals(
                     ],
                     "confidence_score": 85,
                     "due_date": None,
+                    "evidence":
+                        _extract_matching_evidence(
+                            subject,
+                            body,
+                            item["pattern"],
+                        ),
                 }
             ]
 
