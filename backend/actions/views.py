@@ -12,6 +12,10 @@ from notifications.services import create_notification
 from timeline.services import create_timeline_event
 from django.contrib.auth import get_user_model
 
+from knowledge.services.intelligence_evidence_persistence import (
+    persist_intelligence_evidence,
+)
+
 User = get_user_model()
 
 def get_user_organization(user):
@@ -177,6 +181,17 @@ class UpdateActionAPIView(APIView):
         if update_fields:
             action.save(update_fields=update_fields)
 
+        if (
+            "due_date" in update_fields
+            and action.message_id
+        ):
+            persist_intelligence_evidence(
+                action,
+                deadline_source=(
+                    "manual_update"
+                ),
+            )
+
         return Response(
             {
                 "status": "updated",
@@ -201,20 +216,55 @@ class CompleteActionAPIView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        action.status = "completed"
-        action.save(update_fields=["status"])
-        if action.message and action.message.conversation:
+        was_completed = (
+            action.status == "completed"
+        )
 
-            create_timeline_event(
-                conversation=action.message.conversation,
-                event_type="action_completed",
-                title="Action completed",
-                details={
-                    "action_id": action.id,
-                    "action_title": action.title,
-                    "completed_by": request.user.email,
-                },
+        if not was_completed:
+            action.status = "completed"
+            action.completed_at = (
+                timezone.now()
             )
+
+            action.save(
+                update_fields=[
+                    "status",
+                    "completed_at",
+                ]
+            )
+
+            if (
+                action.message
+                and action.message.conversation
+            ):
+                create_timeline_event(
+                    conversation=(
+                        action.message
+                        .conversation
+                    ),
+                    event_type=(
+                        "action_completed"
+                    ),
+                    title=(
+                        "Action completed"
+                    ),
+                    details={
+                        "action_id":
+                            action.id,
+
+                        "action_title":
+                            action.title,
+
+                        "completed_by":
+                            request.user.email,
+
+                        "completed_by_user_id":
+                            request.user.id,
+                    },
+                    event_at=(
+                        action.completed_at
+                    ),
+                )
 
         return Response({"status": "completed"}, status=status.HTTP_200_OK)
 
@@ -241,10 +291,12 @@ class StartActionAPIView(APIView):
             )
 
         action.status="in_progress"
+        action.completed_at=None
 
         action.save(
             update_fields=[
-                "status"
+                "status",
+                "completed_at",
             ]
         )
 
@@ -282,7 +334,14 @@ class IgnoreActionAPIView(APIView):
             )
 
         action.status = "ignored"
-        action.save(update_fields=["status"])
+        action.completed_at = None
+
+        action.save(
+            update_fields=[
+                "status",
+                "completed_at",
+            ]
+        )
 
         return Response({"status": "ignored"}, status=status.HTTP_200_OK)
 
@@ -300,7 +359,14 @@ class ReopenActionAPIView(APIView):
             )
 
         action.status = "open"
-        action.save(update_fields=["status"])
+        action.completed_at = None
+
+        action.save(
+            update_fields=[
+                "status",
+                "completed_at",
+            ]
+        )
 
         return Response({"status": "reopened"}, status=status.HTTP_200_OK)
 
@@ -379,15 +445,60 @@ class UpdateActionStatusAPIView(APIView):
                 status=400,
             )
 
+        previous_status = (
+            action.status
+        )
+
         action.status=new_status
 
         if new_status=="completed":
+            if previous_status != "completed":
+                action.completed_at=(
+                    timezone.now()
+                )
 
-            action.completed_at=timezone.now()
+        else:
+            action.completed_at=None
 
         action.save()
 
+        if (
+            new_status == "completed"
+            and previous_status
+            != "completed"
+            and action.message
+            and action.message.conversation
+        ):
+            create_timeline_event(
+                conversation=(
+                    action.message
+                    .conversation
+                ),
+                event_type=(
+                    "action_completed"
+                ),
+                title="Action completed",
+                details={
+                    "action_id":
+                        action.id,
+
+                    "action_title":
+                        action.title,
+
+                    "completed_by":
+                        request.user.email,
+
+                    "completed_by_user_id":
+                        request.user.id,
+                },
+                event_at=(
+                    action.completed_at
+                ),
+            )
+
         create_notification(
+
+            organization=action.organization,
 
             user=action.user,
 

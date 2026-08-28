@@ -1,6 +1,8 @@
 import hashlib
 import json
 
+from django.utils import timezone
+
 from knowledge.models import (
     KnowledgeEvidence,
 )
@@ -112,6 +114,176 @@ def _hash_contract(
     ).hexdigest()
 
 
+def _current_due_at(
+    instance,
+):
+    """
+    Return the authoritative current deadline from the
+    existing domain model.
+
+    No duplicate commitment state is introduced.
+    """
+
+    from actions.models import (
+        ActionItem,
+        ExpectedResponseItem,
+        FollowUpItem,
+    )
+    from approvals.models import (
+        ApprovalItem,
+    )
+
+    if isinstance(
+        instance,
+        ActionItem,
+    ):
+        return instance.due_date
+
+    if isinstance(
+        instance,
+        ApprovalItem,
+    ):
+        return instance.due_date
+
+    if isinstance(
+        instance,
+        ExpectedResponseItem,
+    ):
+        return (
+            instance.response_due_at
+        )
+
+    if isinstance(
+        instance,
+        FollowUpItem,
+    ):
+        return (
+            instance.followup_due_at
+        )
+
+    return None
+
+
+def _serialize_due_at(
+    value,
+):
+    if value is None:
+        return None
+
+    return value.isoformat()
+
+
+def _build_deadline_history(
+    *,
+    instance,
+    title,
+    source_message,
+    deadline_source,
+):
+    """
+    Carry forward deadline history across intelligence
+    evidence rows.
+
+    This handles both:
+
+    - same-message Action deadline edits
+    - ExpectedResponseItem source-message changes
+
+    Historical rows created before this capability remain
+    truthful: if no prior history exists, the currently
+    known deadline becomes the first known value.
+    """
+
+    previous = (
+        KnowledgeEvidence.objects
+        .filter(
+            organization_id=(
+                instance.organization_id
+            ),
+            title=title,
+            is_archived=False,
+        )
+        .order_by(
+            "-updated_at",
+            "-created_at",
+            "-id",
+        )
+        .first()
+    )
+
+    history = []
+
+    if previous is not None:
+        metadata = (
+            previous.metadata
+            if isinstance(
+                previous.metadata,
+                dict,
+            )
+            else {}
+        )
+
+        previous_history = (
+            metadata.get(
+                "deadline_history"
+            )
+        )
+
+        if isinstance(
+            previous_history,
+            list,
+        ):
+            history = [
+                dict(item)
+                for item
+                in previous_history
+                if isinstance(
+                    item,
+                    dict,
+                )
+            ]
+
+    due_at = _serialize_due_at(
+        _current_due_at(
+            instance
+        )
+    )
+
+    last_due_at = (
+        history[-1].get(
+            "due_at"
+        )
+        if history
+        else object()
+    )
+
+    if (
+        not history
+        or last_due_at != due_at
+    ):
+        history.append(
+            {
+                "due_at":
+                    due_at,
+
+                "recorded_at":
+                    timezone.now()
+                    .isoformat(),
+
+                "source":
+                    (
+                        deadline_source
+                        or "system"
+                    ),
+
+                "source_message_id":
+                    source_message.id,
+            }
+        )
+
+    return history
+
+
 def persist_intelligence_evidence(
     instance,
     *,
@@ -121,6 +293,7 @@ def persist_intelligence_evidence(
     provider=None,
     model=None,
     confidence=None,
+    deadline_source="extraction",
 ):
     """
     Persist validated One UCH intelligence provenance in the
@@ -254,6 +427,19 @@ def persist_intelligence_evidence(
         )
     )
 
+    deadline_history = (
+        _build_deadline_history(
+            instance=instance,
+            title=title,
+            source_message=(
+                source_message
+            ),
+            deadline_source=(
+                deadline_source
+            ),
+        )
+    )
+
     metadata = {
         "intelligence_object_type":
             object_type,
@@ -280,6 +466,9 @@ def persist_intelligence_evidence(
 
         "evidence_quality":
             evidence_quality,
+
+        "deadline_history":
+            deadline_history,
     }
 
     evidence_hash = (
