@@ -1,6 +1,8 @@
 import logging
 import time
 
+from django.conf import settings
+
 from workflow.services.ai.contracts import (
     AIResult,
 )
@@ -21,6 +23,10 @@ from workflow.services.ai.exceptions import (
     AIOutputValidationError,
 )
 
+from workflow.services.ai.governance.execution_policy import (
+    AIExecutionPolicy,
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +41,7 @@ class AIExecutionService:
     ):
 
         # --------------------------------------------------
-        # 1. Validate caller request
+        # 1. Validate caller request locally.
         # --------------------------------------------------
 
         AIValidator.validate(
@@ -43,11 +49,90 @@ class AIExecutionService:
         )
 
         # --------------------------------------------------
-        # 2. Resolve provider
+        # 2. PRE-EXECUTION GOVERNANCE
         #
-        # Provider routing errors remain explicit errors.
-        # They are configuration/programming failures rather
-        # than provider execution failures.
+        # deterministic_only fails closed before provider
+        # resolution.
+        #
+        # For AI-enabled modes preserve the existing
+        # ProviderNotFound hardening contract.
+        # --------------------------------------------------
+
+        ai_mode = str(
+            getattr(
+                settings,
+                "ONEUCH_AI_MODE",
+                "cloud",
+            )
+            or ""
+        ).strip().lower()
+
+        if (
+            ai_mode
+            != AIExecutionPolicy.MODE_DETERMINISTIC_ONLY
+            and provider
+            not in AIProviderRouter.PROVIDERS
+        ):
+            AIProviderRouter.get_provider(
+                provider
+            )
+
+        execution_policy = (
+            AIExecutionPolicy.evaluate(
+                mode=ai_mode,
+                provider=provider,
+            )
+        )
+
+        if not execution_policy.allowed:
+
+            logger.warning(
+                "AI execution blocked by governance | "
+                "mode=%s provider=%s reason=%s",
+                execution_policy.mode,
+                execution_policy.provider,
+                execution_policy.reason,
+            )
+
+            return AIResult(
+                success=False,
+                output=None,
+                provider=provider,
+                model=request.model,
+                execution_time_ms=0,
+                confidence=0.0,
+                metadata={
+                    "failure_stage":
+                        "execution_governance",
+
+                    "retryable":
+                        False,
+
+                    # Canonical provenance field used by
+                    # future Evidence Contract.
+                    "processing_mode":
+                        execution_policy.mode,
+
+                    # Backward-compatible alias.
+                    "governance_mode":
+                        execution_policy.mode,
+
+                    "governance_allowed":
+                        False,
+
+                    "governance_provider":
+                        execution_policy.provider,
+
+                    "governance_reason":
+                        execution_policy.reason,
+                },
+                error=(
+                    execution_policy.reason
+                ),
+            )
+
+        # --------------------------------------------------
+        # 3. Resolve permitted provider.
         # --------------------------------------------------
 
         engine = (
@@ -63,7 +148,7 @@ class AIExecutionService:
         try:
 
             # ----------------------------------------------
-            # 3. Execute provider
+            # 4. Execute provider.
             # ----------------------------------------------
 
             result = engine.execute(
@@ -79,7 +164,7 @@ class AIExecutionService:
             )
 
             # ----------------------------------------------
-            # 4. Enforce normalized provider contract
+            # 5. Enforce normalized provider contract.
             # ----------------------------------------------
 
             if not isinstance(
@@ -99,12 +184,39 @@ class AIExecutionService:
                 )
 
             # ----------------------------------------------
-            # 5. Validate provider output
+            # 6. Validate provider output.
             # ----------------------------------------------
 
             AIOutputValidator.validate(
                 request=request,
                 result=result,
+            )
+
+            # ----------------------------------------------
+            # 7. Attach processing provenance.
+            #
+            # Preserve provider-specific metadata while
+            # adding One UCH governance metadata.
+            # ----------------------------------------------
+
+            result.metadata = dict(
+                result.metadata or {}
+            )
+
+            result.metadata.update(
+                {
+                    "processing_mode":
+                        execution_policy.mode,
+
+                    "governance_allowed":
+                        True,
+
+                    "governance_provider":
+                        execution_policy.provider,
+
+                    "governance_reason":
+                        execution_policy.reason,
+                }
             )
 
             logger.info(
@@ -150,6 +262,18 @@ class AIExecutionService:
 
                     "failure_stage":
                         "output_validation",
+
+                    "processing_mode":
+                        execution_policy.mode,
+
+                    "governance_allowed":
+                        True,
+
+                    "governance_provider":
+                        execution_policy.provider,
+
+                    "governance_reason":
+                        execution_policy.reason,
                 },
                 error=str(exc),
             )
@@ -186,6 +310,18 @@ class AIExecutionService:
 
                     "failure_stage":
                         "provider_execution",
+
+                    "processing_mode":
+                        execution_policy.mode,
+
+                    "governance_allowed":
+                        True,
+
+                    "governance_provider":
+                        execution_policy.provider,
+
+                    "governance_reason":
+                        execution_policy.reason,
                 },
                 error=str(exc),
             )

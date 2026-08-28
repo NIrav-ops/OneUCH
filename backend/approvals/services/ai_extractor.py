@@ -29,6 +29,7 @@ class AIApprovalExtractionResult:
     error: Optional[str] = None
     provider: Optional[str] = None
     model: Optional[str] = None
+    processing_mode: Optional[str] = None
 
 
 SYSTEM_PROMPT = """
@@ -348,6 +349,19 @@ def extract_approvals_with_ai_result(
         provider=provider,
     )
 
+    processing_mode = (
+        (
+            getattr(
+                result,
+                "metadata",
+                None,
+            )
+            or {}
+        ).get(
+            "processing_mode"
+        )
+    )
+
     if not result.success:
 
         logger.warning(
@@ -370,6 +384,7 @@ def extract_approvals_with_ai_result(
                 result.model
                 or model
             ),
+            processing_mode=processing_mode,
         )
 
     try:
@@ -399,6 +414,7 @@ def extract_approvals_with_ai_result(
                 result.model
                 or model
             ),
+            processing_mode=processing_mode,
         )
 
     candidates = []
@@ -523,6 +539,8 @@ def extract_approvals_with_ai_result(
                     APPROVAL_AI_PROMPT_VERSION,
                 "provider": result.provider,
                 "model": result.model,
+                "processing_mode":
+                    processing_mode,
             }
         )
 
@@ -538,6 +556,7 @@ def extract_approvals_with_ai_result(
             result.model
             or model
         ),
+        processing_mode=processing_mode,
     )
 
 

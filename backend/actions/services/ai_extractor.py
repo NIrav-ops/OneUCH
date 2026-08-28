@@ -26,6 +26,7 @@ class AIActionExtractionResult:
     error: Optional[str] = None
     provider: Optional[str] = None
     model: Optional[str] = None
+    processing_mode: Optional[str] = None
 
 
 SYSTEM_PROMPT = """
@@ -301,6 +302,16 @@ def extract_actions_with_ai_result(
         provider=provider,
     )
 
+    processing_mode = (
+        (getattr(
+            result,
+            "metadata",
+            None,
+        ) or {}).get(
+            "processing_mode"
+        )
+    )
+
     if not result.success:
         logger.warning(
             "AI Action extraction failed | "
@@ -316,6 +327,7 @@ def extract_actions_with_ai_result(
             error=result.error,
             provider=result.provider or provider,
             model=result.model or model,
+            processing_mode=processing_mode,
         )
 
     try:
@@ -337,6 +349,7 @@ def extract_actions_with_ai_result(
             error=str(exc),
             provider=result.provider or provider,
             model=result.model or model,
+            processing_mode=processing_mode,
         )
 
     candidates = []
@@ -448,6 +461,8 @@ def extract_actions_with_ai_result(
                     ACTION_AI_PROMPT_VERSION,
                 "provider": result.provider,
                 "model": result.model,
+                "processing_mode":
+                    processing_mode,
             }
         )
 
@@ -457,6 +472,7 @@ def extract_actions_with_ai_result(
         error=None,
         provider=result.provider or provider,
         model=result.model or model,
+        processing_mode=processing_mode,
     )
 
 def extract_actions_with_ai(

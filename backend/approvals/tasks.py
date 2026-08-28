@@ -1,3 +1,4 @@
+from workflow.services.ai.governance.execution_policy import AIExecutionPolicy
 from celery import shared_task
 from django.conf import settings
 from django.core.mail import send_mail
@@ -257,6 +258,39 @@ def analyze_new_approvals(
                 .APPROVAL_AI_ALLOWED_ACCOUNT_IDS
             ),
         ):
+
+            msg.approval_analyzed = True
+
+            msg.save(
+                update_fields=[
+                    "approval_analyzed"
+                ]
+            )
+
+            processed_count += 1
+            continue
+
+        # --------------------------------------------------
+        # 3B. Global AI execution governance.
+        #
+        # Governance prohibition is intentional and must
+        # not become a retryable provider failure.
+        # --------------------------------------------------
+
+        ai_execution_policy = (
+            AIExecutionPolicy.evaluate(
+                mode=getattr(
+                    settings,
+                    "ONEUCH_AI_MODE",
+                    "cloud",
+                ),
+                provider=(
+                    settings.ONEUCH_AI_PROVIDER
+                ),
+            )
+        )
+
+        if not ai_execution_policy.allowed:
 
             msg.approval_analyzed = True
 

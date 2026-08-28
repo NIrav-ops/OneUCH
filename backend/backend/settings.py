@@ -499,6 +499,11 @@ ONEUCH_AI_PROVIDER = os.getenv(
     "mock",
 )
 
+ONEUCH_AI_MODE = os.getenv(
+    "ONEUCH_AI_MODE",
+    "cloud",
+).strip().lower()
+
 ONEUCH_AI_MODEL = os.getenv(
     "ONEUCH_AI_MODEL",
     "gpt-5.6-luna",

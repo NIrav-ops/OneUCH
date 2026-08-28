@@ -1,3 +1,4 @@
+from workflow.services.ai.governance.execution_policy import AIExecutionPolicy
 from celery import shared_task
 from django.conf import settings
 from django.utils import timezone
@@ -240,6 +241,40 @@ def analyze_new_messages(
                 .ACTION_AI_ALLOWED_ACCOUNT_IDS
             ),
         ):
+
+            msg.action_analyzed = True
+
+            msg.save(
+                update_fields=[
+                    "action_analyzed"
+                ]
+            )
+
+            processed_count += 1
+            continue
+
+        # --------------------------------------------------
+        # 2B. Global AI execution governance.
+        #
+        # A policy block is intentional and terminal for
+        # this analysis pass. It must NOT create provider
+        # retry state.
+        # --------------------------------------------------
+
+        ai_execution_policy = (
+            AIExecutionPolicy.evaluate(
+                mode=getattr(
+                    settings,
+                    "ONEUCH_AI_MODE",
+                    "cloud",
+                ),
+                provider=(
+                    settings.ONEUCH_AI_PROVIDER
+                ),
+            )
+        )
+
+        if not ai_execution_policy.allowed:
 
             msg.action_analyzed = True
 
