@@ -16,6 +16,11 @@ from knowledge.views.views_waiting_for import (
     WaitingForAPIView,
 )
 
+from knowledge.views.views_decisions import (
+    DecisionsAPIView,
+)
+
+
 
 
 urlpatterns = [
@@ -43,6 +48,13 @@ urlpatterns = [
         WaitingForAPIView.as_view(),
         name="knowledge-waiting-for",
     ),
+
+    path(
+        "decisions/",
+        DecisionsAPIView.as_view(),
+        name="knowledge-decisions",
+    ),
+
 
 
 

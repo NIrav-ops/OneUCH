@@ -10,6 +10,7 @@ import {
   Briefcase,
   Handshake,
   Clock,
+  Scale,
   CheckSquare,
   ShieldCheck,
   Search,
@@ -103,6 +104,11 @@ export default function AppLayout() {
           <NavLink to="/waiting-for" className={linkClass}>
             <Clock size={18} />
             Waiting For
+          </NavLink>
+
+          <NavLink to="/decisions" className={linkClass}>
+            <Scale size={18} />
+            Decisions
           </NavLink>
 
           <NavLink to="/inbox" className={linkClass}>
