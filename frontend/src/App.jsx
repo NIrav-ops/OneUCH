@@ -16,6 +16,7 @@ import Commitments from "./pages/Commitments";
 import WaitingFor from "./pages/WaitingFor";
 import Decisions from "./pages/Decisions";
 import Relationships from "./pages/Relationships";
+import Settings from "./pages/Settings";
 import ApprovalCenter from "./pages/ApprovalCenter";
 import SearchResults from "./pages/SearchResults";
 import Notifications from "./pages/Notifications";
@@ -80,6 +81,12 @@ export default function App() {
           path="/relationships"
           element={<Relationships />}
         />
+
+        <Route
+          path="/settings"
+          element={<Settings />}
+        />
+
 
 
 

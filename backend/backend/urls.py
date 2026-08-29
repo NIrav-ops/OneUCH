@@ -27,6 +27,11 @@ from actions.views_my_work import (
     MyWorkAPIView,
 )
 
+from email_accounts.views_adoption import (
+    MailAdoptionAPIView,
+)
+
+
 
 from rest_framework.permissions import (
     AllowAny,
@@ -61,6 +66,13 @@ urlpatterns = [
         "api/email/",
         include("email_accounts.urls"),
     ),
+
+    path(
+        "api/mail-adoption/",
+        MailAdoptionAPIView.as_view(),
+        name="mail-adoption",
+    ),
+
 
     path(
         "api/audit/",
