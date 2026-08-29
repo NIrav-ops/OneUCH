@@ -20,6 +20,11 @@ from knowledge.views.views_decisions import (
     DecisionsAPIView,
 )
 
+from knowledge.views.views_relationship_profiles import (
+    RelationshipProfilesAPIView,
+)
+
+
 
 
 
@@ -54,6 +59,13 @@ urlpatterns = [
         DecisionsAPIView.as_view(),
         name="knowledge-decisions",
     ),
+
+    path(
+        "relationships/",
+        RelationshipProfilesAPIView.as_view(),
+        name="knowledge-relationships",
+    ),
+
 
 
 

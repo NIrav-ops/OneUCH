@@ -11,6 +11,7 @@ import {
   Handshake,
   Clock,
   Scale,
+  Users,
   CheckSquare,
   ShieldCheck,
   Search,
@@ -109,6 +110,11 @@ export default function AppLayout() {
           <NavLink to="/decisions" className={linkClass}>
             <Scale size={18} />
             Decisions
+          </NavLink>
+
+          <NavLink to="/relationships" className={linkClass}>
+            <Users size={18} />
+            Relationships
           </NavLink>
 
           <NavLink to="/inbox" className={linkClass}>

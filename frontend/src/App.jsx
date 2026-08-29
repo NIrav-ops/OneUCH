@@ -15,6 +15,7 @@ import MyWork from "./pages/MyWork";
 import Commitments from "./pages/Commitments";
 import WaitingFor from "./pages/WaitingFor";
 import Decisions from "./pages/Decisions";
+import Relationships from "./pages/Relationships";
 import ApprovalCenter from "./pages/ApprovalCenter";
 import SearchResults from "./pages/SearchResults";
 import Notifications from "./pages/Notifications";
@@ -74,6 +75,12 @@ export default function App() {
           path="/decisions"
           element={<Decisions />}
         />
+
+        <Route
+          path="/relationships"
+          element={<Relationships />}
+        />
+
 
 
 
