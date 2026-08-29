@@ -12,6 +12,7 @@ import Inbox from "./pages/Inbox";
 import ActionCenter from "./pages/ActionCenter";
 import AttentionCenter from "./pages/AttentionCenter";
 import MyWork from "./pages/MyWork";
+import Commitments from "./pages/Commitments";
 import ApprovalCenter from "./pages/ApprovalCenter";
 import SearchResults from "./pages/SearchResults";
 import Notifications from "./pages/Notifications";
@@ -56,6 +57,12 @@ export default function App() {
           path="/my-work"
           element={<MyWork />}
         />
+
+        <Route
+          path="/commitments"
+          element={<Commitments />}
+        />
+
 
 
         <Route

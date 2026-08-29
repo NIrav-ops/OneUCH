@@ -8,6 +8,11 @@ from knowledge.views.views_attention import (
     AttentionAPIView,
 )
 
+from knowledge.views.views_commitments import (
+    CommitmentsAPIView,
+)
+
+
 urlpatterns = [
 
     path(
@@ -21,5 +26,12 @@ urlpatterns = [
         AttentionAPIView.as_view(),
         name="knowledge-attention",
     ),
+
+    path(
+        "commitments/",
+        CommitmentsAPIView.as_view(),
+        name="knowledge-commitments",
+    ),
+
 
 ]

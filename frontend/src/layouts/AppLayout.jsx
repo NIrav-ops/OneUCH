@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   AlertTriangle,
   Briefcase,
+  Handshake,
   CheckSquare,
   ShieldCheck,
   Search,
@@ -91,6 +92,11 @@ export default function AppLayout() {
           <NavLink to="/my-work" className={linkClass}>
             <Briefcase size={18} />
             My Work
+          </NavLink>
+
+          <NavLink to="/commitments" className={linkClass}>
+            <Handshake size={18} />
+            Commitments
           </NavLink>
 
           <NavLink to="/inbox" className={linkClass}>
