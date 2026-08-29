@@ -12,6 +12,11 @@ from knowledge.views.views_commitments import (
     CommitmentsAPIView,
 )
 
+from knowledge.views.views_waiting_for import (
+    WaitingForAPIView,
+)
+
+
 
 urlpatterns = [
 
@@ -32,6 +37,13 @@ urlpatterns = [
         CommitmentsAPIView.as_view(),
         name="knowledge-commitments",
     ),
+
+    path(
+        "waiting-for/",
+        WaitingForAPIView.as_view(),
+        name="knowledge-waiting-for",
+    ),
+
 
 
 ]

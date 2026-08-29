@@ -13,6 +13,7 @@ import ActionCenter from "./pages/ActionCenter";
 import AttentionCenter from "./pages/AttentionCenter";
 import MyWork from "./pages/MyWork";
 import Commitments from "./pages/Commitments";
+import WaitingFor from "./pages/WaitingFor";
 import ApprovalCenter from "./pages/ApprovalCenter";
 import SearchResults from "./pages/SearchResults";
 import Notifications from "./pages/Notifications";
@@ -62,6 +63,12 @@ export default function App() {
           path="/commitments"
           element={<Commitments />}
         />
+
+        <Route
+          path="/waiting-for"
+          element={<WaitingFor />}
+        />
+
 
 
 
