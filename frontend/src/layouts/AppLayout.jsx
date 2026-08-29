@@ -7,6 +7,7 @@ import {
   Settings,
   LayoutDashboard,
   AlertTriangle,
+  Briefcase,
   CheckSquare,
   ShieldCheck,
   Search,
@@ -85,6 +86,11 @@ export default function AppLayout() {
           <NavLink to="/attention" className={linkClass}>
             <AlertTriangle size={18} />
             Attention Center
+          </NavLink>
+
+          <NavLink to="/my-work" className={linkClass}>
+            <Briefcase size={18} />
+            My Work
           </NavLink>
 
           <NavLink to="/inbox" className={linkClass}>

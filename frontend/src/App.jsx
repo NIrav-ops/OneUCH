@@ -11,6 +11,7 @@ import Dashboard from "./pages/Dashboard";
 import Inbox from "./pages/Inbox";
 import ActionCenter from "./pages/ActionCenter";
 import AttentionCenter from "./pages/AttentionCenter";
+import MyWork from "./pages/MyWork";
 import ApprovalCenter from "./pages/ApprovalCenter";
 import SearchResults from "./pages/SearchResults";
 import Notifications from "./pages/Notifications";
@@ -50,6 +51,12 @@ export default function App() {
           path="/attention"
           element={<AttentionCenter />}
         />
+
+        <Route
+          path="/my-work"
+          element={<MyWork />}
+        />
+
 
         <Route
           path="/actions"

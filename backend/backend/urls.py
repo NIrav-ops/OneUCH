@@ -23,6 +23,11 @@ from inbox.views.dashboard import (
     InboxDashboardAPIView,
 )
 
+from actions.views_my_work import (
+    MyWorkAPIView,
+)
+
+
 from rest_framework.permissions import (
     AllowAny,
     IsAdminUser,
@@ -110,6 +115,12 @@ urlpatterns = [
     ),
 
     # Operational intelligence
+    path(
+        "api/my-work/",
+        MyWorkAPIView.as_view(),
+        name="my-work",
+    ),
+
     path(
         "api/actions/",
         include("actions.urls"),
