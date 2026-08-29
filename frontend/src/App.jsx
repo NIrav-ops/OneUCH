@@ -10,6 +10,7 @@ import AppLayout from "./layouts/AppLayout";
 import Dashboard from "./pages/Dashboard";
 import Inbox from "./pages/Inbox";
 import ActionCenter from "./pages/ActionCenter";
+import AttentionCenter from "./pages/AttentionCenter";
 import ApprovalCenter from "./pages/ApprovalCenter";
 import SearchResults from "./pages/SearchResults";
 import Notifications from "./pages/Notifications";
@@ -43,6 +44,11 @@ export default function App() {
         <Route
           path="/inbox"
           element={<Inbox />}
+        />
+
+        <Route
+          path="/attention"
+          element={<AttentionCenter />}
         />
 
         <Route

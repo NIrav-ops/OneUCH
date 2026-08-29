@@ -6,12 +6,12 @@ import {
   Mail,
   Settings,
   LayoutDashboard,
+  AlertTriangle,
   CheckSquare,
   ShieldCheck,
   Search,
   Bell,
   GitBranch,
-  Workflow,
 } from "lucide-react";
 
 export default function AppLayout() {
@@ -80,6 +80,11 @@ export default function AppLayout() {
           <NavLink to="/dashboard" className={linkClass}>
             <LayoutDashboard size={18} />
             Dashboard
+          </NavLink>
+
+          <NavLink to="/attention" className={linkClass}>
+            <AlertTriangle size={18} />
+            Attention Center
           </NavLink>
 
           <NavLink to="/inbox" className={linkClass}>
