@@ -83,13 +83,22 @@ def periodic_sync_all_users():
 
                 print("SYNC START - IMAP:", account.email_address)
 
-                if not account.imap_password:
+                # Generic IMAP / SMTP accounts currently use one
+                # temporary app-password field on EmailAccount.
+                #
+                # SMTP delivery already uses smtp_password, and
+                # there is no imap_password model field. Reuse the
+                # existing credential rather than inventing a second
+                # plaintext secret or referencing a nonexistent field.
+                imap_password = account.smtp_password
+
+                if not imap_password:
                     continue
 
                 fetch_imap_emails(
                     user=account.user,
                     email_account=account,
-                    password=account.imap_password,
+                    password=imap_password,
                 )
 
             analyze_new_approvals.delay()

@@ -4,6 +4,7 @@ from django.utils import timezone
 from django.conf import settings
 
 from oauth_tokens.models import OAuthToken
+from oauth_tokens.policy import enforce_oauth_execution_policy
 from microsoftapis.utils import refresh_microsoft_token
 
 
@@ -11,6 +12,11 @@ def refresh_google_token(token: OAuthToken):
     """
     Refresh Google OAuth access token using refresh token
     """
+    enforce_oauth_execution_policy(
+        token=token,
+        provider="google",
+    )
+
     if not token.refresh_token:
         raise Exception("Google refresh token missing. Please reconnect Gmail.")
 
@@ -59,10 +65,10 @@ def get_valid_oauth_token(user, provider: str):
             f"{provider.title()} account not connected. Please connect {provider} first."
         )
     
-    if token.disabled_by_admin:
-        raise Exception(
-            f"{provider.title()} access disabled by administrator"
-        )
+    enforce_oauth_execution_policy(
+        token=token,
+        provider=provider,
+    )
 
     if token.is_expired():
 

@@ -4,12 +4,18 @@ from django.utils import timezone
 from google.oauth2.credentials import Credentials
 
 from oauth_tokens.models import OAuthToken
+from oauth_tokens.policy import enforce_oauth_execution_policy
 
 
 def refresh_google_token(oauth_token):
     """
     Refresh expired Google access token
     """
+
+    enforce_oauth_execution_policy(
+        token=oauth_token,
+        provider="google",
+    )
 
     response = requests.post(
         "https://oauth2.googleapis.com/token",
@@ -47,6 +53,11 @@ def get_gmail_credentials(user):
 
     if not oauth_token:
         raise Exception("Google account not connected")
+
+    enforce_oauth_execution_policy(
+        token=oauth_token,
+        provider="google",
+    )
 
     # Refresh if expired
     if oauth_token.expires_at <= timezone.now():

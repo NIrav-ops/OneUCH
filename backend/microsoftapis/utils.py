@@ -4,9 +4,15 @@ from django.utils import timezone
 from datetime import timedelta
 
 from oauth_tokens.models import OAuthToken
+from oauth_tokens.policy import enforce_oauth_execution_policy
 
 
 def refresh_microsoft_token(oauth_token):
+
+    enforce_oauth_execution_policy(
+        token=oauth_token,
+        provider="microsoft",
+    )
 
     response = requests.post(
         "https://login.microsoftonline.com/common/oauth2/v2.0/token",
@@ -65,6 +71,11 @@ def get_microsoft_access_token(user):
         raise Exception(
             "Microsoft account not connected."
         )
+
+    enforce_oauth_execution_policy(
+        token=oauth_token,
+        provider="microsoft",
+    )
 
     if oauth_token.expires_at <= timezone.now():
 
