@@ -60,6 +60,7 @@ from inbox.views.reply import ReplyConversationAPIView
 from inbox.views.dashboard import InboxDashboardAPIView
 from inbox.views.notifications_list import NotificationListAPIView
 from inbox.views.sync_status import InboxSyncStatusAPIView
+from inbox.views.recipient_suggestions import RecipientSuggestionAPIView
 from inbox.views.payment_create_order import CreatePaymentOrderAPIView
 
 
@@ -113,6 +114,11 @@ urlpatterns = [
     path("unified/", UnifiedInboxAPIView.as_view(), name="unified-inbox"),
     path("unified-conversations/", UnifiedConversationInboxAPIView.as_view(), name="unified-conversations"),
     path("search/", MessageSearchAPIView.as_view()),
+    path(
+        "recipient-suggestions/",
+        RecipientSuggestionAPIView.as_view(),
+        name="recipient-suggestions",
+    ),
 
 
     # ==========================================================

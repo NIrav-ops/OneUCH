@@ -1,247 +1,612 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+
 from django.utils import timezone
+
 from asgiref.sync import async_to_sync
+
 from channels.layers import get_channel_layer
 
 from googleapiclient.discovery import build
+
 from email.mime.text import MIMEText
-from email.utils import getaddresses
+
 import base64
 import requests
 
-from inbox.models import Conversation, InboxMessage
-from googleapis.utils import get_gmail_credentials
-from microsoftapis.utils import get_microsoft_access_token
-from inbox.utils.conversation_key import generate_conversation_key
+from inbox.models import (
+    Conversation,
+    InboxMessage,
+)
+
+from inbox.services.recipient_payload import (
+    graph_recipient_payload,
+    mime_recipient_header,
+    normalize_recipient_buckets,
+)
+
+from googleapis.utils import (
+    get_gmail_credentials,
+)
+
+from microsoftapis.utils import (
+    get_microsoft_access_token,
+)
+
+from inbox.utils.conversation_key import (
+    generate_conversation_key,
+)
 
 
-class UnifiedSendMessageAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+class UnifiedSendMessageAPIView(
+    APIView
+):
+    permission_classes = [
+        IsAuthenticated
+    ]
 
-    def post(self, request):
+
+    def post(
+        self,
+        request,
+    ):
         return self.send_with_data(
             request=request,
             data=request.data,
         )
 
-    def send_with_data(self, *, request, data):
+
+    def send_with_data(
+        self,
+        *,
+        request,
+        data,
+    ):
 
         try:
+
             user = request.user
 
-            to = data.get("to")
-            subject = data.get("subject", "")
-            body = data.get("body", "")
-            conversation_id = data.get("conversation_id")
+            subject = data.get(
+                "subject",
+                "",
+            )
 
-            if not to:
-                return Response({"error": "Recipient required"}, status=400)
+            body = data.get(
+                "body",
+                "",
+            )
+
+            conversation_id = (
+                data.get(
+                    "conversation_id"
+                )
+            )
+
+
+            try:
+
+                (
+                    recipient_meta,
+                    recipients_flat,
+                ) = (
+                    normalize_recipient_buckets(
+                        to=data.get(
+                            "to"
+                        ),
+                        cc=data.get(
+                            "cc",
+                            []
+                        ),
+                        bcc=data.get(
+                            "bcc",
+                            []
+                        ),
+                        require_to=True,
+                    )
+                )
+
+            except ValueError as exc:
+
+                return Response(
+                    {
+                        "error":
+                            str(exc)
+                    },
+                    status=400,
+                )
+
+
+            to_recipients = (
+                recipient_meta[
+                    "to"
+                ]
+            )
+
+            cc_recipients = (
+                recipient_meta[
+                    "cc"
+                ]
+            )
+
+            bcc_recipients = (
+                recipient_meta[
+                    "bcc"
+                ]
+            )
+
+
+            to_flat = ", ".join(
+                item[
+                    "email"
+                ]
+                for item
+                in to_recipients
+            )
+
 
             # =========================
             # ACCOUNT
             # =========================
-            account_id = data.get("account_id")
+
+            account_id = data.get(
+                "account_id"
+            )
+
 
             if account_id:
-                account = user.email_accounts.filter(id=account_id).first()
+
+                account = (
+                    user.email_accounts
+                    .filter(
+                        id=account_id
+                    )
+                    .first()
+                )
+
             else:
-                account = user.email_accounts.first()
+
+                account = (
+                    user.email_accounts
+                    .first()
+                )
+
 
             if not account:
-                return Response({"error": "No email account connected"}, status=400)
 
-            account_type = account.account_type
+                return Response(
+                    {
+                        "error":
+                            "No email account connected"
+                    },
+                    status=400,
+                )
+
+
+            account_type = (
+                account.account_type
+            )
+
+
+            sender_email = (
+                str(
+                    account.email_address
+                )
+                .strip()
+                .lower()
+            )
+
+
+            sender_meta = {
+                "name":
+                    "",
+
+                "email":
+                    sender_email,
+            }
+
 
             # =========================
             # CONVERSATION
             # =========================
+
             conversation = None
+
+
             if conversation_id:
-                conversation = Conversation.objects.filter(
-                    id=conversation_id,
-                    user=user
-                ).first()
+
+                conversation = (
+                    Conversation.objects
+                    .filter(
+                        id=conversation_id,
+                        user=user,
+                    )
+                    .first()
+                )
+
 
                 if not conversation:
-                    return Response({"error": "Conversation not found"}, status=404)
+
+                    return Response(
+                        {
+                            "error":
+                                "Conversation not found"
+                        },
+                        status=404,
+                    )
+
 
             if conversation is None:
-                conversation_key = generate_conversation_key(
-                    account_type,
-                    None,
-                    subject,
-                    to
+
+                conversation_key = (
+                    generate_conversation_key(
+                        account_type,
+                        None,
+                        subject,
+                        to_flat,
+                    )
                 )
 
-                conversation, _ = Conversation.objects.get_or_create(
-                    user=user,
-                    conversation_key=conversation_key,
-                    defaults={
-                        "organization": user.organization_membership.organization,
-                        "subject": subject or "New Message",
-                        "email_account": account,
-                        "last_message_preview": "",
-                    }
+
+                conversation, _ = (
+                    Conversation.objects
+                    .get_or_create(
+                        user=user,
+                        conversation_key=(
+                            conversation_key
+                        ),
+                        defaults={
+                            "organization":
+                                user
+                                .organization_membership
+                                .organization,
+
+                            "subject":
+                                (
+                                    subject
+                                    or
+                                    "New Message"
+                                ),
+
+                            "email_account":
+                                account,
+
+                            "last_message_preview":
+                                "",
+                        },
+                    )
                 )
 
+
             # =========================
-            # SEND EMAIL
+            # PROVIDER SEND
             # =========================
+
+            provider_message_id = (
+                "sent"
+            )
+
+
             if account_type == "gmail":
 
-                creds = get_gmail_credentials(user)
-                service = build("gmail", "v1", credentials=creds)
+                creds = (
+                    get_gmail_credentials(
+                        user
+                    )
+                )
 
-                message = MIMEText(body)
-                message["to"] = to
-                message["subject"] = subject
 
-                raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
+                service = build(
+                    "gmail",
+                    "v1",
+                    credentials=creds,
+                )
+
+
+                message = MIMEText(
+                    body
+                )
+
+
+                message[
+                    "To"
+                ] = (
+                    mime_recipient_header(
+                        to_recipients
+                    )
+                )
+
+
+                if cc_recipients:
+
+                    message[
+                        "Cc"
+                    ] = (
+                        mime_recipient_header(
+                            cc_recipients
+                        )
+                    )
+
+
+                if bcc_recipients:
+
+                    message[
+                        "Bcc"
+                    ] = (
+                        mime_recipient_header(
+                            bcc_recipients
+                        )
+                    )
+
+
+                message[
+                    "Subject"
+                ] = subject
+
+
+                raw = (
+                    base64
+                    .urlsafe_b64encode(
+                        message.as_bytes()
+                    )
+                    .decode()
+                )
+
 
                 gmail_result = (
                     service.users()
                     .messages()
                     .send(
                         userId="me",
-                        body={"raw": raw},
+                        body={
+                            "raw":
+                                raw
+                        },
                     )
                     .execute()
                 )
 
+
                 provider_message_id = (
-                    gmail_result.get("id")
-                    or "sent"
+                    gmail_result.get(
+                        "id"
+                    )
+                    or
+                    "sent"
                 )
+
 
             elif account_type == "outlook":
 
-                token = get_microsoft_access_token(user)
-
-                recipient_source = str(to).replace(
-                    ";",
-                    ",",
+                token = (
+                    get_microsoft_access_token(
+                        user
+                    )
                 )
 
-                recipients = [
-                    address
-                    for _, address in getaddresses(
-                        [recipient_source]
-                    )
-                    if address
-                ]
 
-                if not recipients:
-                    return Response(
-                        {
-                            "error": (
-                                "No valid recipient email "
-                                "address found"
-                            )
-                        },
-                        status=400,
-                    )
+                graph_message = {
+                    "subject":
+                        subject,
+
+                    "body": {
+                        "contentType":
+                            "Text",
+
+                        "content":
+                            body,
+                    },
+
+                    "toRecipients":
+                        graph_recipient_payload(
+                            to_recipients
+                        ),
+
+                    "ccRecipients":
+                        graph_recipient_payload(
+                            cc_recipients
+                        ),
+
+                    "bccRecipients":
+                        graph_recipient_payload(
+                            bcc_recipients
+                        ),
+                }
+
 
                 response = requests.post(
-                    "https://graph.microsoft.com/v1.0/me/sendMail",
+                    (
+                        "https://graph.microsoft.com/"
+                        "v1.0/me/sendMail"
+                    ),
                     headers={
-                        "Authorization": f"Bearer {token}",
-                        "Content-Type": "application/json",
+                        "Authorization":
+                            f"Bearer {token}",
+
+                        "Content-Type":
+                            "application/json",
                     },
                     json={
-                        "message": {
-                            "subject": subject,
-                            "body": {
-                                "contentType": "Text",
-                                "content": body,
-                            },
-                            "toRecipients": [
-                                {
-                                    "emailAddress": {
-                                        "address": address
-                                    }
-                                }
-                                for address in recipients
-                            ],
-                        }
+                        "message":
+                            graph_message
                     },
+                    timeout=30,
                 )
+
 
                 if response.status_code >= 400:
 
                     try:
-                        graph_error = response.json()
-                        graph_message = (
-                            graph_error
-                            .get("error", {})
-                            .get("message")
+
+                        graph_error = (
+                            response.json()
                         )
+
+                        graph_message_text = (
+                            graph_error
+                            .get(
+                                "error",
+                                {},
+                            )
+                            .get(
+                                "message"
+                            )
+                        )
+
                     except Exception:
-                        graph_message = None
+
+                        graph_message_text = (
+                            None
+                        )
+
 
                     raise Exception(
                         "Microsoft Graph sendMail failed "
                         f"with status {response.status_code}"
-                        + (
-                            f": {graph_message}"
-                            if graph_message
+                        +
+                        (
+                            f": {graph_message_text}"
+                            if graph_message_text
                             else ""
                         )
                     )
 
+
+            else:
+
+                return Response(
+                    {
+                        "error":
+                            "Unsupported email account type"
+                    },
+                    status=400,
+                )
+
+
             # =========================
-            # SAVE MESSAGE (ONE TIME ONLY ✅)
+            # LOCAL SENT MATERIALIZATION
             # =========================
-            message_obj = InboxMessage.objects.create(
-                user=user,
-                organization=user.organization_membership.organization,
-                platform=account_type,
-                external_message_id=(
-                    provider_message_id
-                    if account_type == "gmail"
-                    else "sent"
-                ),
-                sender=account.email_address,
-                recipients=to,
-                subject=subject or "No Subject",
-                body=body,
-                is_read=True,
-                email_account=account,
-                direction="outbound",
-                is_draft=False,
-                status="sent",
-                received_at=timezone.now(),
-                conversation=conversation   # 🔥 THIS IS THE FIX
+
+            message_obj = (
+                InboxMessage.objects
+                .create(
+                    user=user,
+                    organization=(
+                        user
+                        .organization_membership
+                        .organization
+                    ),
+                    platform=(
+                        account_type
+                    ),
+                    folder="sent",
+                    external_message_id=(
+                        provider_message_id
+                    ),
+                    sender=(
+                        sender_email
+                    ),
+                    sender_meta=(
+                        sender_meta
+                    ),
+                    recipients=(
+                        recipients_flat
+                    ),
+                    recipient_meta=(
+                        recipient_meta
+                    ),
+                    subject=(
+                        subject
+                        or
+                        "No Subject"
+                    ),
+                    body=body,
+                    is_read=True,
+                    email_account=(
+                        account
+                    ),
+                    direction="outbound",
+                    is_draft=False,
+                    status="sent",
+                    received_at=(
+                        timezone.now()
+                    ),
+                    conversation=(
+                        conversation
+                    ),
+                )
             )
 
-            # UPDATE CONVERSATION
-            conversation.last_message = message_obj
-            conversation.last_message_at = message_obj.received_at
-            conversation.last_message_preview = body[:120] if body else ""
+
+            conversation.last_message = (
+                message_obj
+            )
+
+            conversation.last_message_at = (
+                message_obj.received_at
+            )
+
+            conversation.last_message_preview = (
+                body[
+                    :120
+                ]
+                if body
+                else ""
+            )
 
             conversation.save()
+
 
             # =========================
             # REALTIME UPDATE
             # =========================
-            channel_layer = get_channel_layer()
 
-            async_to_sync(channel_layer.group_send)(
+            channel_layer = (
+                get_channel_layer()
+            )
+
+
+            async_to_sync(
+                channel_layer.group_send
+            )(
                 f"inbox_{user.id}",
                 {
-                    "type": "send_update",
-                    "data": {"message": "new_email"}
+                    "type":
+                        "send_update",
+
+                    "data": {
+                        "message":
+                            "new_email"
+                    },
+                },
+            )
+
+
+            return Response(
+                {
+                    "status":
+                        "sent",
+
+                    "conversation_id":
+                        conversation.id,
+
+                    "message_id":
+                        message_obj.id,
                 }
             )
 
-            return Response({
-                "status": "sent",
-                "conversation_id": conversation.id,
-                "message_id": message_obj.id,
-            })
 
-        except Exception as e:
+        except Exception as exc:
+
             import traceback
+
             traceback.print_exc()
-            return Response({"error": str(e)}, status=500)
+
+            return Response(
+                {
+                    "error":
+                        str(exc)
+                },
+                status=500,
+            )

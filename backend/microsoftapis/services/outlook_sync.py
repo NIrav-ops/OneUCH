@@ -300,6 +300,68 @@ def _normalized_recipients(value):
     }
 
 
+def _candidate_to_recipient_set(
+    candidate,
+):
+    """
+    P2C reconciliation compares Graph To recipients with the
+    local structured To bucket.
+
+    The legacy flat recipients field may now contain
+    To + CC + BCC, so it is only used as a fallback for older
+    outbound rows that predate structured recipient metadata.
+    """
+
+    recipient_meta = (
+        candidate.recipient_meta
+        if isinstance(
+            candidate.recipient_meta,
+            dict,
+        )
+        else {}
+    )
+
+
+    structured_to = {
+        str(
+            item.get(
+                "email",
+                "",
+            )
+        )
+        .strip()
+        .lower()
+
+        for item in (
+            recipient_meta.get(
+                "to",
+                [],
+            )
+            or []
+        )
+
+        if (
+            isinstance(
+                item,
+                dict,
+            )
+            and
+            item.get(
+                "email"
+            )
+        )
+    }
+
+
+    if structured_to:
+        return structured_to
+
+
+    return _normalized_recipients(
+        candidate.recipients
+    )
+
+
 class _HTMLTextExtractor(
     HTMLParser
 ):
@@ -815,8 +877,8 @@ def _find_local_outbound_candidate(
 
     for candidate in candidates:
         if (
-            _normalized_recipients(
-                candidate.recipients
+            _candidate_to_recipient_set(
+                candidate
             )
             != graph_recipient_set
         ):

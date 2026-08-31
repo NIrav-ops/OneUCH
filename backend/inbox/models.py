@@ -229,6 +229,200 @@ class InboxMessage(models.Model):
         return f"{self.platform} | {self.sender} | {self.subject[:30]}"
 
 
+# ============================================================
+# Recipient Intelligence Directory
+# Product Freeze P2A
+# ============================================================
+
+class RecipientContact(models.Model):
+    """
+    User-scoped recipient intelligence derived from governed
+    communication history.
+
+    This is intentionally separate from BusinessObjectContact.
+    BusinessObjectContact describes a contact attached to an
+    enterprise business object; RecipientContact represents a
+    user's observed communication relationship and powers mail
+    recipient autocomplete.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="recipient_contacts",
+    )
+
+    organization = models.ForeignKey(
+        "inbox.Organization",
+        on_delete=models.CASCADE,
+        related_name="recipient_contacts",
+    )
+
+    email = models.EmailField(
+        max_length=254,
+    )
+
+    normalized_email = models.CharField(
+        max_length=254,
+    )
+
+    display_name = models.CharField(
+        max_length=255,
+        blank=True,
+    )
+
+    first_seen_at = models.DateTimeField()
+
+    last_seen_at = models.DateTimeField()
+
+    message_count = models.PositiveIntegerField(
+        default=0,
+    )
+
+    sent_count = models.PositiveIntegerField(
+        default=0,
+    )
+
+    received_count = models.PositiveIntegerField(
+        default=0,
+    )
+
+    to_count = models.PositiveIntegerField(
+        default=0,
+    )
+
+    cc_count = models.PositiveIntegerField(
+        default=0,
+    )
+
+    bcc_count = models.PositiveIntegerField(
+        default=0,
+    )
+
+    reply_to_count = models.PositiveIntegerField(
+        default=0,
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    updated_at = models.DateTimeField(
+        auto_now=True,
+    )
+
+    class Meta:
+        ordering = [
+            "-sent_count",
+            "-message_count",
+            "-last_seen_at",
+        ]
+
+        constraints = [
+            models.UniqueConstraint(
+                fields=[
+                    "user",
+                    "organization",
+                    "normalized_email",
+                ],
+                name="uniq_rcpt_user_org_email",
+            ),
+        ]
+
+        indexes = [
+            models.Index(
+                fields=[
+                    "user",
+                    "normalized_email",
+                ],
+                name="inbox_rcpt_uemail_idx",
+            ),
+            models.Index(
+                fields=[
+                    "user",
+                    "last_seen_at",
+                ],
+                name="inbox_rcpt_useen_idx",
+            ),
+            models.Index(
+                fields=[
+                    "organization",
+                    "normalized_email",
+                ],
+                name="inbox_rcpt_oemail_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            self.display_name
+            or
+            self.email
+        )
+
+
+class RecipientDirectoryState(models.Model):
+    """
+    Per-user indexing watermark.
+
+    The watermark lets autocomplete incrementally consume only
+    InboxMessage rows created after the previous directory pass.
+    It also makes a repeated directory refresh idempotent.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="recipient_directory_states",
+    )
+
+    organization = models.ForeignKey(
+        "inbox.Organization",
+        on_delete=models.CASCADE,
+        related_name="recipient_directory_states",
+    )
+
+    last_indexed_message_id = models.PositiveBigIntegerField(
+        default=0,
+    )
+
+    indexed_message_count = models.PositiveBigIntegerField(
+        default=0,
+    )
+
+    last_indexed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    updated_at = models.DateTimeField(
+        auto_now=True,
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=[
+                    "user",
+                    "organization",
+                ],
+                name="uniq_rcpt_state_user_org",
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            "RecipientDirectoryState "
+            + str(self.user_id)
+            + ":"
+            + str(self.organization_id)
+        )
+
+
 class Attachment(models.Model):
     message = models.ForeignKey(
         InboxMessage,

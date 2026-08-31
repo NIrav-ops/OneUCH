@@ -10,6 +10,11 @@ import { useLocation } from "react-router-dom";
 import axios from "../axiosConfig";
 import ConversationTimeline from "../components/ConversationTimeline";
 
+import RecipientChipInput, {
+  parseRecipientString,
+  serializeRecipients,
+} from "../components/RecipientChipInput";
+
 import {
   API_BASE_URL,
   WS_BASE_URL,
@@ -70,7 +75,9 @@ export default function Inbox() {
   ] = useState("");
 
   const [composeData, setComposeData] = useState({
-    to: "",
+    to: [],
+    cc: [],
+    bcc: [],
     subject: "",
     body: "",
   });
@@ -677,6 +684,19 @@ export default function Inbox() {
 
   const sendEmail = async () => {
 
+    if (
+      composeData.to.length === 0
+    ) {
+
+      setError(
+        "Add at least one recipient."
+      );
+
+      return;
+
+    }
+
+
     try {
 
       setError("");
@@ -685,7 +705,15 @@ export default function Inbox() {
       await axios.post(
         "/api/inbox/send/",
         {
-          to: composeData.to,
+          to:
+            composeData.to,
+
+          cc:
+            composeData.cc,
+
+          bcc:
+            composeData.bcc,
+
           subject:
             composeData.subject,
           body:
@@ -701,7 +729,9 @@ export default function Inbox() {
       setActiveDraftId(null);
 
       setComposeData({
-        to: "",
+        to: [],
+    cc: [],
+    bcc: [],
         subject: "",
         body: "",
       });
@@ -841,7 +871,18 @@ export default function Inbox() {
             composeData.body,
 
           recipients:
+            serializeRecipients(
+              composeData.to
+            ),
+
+          to:
             composeData.to,
+
+          cc:
+            composeData.cc,
+
+          bcc:
+            composeData.bcc,
 
           account_id:
             composeAccountId,
@@ -857,7 +898,9 @@ export default function Inbox() {
 
 
       setComposeData({
-        to: "",
+        to: [],
+    cc: [],
+    bcc: [],
         subject: "",
         body: "",
       });
@@ -920,7 +963,9 @@ export default function Inbox() {
 
 
       setComposeData({
-        to: "",
+        to: [],
+    cc: [],
+    bcc: [],
         subject: "",
         body: "",
       });
@@ -1308,9 +1353,39 @@ export default function Inbox() {
     );
 
 
+    const draftRecipientMeta =
+      draft.recipient_meta || {};
+
+
+    const structuredDraftTo =
+      Array.isArray(
+        draftRecipientMeta.to
+      )
+      &&
+      draftRecipientMeta.to.length > 0
+        ? draftRecipientMeta.to
+        : parseRecipientString(
+            draft.recipients
+          );
+
+
     setComposeData({
       to:
-        draft.recipients || "",
+        structuredDraftTo,
+
+      cc:
+        Array.isArray(
+          draftRecipientMeta.cc
+        )
+          ? draftRecipientMeta.cc
+          : [],
+
+      bcc:
+        Array.isArray(
+          draftRecipientMeta.bcc
+        )
+          ? draftRecipientMeta.bcc
+          : [],
 
       subject:
         draft.subject || "",
@@ -1361,7 +1436,9 @@ export default function Inbox() {
 
 
     setComposeData({
-      to: "",
+      to: [],
+    cc: [],
+    bcc: [],
       subject: "",
       body: "",
     });
@@ -1536,7 +1613,9 @@ export default function Inbox() {
               );
 
               setComposeData({
-                to: "",
+                to: [],
+    cc: [],
+    bcc: [],
                 subject: "",
                 body: "",
               });
@@ -2265,11 +2344,15 @@ export default function Inbox() {
               background:
                 "white",
               padding: 20,
-              width: 420,
+              width: 580,
               maxWidth:
-                "90vw",
+                "92vw",
               position:
                 "relative",
+              borderRadius:
+                16,
+              boxShadow:
+                "0 24px 70px rgba(15, 23, 42, 0.22)",
             }}
           >
 
@@ -2343,25 +2426,97 @@ export default function Inbox() {
 
             {/* TO */}
 
-            <input
-              placeholder="To"
-              value={
-                composeData.to
-              }
-              onChange={(event) =>
-                setComposeData({
-                  ...composeData,
-                  to:
-                    event.target.value,
-                })
-              }
-              style={{
-                width:
-                  "100%",
-                marginBottom:
-                  8,
-              }}
-            />
+            <div
+              className="mb-3"
+            >
+
+              <RecipientChipInput
+                label="To"
+                value={
+                  composeData.to
+                }
+                onChange={(
+                  recipients
+                ) =>
+                  setComposeData(
+                    (
+                      current
+                    ) => ({
+                      ...current,
+                      to:
+                        recipients,
+                    })
+                  )
+                }
+                placeholder="Type a name or email"
+              />
+
+              <div
+                className="
+                  mt-1.5
+                  px-1
+                  text-[11px]
+                  text-slate-400
+                "
+              >
+                Suggestions are ranked from your communication history.
+              </div>
+
+            </div>
+
+
+            {/* CC / BCC */}
+
+            <div
+              className="
+                mb-3 space-y-2
+              "
+            >
+
+              <RecipientChipInput
+                label="Cc"
+                value={
+                  composeData.cc
+                }
+                onChange={(
+                  recipients
+                ) =>
+                  setComposeData(
+                    (
+                      current
+                    ) => ({
+                      ...current,
+                      cc:
+                        recipients,
+                    })
+                  )
+                }
+                placeholder="Add Cc recipients"
+              />
+
+
+              <RecipientChipInput
+                label="Bcc"
+                value={
+                  composeData.bcc
+                }
+                onChange={(
+                  recipients
+                ) =>
+                  setComposeData(
+                    (
+                      current
+                    ) => ({
+                      ...current,
+                      bcc:
+                        recipients,
+                    })
+                  )
+                }
+                placeholder="Add Bcc recipients"
+              />
+
+            </div>
 
 
             {/* SUBJECT */}
