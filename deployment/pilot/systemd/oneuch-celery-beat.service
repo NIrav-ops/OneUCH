@@ -1,0 +1,34 @@
+[Unit]
+Description=One UCH Celery Beat
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=oneuch
+Group=oneuch
+
+WorkingDirectory=/opt/oneuch/backend
+
+EnvironmentFile=/opt/oneuch/backend/.env
+Environment=PYTHONUNBUFFERED=1
+
+ExecStartPre=/opt/oneuch/backend/venv/bin/python manage.py validate_pilot_environment
+
+ExecStart=/opt/oneuch/backend/venv/bin/celery \
+    -A backend \
+    beat \
+    --loglevel=INFO \
+    --scheduler=django_celery_beat.schedulers:DatabaseScheduler
+
+Restart=on-failure
+RestartSec=5
+
+TimeoutStopSec=30
+KillSignal=SIGTERM
+
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
