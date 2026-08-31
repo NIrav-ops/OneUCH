@@ -2,132 +2,176 @@
 
 ## Objective
 
-Start One UCH in a controlled environment so selected users can validate the product as real end users.
+Start One UCH in a controlled pilot environment so selected
+users can validate the product as real end users.
 
-Pilot users should be able to:
+The goal of the pilot is product validation, not feature
+completeness.
 
-- Sign in
-- Connect Gmail or Microsoft
-- Synchronize communication
-- Use the unified inbox
-- Open conversations
-- Reply and send messages
-- Work with actions, approvals and follow-ups
-- Validate communication intelligence
+## 1. Production Pilot Topology
 
-## 1. Backend Setup
+The authoritative hardened deployment topology is:
+
+deployment/pilot/README.md
+
+The pilot must use the deployment configuration defined there,
+including:
+
+- Nginx HTTPS termination
+- Daphne ASGI
+- PostgreSQL
+- Redis
+- a dedicated Celery worker
+- exactly one Celery Beat process
+- WebSocket proxy forwarding
+- systemd process isolation
+
+Do not use Django `runserver` as the pilot application server.
+
+## 2. Backend Environment
 
 Backend directory:
 
-D:\UnifiedMessenger\unified-comm-hub\backend
+/opt/oneuch/backend
 
-Install dependencies:
+Create the pilot environment from:
 
-.\venv\Scripts\python.exe -m pip install -r requirements.txt
+backend/.env.pilot.example
 
-Create .env from .env.example and populate required secrets.
+Do not promote local-development defaults from `.env.example`.
 
-Never commit the real .env file.
+Never commit the real `.env` file.
 
-## 2. Database
+Install backend dependencies:
 
-Local development uses SQLite by default.
+./venv/bin/python -m pip install -r requirements.txt
 
-Pilot deployment should use PostgreSQL with:
+## 3. Database
 
-DJANGO_DB_ENGINE=postgresql
-DB_NAME=oneuch
-DB_USER=oneuch
-DB_PASSWORD=<secret>
-DB_HOST=127.0.0.1
-DB_PORT=5432
+Pilot deployment requires PostgreSQL.
 
 Apply migrations:
 
-.\venv\Scripts\python.exe manage.py migrate
+./venv/bin/python manage.py migrate
 
-Verify:
+Verify migration state:
 
-.\venv\Scripts\python.exe manage.py check
+./venv/bin/python manage.py makemigrations --check --dry-run
 
-## 3. Redis
+## 4. Static Files
 
-Configured through:
+Before the release gate:
 
-REDIS_URL=redis://127.0.0.1:6379/0
+./venv/bin/python manage.py collectstatic --noinput
 
-## 4. Backend API
+`STATIC_ROOT` must contain collected files.
 
-Terminal 1:
+## 5. Infrastructure Release Gate
 
-.\venv\Scripts\python.exe manage.py runserver
+On the actual pilot application host run:
 
-Development URL:
+./venv/bin/python manage.py validate_pilot_environment
 
-http://127.0.0.1:8000/
+Then run:
 
-## 5. Celery Worker
+./venv/bin/python manage.py verify_pilot_release
 
-Terminal 2:
+The release gate validates the hardened configuration and
+runtime dependencies including:
 
-.\venv\Scripts\celery.exe -A backend worker -l info --pool=solo
+- Django deployment security
+- PostgreSQL
+- Redis
+- migrations
+- static files
+- ASGI wiring
+- Celery broker/result wiring
+- Channels Redis wiring
+- Celery Beat scheduler configuration
 
-Verify:
+Do not expose the pilot to users if either command fails.
 
-.\venv\Scripts\celery.exe -A backend inspect ping
-
-Expected: pong
-
-## 6. Celery Beat
-
-Terminal 3:
-
-.\venv\Scripts\celery.exe -A backend beat -l info
-
-Scheduled responsibilities:
-
-- Communication synchronization every 5 minutes
-- OAuth token refresh every 10 minutes
-- Overdue work scanning hourly
-- Escalation processing hourly
-
-## 7. Frontend
+## 6. Frontend Pilot Build
 
 Frontend directory:
 
-D:\UnifiedMessenger\unified-comm-hub\frontend
+/opt/oneuch/frontend
+
+Start from:
+
+frontend/.env.pilot.example
+
+Replace example hostnames with the actual public HTTPS/WSS
+pilot endpoints before building.
 
 Install dependencies:
 
 npm install
 
-Start development frontend:
-
-npm run dev
-
-Verify production build:
+Verify the production bundle:
 
 npm run build
 
-## 8. Platform Health
+Do not use a frontend bundle containing localhost API or
+WebSocket endpoints for the pilot.
+
+## 7. Platform Health
 
 Authenticated endpoint:
 
 /api/platform/health/
 
-Expected dependencies:
+Expected dependency state:
 
 - database = Healthy
 - redis = Healthy
 
-## 9. End-User Acceptance Journey
+A Degraded health result must be investigated before pilot
+acceptance continues.
 
-A pilot user must be able to:
+## 8. Pilot User Preparation
+
+Create or select the pilot user.
+
+The user must have:
+
+- an active One UCH account
+- membership in an active organization
+
+The user then signs in through the real pilot frontend and
+connects Gmail or Microsoft through the normal OAuth flow.
+
+Do not place OAuth credentials or passwords in shell history,
+scripts or source files.
+
+## 9. Selected Pilot User Release Gate
+
+After OAuth connection and the first mailbox synchronization,
+run:
+
+./venv/bin/python manage.py verify_pilot_user --email <pilot-user-email>
+
+The selected-user gate requires:
+
+- active user
+- active organization membership
+- active Gmail or Outlook account
+- usable Google or Microsoft OAuth authorization
+- at least one successful mailbox synchronization
+
+No OAuth token value or mailbox content is printed by this
+gate.
+
+Do not continue real-user acceptance if this command fails.
+
+## 10. End-User Acceptance Journey
+
+The real pilot user must manually verify:
 
 1. Sign in
 2. Reach the dashboard
 3. Connect Gmail or Microsoft
-4. Complete OAuth
+4. Complete the provider OAuth callback
 5. Synchronize communication
 6. View unified conversations
 7. Open a conversation
@@ -141,7 +185,26 @@ A pilot user must be able to:
 15. Never access another organization's data
 16. Receive understandable errors when something fails
 
-## 10. Pilot Feedback
+Real Google/Microsoft authorization and message delivery must
+be validated manually on the pilot host/account. Automated
+tests must not pretend that mocked provider calls prove the
+external provider journey.
+
+## 11. Operational Observation
+
+During pilot acceptance watch:
+
+- structured One UCH runtime logs
+- platform.health.checked events
+- mailbox synchronization failures
+- OAuth refresh/re-authentication state
+- WebSocket connectivity
+- worker and Beat process health
+
+Never copy raw credentials, OAuth tokens, message bodies or
+other sensitive communication content into issue reports.
+
+## 12. Pilot Feedback
 
 Capture:
 
@@ -158,4 +221,5 @@ Capture:
 - errors encountered
 - expected features users could not find
 
-The goal of the pilot is product validation, not feature completeness.
+For every blocking pilot issue capture the time, affected user,
+provider and correlation/request identifier where available.
