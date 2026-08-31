@@ -36,120 +36,384 @@ MAX_RETRIES = 3
 # ============================================
 
 @shared_task
-def periodic_sync_all_users():
+def sync_email_account(
+    email_account_id,
+):
     """
-    Main scheduler task that syncs Gmail, Outlook and IMAP accounts.
+    Governed single-mailbox synchronization task.
+
+    This is the common runtime path for:
+    - manual Sync mailbox
+    - scheduled mailbox synchronization
+
+    Provider ingestion remains authoritative inside:
+    - fetch_gmail_emails
+    - fetch_outlook_emails
+    - fetch_imap_emails
+
+    The existing account-level distributed sync lock prevents
+    overlapping manual/scheduled execution for the same mailbox.
     """
 
-    accounts = EmailAccount.objects.filter(is_active=True)
+    account = (
+        EmailAccount.objects
+        .select_related(
+            "user"
+        )
+        .filter(
+            id=email_account_id,
+            is_active=True,
+        )
+        .first()
+    )
 
-    for account in accounts:
 
-        lock = acquire_sync_lock(account.id)
-
-        if not lock:
-            log_event(
-                logger,
-                "info",
-                "sync.account.skipped_lock",
-                account_id=account.id,
-                provider=account.account_type,
-            )
-            continue
+    if account is None:
 
         log_event(
             logger,
-            "debug",
-            "sync.account.selected",
-            account_id=account.id,
-            provider=account.account_type,
+            "warning",
+            "sync.account.skipped_missing",
+            account_id=(
+                email_account_id
+            ),
         )
 
-        try:
+        return {
+            "status":
+                "skipped",
 
-            # -----------------------------
-            # GMAIL
-            # -----------------------------
-            if account.account_type == "gmail":
+            "reason":
+                "inactive_or_missing",
+        }
+
+
+    lock = (
+        acquire_sync_lock(
+            account.id
+        )
+    )
+
+
+    if not lock:
+
+        log_event(
+            logger,
+            "info",
+            "sync.account.skipped_lock",
+            account_id=(
+                account.id
+            ),
+            provider=(
+                account.account_type
+            ),
+        )
+
+        return {
+            "status":
+                "skipped",
+
+            "reason":
+                "already_syncing",
+
+            "provider":
+                account.account_type,
+        }
+
+
+    log_event(
+        logger,
+        "debug",
+        "sync.account.selected",
+        account_id=(
+            account.id
+        ),
+        provider=(
+            account.account_type
+        ),
+    )
+
+
+    try:
+
+        # ----------------------------------------------------
+        # GMAIL
+        # ----------------------------------------------------
+
+        if (
+            account.account_type
+            ==
+            "gmail"
+        ):
+
+            log_event(
+                logger,
+                "info",
+                "sync.account.started",
+                account_id=(
+                    account.id
+                ),
+                provider="gmail",
+            )
+
+
+            fetch_gmail_emails(
+                user=account.user,
+                email_account=(
+                    account
+                ),
+            )
+
+
+        # ----------------------------------------------------
+        # MICROSOFT
+        # ----------------------------------------------------
+
+        elif (
+            account.account_type
+            ==
+            "outlook"
+        ):
+
+            log_event(
+                logger,
+                "info",
+                "sync.account.started",
+                account_id=(
+                    account.id
+                ),
+                provider="outlook",
+            )
+
+
+            fetch_outlook_emails(
+                user=account.user,
+                email_account=(
+                    account
+                ),
+            )
+
+
+        # ----------------------------------------------------
+        # IMAP / SMTP
+        # ----------------------------------------------------
+
+        elif (
+            account.account_type
+            ==
+            "imap"
+        ):
+
+            log_event(
+                logger,
+                "info",
+                "sync.account.started",
+                account_id=(
+                    account.id
+                ),
+                provider="imap",
+            )
+
+
+            # Generic IMAP currently uses the existing temporary
+            # SMTP/app-password field for provider authentication.
+            imap_password = (
+                account.smtp_password
+            )
+
+
+            if not imap_password:
 
                 log_event(
                     logger,
-                    "info",
-                    "sync.account.started",
-                    account_id=account.id,
-                    provider="gmail",
-                )
-
-                fetch_gmail_emails(
-                    user=account.user,
-                    email_account=account,
-                )
-
-            # -----------------------------
-            # OUTLOOK
-            # -----------------------------
-            elif account.account_type == "outlook":
-
-                log_event(
-                    logger,
-                    "info",
-                    "sync.account.started",
-                    account_id=account.id,
-                    provider="outlook",
-                )
-
-                fetch_outlook_emails(
-                    user=account.user,
-                    email_account=account,
-                )
-
-            # -----------------------------
-            # IMAP
-            # -----------------------------
-            elif account.account_type == "imap":
-
-                log_event(
-                    logger,
-                    "info",
-                    "sync.account.started",
-                    account_id=account.id,
+                    "warning",
+                    (
+                        "sync.account."
+                        "skipped_missing_credential"
+                    ),
+                    account_id=(
+                        account.id
+                    ),
                     provider="imap",
                 )
 
-                # Generic IMAP / SMTP accounts currently use one
-                # temporary app-password field on EmailAccount.
-                #
-                # SMTP delivery already uses smtp_password, and
-                # there is no imap_password model field. Reuse the
-                # existing credential rather than inventing a second
-                # plaintext secret or referencing a nonexistent field.
-                imap_password = account.smtp_password
 
-                if not imap_password:
-                    continue
+                return {
+                    "status":
+                        "skipped",
 
-                fetch_imap_emails(
-                    user=account.user,
-                    email_account=account,
-                    password=imap_password,
-                )
+                    "reason":
+                        "missing_credential",
 
-            analyze_new_approvals.delay()
+                    "provider":
+                        "imap",
+                }
 
-        except Exception as e:
+
+            fetch_imap_emails(
+                user=account.user,
+                email_account=(
+                    account
+                ),
+                password=(
+                    imap_password
+                ),
+            )
+
+
+        else:
+
+            raise ValueError(
+                "Unsupported email account type."
+            )
+
+
+        analyze_new_approvals.delay()
+
+
+        log_event(
+            logger,
+            "info",
+            "sync.account.completed",
+            account_id=(
+                account.id
+            ),
+            provider=(
+                account.account_type
+            ),
+        )
+
+
+        return {
+            "status":
+                "completed",
+
+            "provider":
+                account.account_type,
+        }
+
+
+    except Exception as exc:
+
+        log_event(
+            logger,
+            "error",
+            "sync.account.failed",
+            account_id=(
+                account.id
+            ),
+            provider=(
+                account.account_type
+            ),
+            error_type=(
+                type(exc).__name__
+            ),
+        )
+
+
+        # A per-mailbox Celery task should be operationally
+        # visible as failed. Provider services already persist
+        # their own sync-health truth where supported.
+        raise
+
+
+    finally:
+
+        release_sync_lock(
+            lock
+        )
+
+
+@shared_task
+def periodic_sync_all_users():
+    """
+    Scheduler fan-out.
+
+    Celery Beat only identifies active mailboxes and queues the
+    governed per-mailbox task. Provider network work executes in
+    Celery workers rather than serially inside the scheduler job.
+    """
+
+    account_ids = list(
+        EmailAccount.objects
+        .filter(
+            is_active=True
+        )
+        .values_list(
+            "id",
+            flat=True,
+        )
+    )
+
+
+    queued_count = 0
+
+    failed_count = 0
+
+
+    for account_id in (
+        account_ids
+    ):
+
+        try:
+
+            sync_email_account.delay(
+                account_id
+            )
+
+            queued_count += 1
+
+
+        except Exception as exc:
+
+            failed_count += 1
+
 
             log_event(
                 logger,
                 "error",
-                "sync.account.failed",
-                account_id=account.id,
-                provider=account.account_type,
-                error_type=type(e).__name__,
+                "sync.account.queue_failed",
+                account_id=(
+                    account_id
+                ),
+                error_type=(
+                    type(exc).__name__
+                ),
             )
 
-        finally:
 
-            release_sync_lock(lock)
+    log_event(
+        logger,
+        "info",
+        "sync.scheduler.fanout",
+        account_count=(
+            len(account_ids)
+        ),
+        queued_count=(
+            queued_count
+        ),
+        failed_count=(
+            failed_count
+        ),
+    )
+
+
+    if failed_count:
+
+        raise RuntimeError(
+            "Mailbox scheduler failed to queue "
+            f"{failed_count} account(s)."
+        )
+
+
+    return {
+        "queued":
+            queued_count,
+
+        "failed":
+            failed_count,
+    }
+
 
 # ============================================
 # TASK 2: SEND EMAIL (ASYNC)

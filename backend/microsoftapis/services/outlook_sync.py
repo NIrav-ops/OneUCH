@@ -1,5 +1,19 @@
-from datetime import timedelta
-from email.utils import getaddresses
+from datetime import (
+    timedelta,
+    timezone as datetime_timezone,
+)
+
+from email.utils import (
+    getaddresses,
+)
+
+from html import (
+    unescape,
+)
+
+from html.parser import (
+    HTMLParser,
+)
 
 import requests
 
@@ -18,6 +32,12 @@ from inbox.services.conversation_cache import (
 
 from inbox.services.sync_status import (
     update_sync_status,
+)
+
+from inbox.services.mail_sync_policy import (
+    OUTLOOK_PAGE_SIZE,
+    mark_initial_history_complete,
+    resolve_mail_sync_window,
 )
 
 from knowledge.services.message_processor import (
@@ -55,41 +75,212 @@ OUTLOOK_FOLDER_CONFIG = (
 )
 
 
-def _email_address(value):
-    return (
+def _graph_identity(
+    value,
+):
+    email_data = (
         (value or {})
         .get(
             "emailAddress",
             {},
         )
-        .get(
-            "address",
-            "",
-        )
-        or ""
+        or {}
     )
 
 
-def _graph_recipients(message):
-    addresses = []
+    address = (
+        str(
+            email_data.get(
+                "address",
+                "",
+            )
+            or ""
+        )
+        .strip()
+        .lower()
+    )
 
-    for recipient in (
+
+    if not address:
+        return {}
+
+
+    return {
+        "name":
+            str(
+                email_data.get(
+                    "name",
+                    "",
+                )
+                or ""
+            ).strip(),
+
+        "email":
+            address,
+    }
+
+
+def _email_address(
+    value,
+):
+    return (
+        _graph_identity(
+            value
+        ).get(
+            "email",
+            ""
+        )
+    )
+
+
+def _graph_identity_list(
+    message,
+    field,
+):
+    identities = []
+
+    seen = set()
+
+
+    for value in (
         message.get(
-            "toRecipients",
+            field,
             [],
         )
         or []
     ):
-        address = _email_address(
-            recipient
+
+        identity = (
+            _graph_identity(
+                value
+            )
         )
 
-        if address:
-            addresses.append(
-                address
+
+        email_value = (
+            identity.get(
+                "email"
+            )
+        )
+
+
+        if (
+            not email_value
+            or
+            email_value in seen
+        ):
+            continue
+
+
+        seen.add(
+            email_value
+        )
+
+        identities.append(
+            identity
+        )
+
+
+    return identities
+
+
+def _graph_recipient_meta(
+    message,
+):
+    return {
+        "to":
+            _graph_identity_list(
+                message,
+                "toRecipients",
+            ),
+
+        "cc":
+            _graph_identity_list(
+                message,
+                "ccRecipients",
+            ),
+
+        "bcc":
+            _graph_identity_list(
+                message,
+                "bccRecipients",
+            ),
+
+        "reply_to":
+            _graph_identity_list(
+                message,
+                "replyTo",
+            ),
+    }
+
+
+def _graph_recipients(
+    message,
+):
+    return [
+        item["email"]
+        for item in (
+            _graph_recipient_meta(
+                message
+            )["to"]
+        )
+    ]
+
+
+def _flatten_recipient_emails(
+    recipient_meta,
+):
+    values = []
+
+    seen = set()
+
+
+    for key in (
+        "to",
+        "cc",
+        "bcc",
+    ):
+
+        for item in (
+            recipient_meta.get(
+                key,
+                [],
+            )
+            or []
+        ):
+
+            email_value = (
+                str(
+                    item.get(
+                        "email",
+                        "",
+                    )
+                )
+                .strip()
+                .lower()
             )
 
-    return addresses
+
+            if (
+                not email_value
+                or
+                email_value in seen
+            ):
+                continue
+
+
+            seen.add(
+                email_value
+            )
+
+            values.append(
+                email_value
+            )
+
+
+    return ", ".join(
+        values
+    )
 
 
 def _normalized_recipients(value):
@@ -107,6 +298,135 @@ def _normalized_recipients(value):
         )
         if address
     }
+
+
+class _HTMLTextExtractor(
+    HTMLParser
+):
+
+    def __init__(
+        self,
+    ):
+        super().__init__()
+
+        self.parts = []
+
+
+    def handle_data(
+        self,
+        data,
+    ):
+        value = str(
+            data or ""
+        ).strip()
+
+        if value:
+            self.parts.append(
+                value
+            )
+
+
+    def text(
+        self,
+    ):
+        return "\n".join(
+            self.parts
+        ).strip()
+
+
+def _html_to_text(
+    value,
+):
+    parser = (
+        _HTMLTextExtractor()
+    )
+
+
+    try:
+
+        parser.feed(
+            str(
+                value or ""
+            )
+        )
+
+        parser.close()
+
+
+        return unescape(
+            parser.text()
+        )
+
+    except Exception:
+
+        return unescape(
+            str(
+                value or ""
+            )
+        )
+
+
+def _graph_body_text(
+    message,
+):
+    body = (
+        message.get(
+            "body",
+            {},
+        )
+        or {}
+    )
+
+
+    content = str(
+        body.get(
+            "content",
+            "",
+        )
+        or ""
+    )
+
+
+    content_type = (
+        str(
+            body.get(
+                "contentType",
+                "text",
+            )
+            or "text"
+        )
+        .strip()
+        .lower()
+    )
+
+
+    if content:
+
+        if content_type == "html":
+
+            return (
+                _html_to_text(
+                    content
+                )
+                .strip()
+            )
+
+
+        return content.strip()
+
+
+    # Provider fallback only when Graph supplied no usable
+    # full body. bodyPreview is never preferred over body.
+    return (
+        str(
+            message.get(
+                "bodyPreview",
+                "",
+            )
+            or ""
+        )
+        .strip()
+    )
 
 
 def _extract_attachments(message):
@@ -199,70 +519,219 @@ def _message_timestamp(
     return parsed
 
 
+def _graph_cutoff_value(
+    cutoff,
+):
+    if (
+        cutoff.tzinfo
+        is None
+    ):
+        aware = cutoff.replace(
+            tzinfo=(
+                datetime_timezone.utc
+            )
+        )
+
+    else:
+
+        aware = cutoff.astimezone(
+            datetime_timezone.utc
+        )
+
+
+    return (
+        aware
+        .isoformat(
+            timespec="seconds"
+        )
+        .replace(
+            "+00:00",
+            "Z",
+        )
+    )
+
+
 def _fetch_folder(
     *,
     access_token,
-    graph_folder,
-    limit,
+    config,
+    cutoff,
 ):
-    response = requests.get(
-        (
-            "https://graph.microsoft.com/"
-            "v1.0/me/mailFolders/"
-            f"{graph_folder}/messages"
-        ),
-        headers={
-            "Authorization":
-                f"Bearer {access_token}"
-        },
-        params={
-            "$top":
-                limit,
+    graph_folder = (
+        config[
+            "graph_folder"
+        ]
+    )
 
-            "$select": (
-                "id,"
-                "subject,"
-                "bodyPreview,"
-                "conversationId,"
-                "isRead,"
-                "from,"
-                "toRecipients,"
-                "receivedDateTime,"
-                "sentDateTime,"
-                "hasAttachments"
+    timestamp_field = (
+        config[
+            "timestamp_field"
+        ]
+    )
+
+
+    base_url = (
+        "https://graph.microsoft.com/"
+        "v1.0/me/mailFolders/"
+        f"{graph_folder}/messages"
+    )
+
+
+    headers = {
+        "Authorization":
+            f"Bearer {access_token}",
+
+        # Ask Graph to materialize message.body as text.
+        # _graph_body_text remains defensive if HTML is
+        # returned despite the preference.
+        "Prefer":
+            'outlook.body-content-type="text"',
+    }
+
+
+    params = {
+        "$top":
+            OUTLOOK_PAGE_SIZE,
+
+        "$filter":
+            (
+                f"{timestamp_field} ge "
+                f"{_graph_cutoff_value(cutoff)}"
             ),
 
-            "$expand":
-                "attachments",
-        },
-    )
+        "$select": (
+            "id,"
+            "subject,"
+            "body,"
+            "bodyPreview,"
+            "conversationId,"
+            "isRead,"
+            "from,"
+            "toRecipients,"
+            "ccRecipients,"
+            "bccRecipients,"
+            "replyTo,"
+            "receivedDateTime,"
+            "sentDateTime,"
+            "hasAttachments,"
+            "flag"
+        ),
 
-    log_event(
-        logger,
-        "info",
-        "outlook.graph.response",
-        provider="outlook",
-        folder=graph_folder,
-        status_code=response.status_code,
-    )
+        "$expand":
+            "attachments",
+    }
 
-    if response.status_code != 200:
-        raise RuntimeError(
-            "Microsoft Graph Outlook sync "
-            f"failed for {graph_folder} "
-            f"with status "
-            f"{response.status_code}: "
-            f"{response.text[:500]}"
+
+    messages = []
+
+    next_url = None
+
+    seen_next_links = set()
+
+    page_index = 0
+
+
+    while True:
+
+        page_index += 1
+
+
+        if next_url:
+
+            response = requests.get(
+                next_url,
+                headers=headers,
+            )
+
+        else:
+
+            response = requests.get(
+                base_url,
+                headers=headers,
+                params=params,
+            )
+
+
+        log_event(
+            logger,
+            "info",
+            "outlook.graph.response",
+            provider="outlook",
+            folder=graph_folder,
+            page=page_index,
+            status_code=(
+                response.status_code
+            ),
         )
 
-    return (
-        response.json()
-        .get(
-            "value",
-            [],
-        )
-    )
 
+        if response.status_code != 200:
+
+            raise RuntimeError(
+                "Microsoft Graph Outlook sync "
+                f"failed for {graph_folder} "
+                "with status "
+                f"{response.status_code}."
+            )
+
+
+        payload = response.json()
+
+
+        if not isinstance(
+            payload,
+            dict,
+        ):
+
+            raise RuntimeError(
+                "Microsoft Graph Outlook sync "
+                f"returned an invalid {graph_folder} "
+                "response."
+            )
+
+
+        page_messages = (
+            payload.get(
+                "value",
+                [],
+            )
+            or []
+        )
+
+
+        messages.extend(
+            page_messages
+        )
+
+
+        candidate = (
+            payload.get(
+                "@odata.nextLink"
+            )
+        )
+
+
+        if not candidate:
+            break
+
+
+        if candidate in seen_next_links:
+
+            raise RuntimeError(
+                "Microsoft Graph Outlook sync "
+                f"repeated a pagination link for "
+                f"{graph_folder}."
+            )
+
+
+        seen_next_links.add(
+            candidate
+        )
+
+        next_url = candidate
+
+
+    return messages
 
 def _find_local_outbound_candidate(
     *,
@@ -524,8 +993,13 @@ def fetch_outlook_emails(
     *,
     user,
     email_account,
-    limit=20,
+    limit=None,
 ):
+    # `limit` remains accepted so older callers do not break.
+    # P1B intentionally traverses the complete bounded window.
+    del limit
+
+
     update_sync_status(
         user=user,
         platform="outlook",
@@ -534,33 +1008,64 @@ def fetch_outlook_emails(
         error_message="",
     )
 
+
+    window = (
+        resolve_mail_sync_window(
+            email_account=(
+                email_account
+            )
+        )
+    )
+
+
+    latest_message = None
+
+    processed_count = 0
+
+    created_count = 0
+
+    upgraded_count = 0
+
+    skipped_count = 0
+
+    reconciled_count = 0
+
+    failed_count = 0
+
+
     try:
+
         access_token = (
             get_microsoft_access_token(
                 user
             )
         )
 
-        # Fetch both provider folders before persisting either.
-        # If provider completeness cannot be established, the
-        # sync is reported as failed rather than silently
-        # claiming a complete Outlook view.
+
+        # Fetch every required provider page first.
+        #
+        # If Inbox/Sent provider completeness cannot be
+        # established, no folder is persisted and the run
+        # cannot falsely claim a complete mailbox.
         folder_batches = []
+
 
         for config in (
             OUTLOOK_FOLDER_CONFIG
         ):
-            messages = _fetch_folder(
-                access_token=(
-                    access_token
-                ),
-                graph_folder=(
-                    config[
-                        "graph_folder"
-                    ]
-                ),
-                limit=limit,
+
+            messages = (
+                _fetch_folder(
+                    access_token=(
+                        access_token
+                    ),
+                    config=config,
+                    cutoff=(
+                        window.cutoff
+                    ),
+                )
             )
+
 
             folder_batches.append(
                 (
@@ -569,400 +1074,808 @@ def fetch_outlook_emails(
                 )
             )
 
+
+        organization = (
+            user
+            .organization_membership
+            .organization
+        )
+
+
+        for (
+            config,
+            messages,
+        ) in folder_batches:
+
+            log_event(
+                logger,
+                "info",
+                "outlook.folder.batch",
+                provider="outlook",
+                folder=(
+                    config[
+                        "graph_folder"
+                    ]
+                ),
+                message_count=(
+                    len(messages)
+                ),
+            )
+
+
+            for graph_message in messages:
+
+                try:
+
+                    external_id = (
+                        graph_message.get(
+                            "id"
+                        )
+                    )
+
+
+                    thread_id = (
+                        graph_message.get(
+                            "conversationId"
+                        )
+                    )
+
+
+                    if (
+                        not external_id
+                        or
+                        not thread_id
+                    ):
+
+                        raise RuntimeError(
+                            "Microsoft Graph message "
+                            "is missing id or "
+                            "conversationId."
+                        )
+
+
+                    direction = (
+                        config[
+                            "direction"
+                        ]
+                    )
+
+
+                    received_at = (
+                        _message_timestamp(
+                            graph_message,
+                            direction=(
+                                direction
+                            ),
+                        )
+                    )
+
+
+                    # Defence in depth: Graph receives an OData
+                    # cutoff filter, but One UCH independently
+                    # enforces the same boundary.
+                    if (
+                        received_at
+                        <
+                        window.cutoff
+                    ):
+
+                        continue
+
+
+                    processed_count += 1
+
+
+                    existing = (
+                        InboxMessage.objects
+                        .filter(
+                            user=user,
+                            external_message_id=(
+                                external_id
+                            ),
+                            email_account=(
+                                email_account
+                            ),
+                        )
+                        .first()
+                    )
+
+
+                    if (
+                        existing
+                        and
+                        not window.initial_history
+                    ):
+
+                        skipped_count += 1
+
+                        continue
+
+
+                    subject = (
+                        graph_message.get(
+                            "subject"
+                        )
+                        or "No Subject"
+                    )
+
+
+                    body_text = (
+                        _graph_body_text(
+                            graph_message
+                        )
+                    )
+
+
+                    sender_meta = (
+                        _graph_identity(
+                            graph_message.get(
+                                "from"
+                            )
+                        )
+                    )
+
+
+                    recipient_meta = (
+                        _graph_recipient_meta(
+                            graph_message
+                        )
+                    )
+
+
+                    to_addresses = [
+                        item["email"]
+                        for item in (
+                            recipient_meta[
+                                "to"
+                            ]
+                        )
+                    ]
+
+
+                    sender = (
+                        sender_meta.get(
+                            "email",
+                            "",
+                        )
+                    )
+
+
+                    if (
+                        direction
+                        ==
+                        "outbound"
+                        and
+                        not sender
+                    ):
+
+                        sender = (
+                            email_account
+                            .email_address
+                            .strip()
+                            .lower()
+                        )
+
+
+                        sender_meta = {
+                            "name":
+                                "",
+
+                            "email":
+                                sender,
+                        }
+
+
+                    recipients = (
+                        _flatten_recipient_emails(
+                            recipient_meta
+                        )
+                    )
+
+
+                    if (
+                        direction
+                        ==
+                        "inbound"
+                        and
+                        not recipients
+                    ):
+
+                        account_email = (
+                            email_account
+                            .email_address
+                            .strip()
+                            .lower()
+                        )
+
+
+                        recipient_meta[
+                            "to"
+                        ] = [
+                            {
+                                "name":
+                                    "",
+
+                                "email":
+                                    account_email,
+                            }
+                        ]
+
+
+                        recipients = (
+                            account_email
+                        )
+
+
+                    local_candidate = None
+
+
+                    if (
+                        direction
+                        ==
+                        "outbound"
+                    ):
+
+                        local_candidate = (
+                            _find_local_outbound_candidate(
+                                user=user,
+                                email_account=(
+                                    email_account
+                                ),
+                                subject=subject,
+                                recipients=(
+                                    to_addresses
+                                ),
+                                body_preview=(
+                                    body_text
+                                ),
+                                sent_at=(
+                                    received_at
+                                ),
+                            )
+                        )
+
+
+                    conversation = (
+                        _resolve_conversation(
+                            user=user,
+                            organization=(
+                                organization
+                            ),
+                            email_account=(
+                                email_account
+                            ),
+                            thread_id=(
+                                thread_id
+                            ),
+                            subject=subject,
+                            local_message=(
+                                existing
+                                or
+                                local_candidate
+                            ),
+                        )
+                    )
+
+
+                    if (
+                        conversation
+                        .email_account_id
+                        is None
+                    ):
+
+                        conversation.email_account = (
+                            email_account
+                        )
+
+                        conversation.save(
+                            update_fields=[
+                                "email_account",
+                            ]
+                        )
+
+
+                    attachments = (
+                        _extract_attachments(
+                            graph_message
+                        )
+                    )
+
+
+                    is_starred = (
+                        (
+                            graph_message.get(
+                                "flag",
+                                {},
+                            )
+                            or {}
+                        ).get(
+                            "flagStatus"
+                        )
+                        ==
+                        "flagged"
+                    )
+
+
+                    if existing:
+
+                        message_obj = (
+                            existing
+                        )
+
+
+                        message_obj.organization = (
+                            organization
+                        )
+
+                        message_obj.email_account = (
+                            email_account
+                        )
+
+                        message_obj.conversation = (
+                            conversation
+                        )
+
+                        message_obj.platform = (
+                            "outlook"
+                        )
+
+                        message_obj.folder = (
+                            config[
+                                "local_folder"
+                            ]
+                        )
+
+                        message_obj.external_conversation_id = (
+                            thread_id
+                        )
+
+                        message_obj.sender = (
+                            sender
+                        )
+
+                        message_obj.recipients = (
+                            recipients
+                        )
+
+                        message_obj.sender_meta = (
+                            sender_meta
+                        )
+
+                        message_obj.recipient_meta = (
+                            recipient_meta
+                        )
+
+                        message_obj.subject = (
+                            subject
+                        )
+
+                        message_obj.body = (
+                            body_text
+                        )
+
+                        message_obj.attachment_meta = (
+                            attachments
+                        )
+
+                        message_obj.received_at = (
+                            received_at
+                        )
+
+                        message_obj.is_read = (
+                            graph_message.get(
+                                "isRead",
+                                (
+                                    direction
+                                    ==
+                                    "outbound"
+                                ),
+                            )
+                        )
+
+                        message_obj.is_starred = (
+                            is_starred
+                        )
+
+                        message_obj.direction = (
+                            direction
+                        )
+
+                        message_obj.is_draft = (
+                            False
+                        )
+
+
+                        if (
+                            direction
+                            ==
+                            "outbound"
+                        ):
+
+                            message_obj.status = (
+                                "sent"
+                            )
+
+
+                        message_obj.save(
+                            update_fields=[
+                                "organization",
+                                "email_account",
+                                "conversation",
+                                "platform",
+                                "folder",
+                                "external_conversation_id",
+                                "sender",
+                                "recipients",
+                                "sender_meta",
+                                "recipient_meta",
+                                "subject",
+                                "body",
+                                "attachment_meta",
+                                "received_at",
+                                "is_read",
+                                "is_starred",
+                                "direction",
+                                "is_draft",
+                                "status",
+                            ]
+                        )
+
+
+                        upgraded_count += 1
+
+
+                        log_event(
+                            logger,
+                            "info",
+                            (
+                                "outlook.message."
+                                "upgraded_legacy"
+                            ),
+                            provider="outlook",
+                            account_id=(
+                                email_account.id
+                            ),
+                            message_id=(
+                                message_obj.id
+                            ),
+                        )
+
+
+                    elif local_candidate:
+
+                        message_obj = (
+                            local_candidate
+                        )
+
+
+                        message_obj.conversation = (
+                            conversation
+                        )
+
+                        message_obj.external_message_id = (
+                            external_id
+                        )
+
+                        message_obj.external_conversation_id = (
+                            thread_id
+                        )
+
+                        message_obj.folder = (
+                            config[
+                                "local_folder"
+                            ]
+                        )
+
+                        message_obj.sender = (
+                            sender
+                        )
+
+                        message_obj.recipients = (
+                            recipients
+                        )
+
+                        message_obj.sender_meta = (
+                            sender_meta
+                        )
+
+                        message_obj.recipient_meta = (
+                            recipient_meta
+                        )
+
+                        message_obj.subject = (
+                            subject
+                        )
+
+
+                        # Keep the full local body created by
+                        # One UCH when available. Otherwise use
+                        # the provider's complete Graph body.
+                        if not message_obj.body:
+
+                            message_obj.body = (
+                                body_text
+                            )
+
+
+                        message_obj.received_at = (
+                            received_at
+                        )
+
+                        message_obj.is_read = True
+
+                        message_obj.is_starred = (
+                            is_starred
+                        )
+
+                        message_obj.direction = (
+                            "outbound"
+                        )
+
+                        message_obj.is_draft = False
+
+                        message_obj.status = (
+                            "sent"
+                        )
+
+
+                        if attachments:
+
+                            message_obj.attachment_meta = (
+                                attachments
+                            )
+
+
+                        message_obj.save(
+                            update_fields=[
+                                "conversation",
+                                "external_message_id",
+                                "external_conversation_id",
+                                "folder",
+                                "sender",
+                                "recipients",
+                                "sender_meta",
+                                "recipient_meta",
+                                "subject",
+                                "body",
+                                "received_at",
+                                "is_read",
+                                "is_starred",
+                                "direction",
+                                "is_draft",
+                                "status",
+                                "attachment_meta",
+                            ]
+                        )
+
+
+                        reconciled_count += 1
+
+
+                    else:
+
+                        message_obj = (
+                            InboxMessage.objects.create(
+                                user=user,
+                                organization=(
+                                    organization
+                                ),
+                                conversation=(
+                                    conversation
+                                ),
+                                platform="outlook",
+                                folder=(
+                                    config[
+                                        "local_folder"
+                                    ]
+                                ),
+                                external_message_id=(
+                                    external_id
+                                ),
+                                external_conversation_id=(
+                                    thread_id
+                                ),
+                                sender=(
+                                    sender
+                                ),
+                                recipients=(
+                                    recipients
+                                ),
+                                sender_meta=(
+                                    sender_meta
+                                ),
+                                recipient_meta=(
+                                    recipient_meta
+                                ),
+                                subject=(
+                                    subject
+                                ),
+                                attachment_meta=(
+                                    attachments
+                                ),
+                                body=(
+                                    body_text
+                                ),
+                                received_at=(
+                                    received_at
+                                ),
+                                is_read=(
+                                    graph_message.get(
+                                        "isRead",
+                                        (
+                                            direction
+                                            ==
+                                            "outbound"
+                                        ),
+                                    )
+                                ),
+                                is_starred=(
+                                    is_starred
+                                ),
+                                direction=(
+                                    direction
+                                ),
+                                is_draft=False,
+                                email_account=(
+                                    email_account
+                                ),
+                            )
+                        )
+
+
+                        created_count += 1
+
+
+                    try:
+
+                        processor = (
+                            MessageProcessor()
+                        )
+
+
+                        processor.process_message(
+                            organization=(
+                                organization
+                            ),
+                            message=(
+                                message_obj
+                            ),
+                            sender=(
+                                message_obj
+                                .sender
+                            ),
+                            subject=(
+                                message_obj
+                                .subject
+                            ),
+                            body=(
+                                message_obj
+                                .body
+                            ),
+                            source_channel=(
+                                "outlook"
+                            ),
+                        )
+
+
+                    except Exception as exc:
+
+                        log_event(
+                            logger,
+                            "warning",
+                            "outlook.knowledge.failed",
+                            provider="outlook",
+                            message_id=(
+                                message_obj.id
+                            ),
+                            error_type=(
+                                type(exc).__name__
+                            ),
+                        )
+
+
+                    _update_conversation_if_newer(
+                        conversation=(
+                            conversation
+                        ),
+                        message=(
+                            message_obj
+                        ),
+                    )
+
+
+                    invalidate_conversation_cache(
+                        user.id
+                    )
+
+
+                    if (
+                        latest_message
+                        is None
+                        or
+                        message_obj.received_at
+                        >
+                        latest_message.received_at
+                    ):
+
+                        latest_message = (
+                            message_obj
+                        )
+
+
+                except Exception as exc:
+
+                    failed_count += 1
+
+
+                    log_event(
+                        logger,
+                        "warning",
+                        "outlook.message.failed",
+                        provider="outlook",
+                        folder=(
+                            config[
+                                "graph_folder"
+                            ]
+                        ),
+                        failed_message_count=(
+                            failed_count
+                        ),
+                        error_type=(
+                            type(exc).__name__
+                        ),
+                    )
+
+
+                    continue
+
+
+        if failed_count:
+
+            raise RuntimeError(
+                "Outlook partial sync failure: "
+                f"{failed_count} message(s) failed."
+            )
+
+
+        if window.initial_history:
+
+            mark_initial_history_complete(
+                email_account=(
+                    email_account
+                )
+            )
+
+
     except Exception as exc:
+
         update_sync_status(
             user=user,
             platform="outlook",
             status="failed",
             progress=0,
-            error_message=str(exc),
+            error_message=(
+                str(exc)
+            ),
         )
 
-        raise
-
-    organization = (
-        user
-        .organization_membership
-        .organization
-    )
-
-    latest_message = None
-
-    for (
-        config,
-        messages,
-    ) in folder_batches:
 
         log_event(
             logger,
-            "info",
-            "outlook.folder.batch",
+            "error",
+            "outlook.sync.failed",
             provider="outlook",
-            folder=config['graph_folder'],
-            message_count=len(messages),
+            account_id=(
+                email_account.id
+            ),
+            error_type=(
+                type(exc).__name__
+            ),
         )
 
-        for graph_message in messages:
 
-            external_id = (
-                graph_message.get(
-                    "id"
-                )
-            )
+        raise
 
-            thread_id = (
-                graph_message.get(
-                    "conversationId"
-                )
-            )
-
-            if (
-                not external_id
-                or not thread_id
-            ):
-                raise RuntimeError(
-                    "Microsoft Graph message "
-                    "is missing id or "
-                    "conversationId."
-                )
-
-            # Provider-id idempotency.
-            existing = (
-                InboxMessage.objects
-                .filter(
-                    external_message_id=(
-                        external_id
-                    ),
-                    email_account=(
-                        email_account
-                    ),
-                )
-                .first()
-            )
-
-            if existing:
-                continue
-
-            direction = (
-                config[
-                    "direction"
-                ]
-            )
-
-            subject = (
-                graph_message.get(
-                    "subject"
-                )
-                or "No Subject"
-            )
-
-            body_preview = (
-                graph_message.get(
-                    "bodyPreview",
-                    "",
-                )
-                or ""
-            )
-
-            received_at = (
-                _message_timestamp(
-                    graph_message,
-                    direction=direction,
-                )
-            )
-
-            recipient_addresses = (
-                _graph_recipients(
-                    graph_message
-                )
-            )
-
-            recipients = ", ".join(
-                recipient_addresses
-            )
-
-            sender = _email_address(
-                graph_message.get(
-                    "from"
-                )
-            )
-
-            if direction == "outbound":
-                sender = (
-                    sender
-                    or
-                    email_account.email_address
-                )
-
-            elif not recipients:
-                recipients = (
-                    email_account.email_address
-                )
-
-            local_candidate = None
-
-            if direction == "outbound":
-                local_candidate = (
-                    _find_local_outbound_candidate(
-                        user=user,
-                        email_account=(
-                            email_account
-                        ),
-                        subject=subject,
-                        recipients=(
-                            recipient_addresses
-                        ),
-                        body_preview=(
-                            body_preview
-                        ),
-                        sent_at=(
-                            received_at
-                        ),
-                    )
-                )
-
-            conversation = (
-                _resolve_conversation(
-                    user=user,
-                    organization=(
-                        organization
-                    ),
-                    email_account=(
-                        email_account
-                    ),
-                    thread_id=(
-                        thread_id
-                    ),
-                    subject=subject,
-                    local_message=(
-                        local_candidate
-                    ),
-                )
-            )
-
-            # Repair legacy/provider conversation account link.
-            if (
-                conversation.email_account_id
-                is None
-            ):
-                conversation.email_account = (
-                    email_account
-                )
-
-                conversation.save(
-                    update_fields=[
-                        "email_account",
-                    ]
-                )
-
-            attachments = (
-                _extract_attachments(
-                    graph_message
-                )
-            )
-
-            if local_candidate:
-                message_obj = (
-                    local_candidate
-                )
-
-                message_obj.conversation = (
-                    conversation
-                )
-
-                message_obj.external_message_id = (
-                    external_id
-                )
-
-                message_obj.external_conversation_id = (
-                    thread_id
-                )
-
-                message_obj.folder = (
-                    config[
-                        "local_folder"
-                    ]
-                )
-
-                message_obj.sender = (
-                    sender
-                )
-
-                message_obj.recipients = (
-                    recipients
-                )
-
-                message_obj.subject = (
-                    subject
-                )
-
-                # Preserve the full body that One UCH already
-                # stored. Graph bodyPreview is only a preview.
-                if not message_obj.body:
-                    message_obj.body = (
-                        body_preview
-                    )
-
-                message_obj.received_at = (
-                    received_at
-                )
-
-                message_obj.is_read = True
-
-                message_obj.direction = (
-                    "outbound"
-                )
-
-                message_obj.is_draft = (
-                    False
-                )
-
-                message_obj.status = (
-                    "sent"
-                )
-
-                if attachments:
-                    message_obj.attachment_meta = (
-                        attachments
-                    )
-
-                message_obj.save(
-                    update_fields=[
-                        "conversation",
-                        "external_message_id",
-                        "external_conversation_id",
-                        "folder",
-                        "sender",
-                        "recipients",
-                        "subject",
-                        "body",
-                        "received_at",
-                        "is_read",
-                        "direction",
-                        "is_draft",
-                        "status",
-                        "attachment_meta",
-                    ]
-                )
-
-            else:
-                message_obj = (
-                    InboxMessage.objects.create(
-                        user=user,
-                        organization=(
-                            organization
-                        ),
-                        conversation=(
-                            conversation
-                        ),
-                        platform="outlook",
-                        folder=(
-                            config[
-                                "local_folder"
-                            ]
-                        ),
-                        external_message_id=(
-                            external_id
-                        ),
-                        external_conversation_id=(
-                            thread_id
-                        ),
-                        sender=(
-                            sender
-                        ),
-                        recipients=(
-                            recipients
-                        ),
-                        subject=(
-                            subject
-                        ),
-                        attachment_meta=(
-                            attachments
-                        ),
-                        body=(
-                            body_preview
-                        ),
-                        received_at=(
-                            received_at
-                        ),
-                        is_read=(
-                            graph_message.get(
-                                "isRead",
-                                direction
-                                ==
-                                "outbound",
-                            )
-                        ),
-                        is_starred=False,
-                        direction=(
-                            direction
-                        ),
-                        is_draft=False,
-                        email_account=(
-                            email_account
-                        ),
-                    )
-                )
-
-            try:
-                processor = (
-                    MessageProcessor()
-                )
-
-                processor.process_message(
-                    organization=(
-                        organization
-                    ),
-                    message=(
-                        message_obj
-                    ),
-                    sender=(
-                        message_obj.sender
-                    ),
-                    subject=(
-                        message_obj.subject
-                    ),
-                    body=(
-                        message_obj.body
-                    ),
-                    source_channel=(
-                        "outlook"
-                    ),
-                )
-
-            except Exception as exc:
-                log_event(
-                    logger,
-                    "warning",
-                    "outlook.knowledge.failed",
-                    provider="outlook",
-                    message_id=message_obj.id,
-                    error_type=type(exc).__name__,
-                )
-
-            _update_conversation_if_newer(
-                conversation=(
-                    conversation
-                ),
-                message=(
-                    message_obj
-                ),
-            )
-
-            invalidate_conversation_cache(
-                user.id
-            )
-
-            if (
-                latest_message is None
-                or
-                message_obj.received_at
-                >
-                latest_message.received_at
-            ):
-                latest_message = (
-                    message_obj
-                )
 
     update_sync_status(
         user=user,
@@ -972,10 +1885,20 @@ def fetch_outlook_emails(
         error_message="",
     )
 
-    if latest_message:
+
+    # Historical backfill can contain thousands of messages.
+    # Do not flood the connected browser with one provider
+    # notification per historical import.
+    if (
+        latest_message
+        and
+        not window.initial_history
+    ):
+
         channel_layer = (
             get_channel_layer()
         )
+
 
         async_to_sync(
             channel_layer.group_send
@@ -1020,10 +1943,57 @@ def fetch_outlook_emails(
             },
         )
 
+
     log_event(
         logger,
         "info",
         "outlook.sync.completed",
         provider="outlook",
-        folder_count=len(folder_batches),
+        account_id=(
+            email_account.id
+        ),
+        folder_count=(
+            len(
+                OUTLOOK_FOLDER_CONFIG
+            )
+        ),
+        processed_count=(
+            processed_count
+        ),
+        created_count=(
+            created_count
+        ),
+        upgraded_count=(
+            upgraded_count
+        ),
+        skipped_count=(
+            skipped_count
+        ),
+        reconciled_count=(
+            reconciled_count
+        ),
     )
+
+
+    return {
+        "initial_history":
+            window.initial_history,
+
+        "processed":
+            processed_count,
+
+        "created":
+            created_count,
+
+        "upgraded":
+            upgraded_count,
+
+        "skipped":
+            skipped_count,
+
+        "reconciled":
+            reconciled_count,
+
+        "failed":
+            failed_count,
+    }

@@ -16,7 +16,7 @@ from email_accounts.models import (
 )
 
 from inbox.tasks import (
-    periodic_sync_all_users,
+    sync_email_account,
 )
 
 
@@ -89,7 +89,7 @@ class PeriodicIMAPSyncTests(
             lock
         )
 
-        periodic_sync_all_users.run()
+        sync_email_account.run(account.id)
 
         fetch_imap_emails.assert_called_once_with(
             user=self.user,
@@ -127,7 +127,7 @@ class PeriodicIMAPSyncTests(
         analyze_approvals,
         release_sync_lock,
     ):
-        self.create_account(
+        account = self.create_account(
             password=None,
         )
 
@@ -137,7 +137,7 @@ class PeriodicIMAPSyncTests(
             lock
         )
 
-        periodic_sync_all_users.run()
+        sync_email_account.run(account.id)
 
         fetch_imap_emails.assert_not_called()
 

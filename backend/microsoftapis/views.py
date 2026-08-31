@@ -173,67 +173,110 @@ class MicrosoftOAuthCallback(APIView):
 
 
 class OutlookSyncAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+    """
+    Queue the governed Microsoft mailbox synchronization task.
 
-    @transaction.atomic
-    def post(self, request):
-        from email_accounts.models import EmailAccount
-        from microsoftapis.services.outlook_sync import (
-            fetch_outlook_emails,
+    The provider traversal itself runs in Celery so initial
+    historical synchronization cannot hold an HTTP request open.
+    """
+
+    permission_classes = [
+        IsAuthenticated
+    ]
+
+
+    def post(
+        self,
+        request,
+    ):
+
+        from email_accounts.models import (
+            EmailAccount,
         )
-        from inbox.services.sync_status import (
-            update_sync_status,
+
+        from inbox.tasks import (
+            sync_email_account,
         )
 
-        user = request.user
 
-        email_account = EmailAccount.objects.filter(
-            user=user,
-            account_type="outlook",
-            is_active=True,
-        ).first()
+        email_account = (
+            EmailAccount.objects
+            .filter(
+                user=request.user,
+                account_type="outlook",
+                is_active=True,
+            )
+            .order_by(
+                "-id"
+            )
+            .first()
+        )
 
-        if not email_account:
+
+        if email_account is None:
+
             return Response(
                 {
-                    "error": (
-                        "No active Outlook account found"
-                    )
+                    "status":
+                        "no_mailbox",
+
+                    "error":
+                        (
+                            "No active Outlook "
+                            "account found."
+                        ),
                 },
                 status=404,
             )
 
+
         try:
-            fetch_outlook_emails(
-                user=user,
-                email_account=email_account,
+
+            sync_email_account.delay(
+                email_account.id
             )
+
+
+        except Exception:
 
             return Response(
                 {
-                    "status": (
-                        "outlook_sync_complete"
-                    ),
-                    "email_account_id": (
-                        email_account.id
-                    ),
-                }
-            )
+                    "status":
+                        "queue_failed",
 
-        except Exception as exc:
-            update_sync_status(
-                user=user,
-                platform="outlook",
-                status="failed",
-                progress=0,
-                error_message=str(exc),
-            )
+                    "error":
+                        (
+                            "Unable to start Microsoft "
+                            "mailbox synchronization."
+                        ),
 
-            return Response(
-                {
-                    "status": "sync_failed",
-                    "error": str(exc),
+                    "action":
+                        (
+                            "Try again shortly. If the "
+                            "problem continues, contact "
+                            "your One UCH administrator."
+                        ),
                 },
-                status=500,
+                status=503,
             )
 
+
+        return Response(
+            {
+                "status":
+                    "sync_queued",
+
+                "provider":
+                    "outlook",
+
+                "email_account_id":
+                    email_account.id,
+
+                "message":
+                    (
+                        "Microsoft mailbox "
+                        "synchronization started."
+                    ),
+            },
+            status=202,
+        )

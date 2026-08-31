@@ -147,7 +147,38 @@ class InboxMessage(models.Model):
     attachment_meta = models.JSONField(default=list, blank=True)
 
     sender = models.EmailField()
-    recipients = models.TextField(help_text="To / CC recipients")
+
+    # Existing flat recipient storage remains for backwards
+    # compatibility with inbox/search/send code.
+    recipients = models.TextField(
+        help_text="To / CC recipients"
+    )
+
+    # Provider-normalized identity metadata used by recipient
+    # intelligence, Reply All and future autocomplete.
+    #
+    # sender_meta:
+    # {
+    #     "name": "...",
+    #     "email": "..."
+    # }
+    #
+    # recipient_meta:
+    # {
+    #     "to": [...],
+    #     "cc": [...],
+    #     "bcc": [...],
+    #     "reply_to": [...]
+    # }
+    sender_meta = models.JSONField(
+        default=dict,
+        blank=True,
+    )
+
+    recipient_meta = models.JSONField(
+        default=dict,
+        blank=True,
+    )
 
     subject = models.CharField(max_length=500, blank=True)
     body = models.TextField(blank=True)

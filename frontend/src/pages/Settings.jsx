@@ -580,13 +580,12 @@ export default function Settings() {
           API_BASE_URL;
 
         /*
-         * Deliberately do not use the shared Axios response
-         * interceptor here.
+         * Use the explicit fetch/JWT-refresh path for mailbox
+         * synchronization requests.
          *
-         * Gmail's existing sync API may return HTTP 401 for
-         * provider re-authentication failure. That is not the
-         * same thing as an expired One UCH JWT and must not log
-         * the user out of the application.
+         * The endpoint now queues a governed Celery mailbox
+         * task instead of holding this HTTP request open while
+         * a 90-day provider history import runs.
          */
         const performSyncRequest =
           async (token) => {
@@ -686,9 +685,19 @@ export default function Settings() {
           );
         }
 
-        setNotice(
-          `${provider.label} synchronization completed.`
-        );
+        if (
+          response.status === 202 ||
+          payload.status ===
+            "sync_queued"
+        ) {
+          setNotice(
+            `${provider.label} synchronization started. You can continue using One UCH while the mailbox is processed in the background.`
+          );
+        } else {
+          setNotice(
+            `${provider.label} synchronization request completed.`
+          );
+        }
 
         await loadStatus({
           background: true,

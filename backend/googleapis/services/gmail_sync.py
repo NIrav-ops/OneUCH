@@ -1,411 +1,1659 @@
-from googleapiclient.discovery import build
-from datetime import datetime, timezone as dt_timezone
+import base64
 
-from channels.layers import get_channel_layer
-from asgiref.sync import async_to_sync
+from datetime import (
+    datetime,
+    timezone as datetime_timezone,
+)
 
-from inbox.models import Conversation, InboxMessage
-from inbox.utils.conversation_key import generate_conversation_key
-from googleapis.utils import get_gmail_credentials
-from inbox.services.sync_status import update_sync_status
-from inbox.services.conversation_cache import invalidate_conversation_cache
-from knowledge.services.message_processor import MessageProcessor
-from platform_core.observability.logger import get_logger, log_event
+from email.header import (
+    decode_header,
+    make_header,
+)
 
-logger = get_logger("oneuch.runtime.gmail")
+from email.message import (
+    Message,
+)
+
+from email.utils import (
+    getaddresses,
+)
+
+from html import (
+    unescape,
+)
+
+from html.parser import (
+    HTMLParser,
+)
 
 
-def extract_attachments(payload):
+from asgiref.sync import (
+    async_to_sync,
+)
+
+from channels.layers import (
+    get_channel_layer,
+)
+
+from googleapiclient.discovery import (
+    build,
+)
+
+
+from inbox.models import (
+    Conversation,
+    InboxMessage,
+)
+
+from inbox.services.conversation_cache import (
+    invalidate_conversation_cache,
+)
+
+from inbox.services.mail_sync_policy import (
+    GMAIL_PAGE_SIZE,
+    mark_initial_history_complete,
+    resolve_mail_sync_window,
+)
+
+from inbox.services.sync_status import (
+    update_sync_status,
+)
+
+from googleapis.utils import (
+    get_gmail_credentials,
+)
+
+from knowledge.services.message_processor import (
+    MessageProcessor,
+)
+
+from platform_core.observability.logger import (
+    get_logger,
+    log_event,
+)
+
+
+logger = get_logger(
+    "oneuch.runtime.gmail"
+)
+
+
+# ============================================================
+# TEXT / HEADER NORMALIZATION
+# ============================================================
+
+class _HTMLTextExtractor(
+    HTMLParser
+):
+
+    def __init__(
+        self,
+    ):
+        super().__init__()
+
+        self.parts = []
+
+
+    def handle_data(
+        self,
+        data,
+    ):
+        value = str(
+            data or ""
+        ).strip()
+
+        if value:
+            self.parts.append(
+                value
+            )
+
+
+    def text(
+        self,
+    ):
+        return "\n".join(
+            self.parts
+        ).strip()
+
+
+def _decode_header_value(
+    value,
+):
+    source = str(
+        value or ""
+    )
+
+    if not source:
+        return ""
+
+    try:
+        return str(
+            make_header(
+                decode_header(
+                    source
+                )
+            )
+        )
+
+    except Exception:
+        return source
+
+
+def _header_values(
+    headers,
+    name,
+):
+    target = (
+        str(name)
+        .lower()
+    )
+
+    return [
+        _decode_header_value(
+            header.get(
+                "value",
+                "",
+            )
+        )
+        for header in (
+            headers or []
+        )
+        if (
+            str(
+                header.get(
+                    "name",
+                    "",
+                )
+            ).lower()
+            ==
+            target
+        )
+    ]
+
+
+def _first_header(
+    headers,
+    name,
+):
+    values = (
+        _header_values(
+            headers,
+            name,
+        )
+    )
+
+    return (
+        values[0]
+        if values
+        else ""
+    )
+
+
+def _normalize_addresses(
+    values,
+):
+    addresses = []
+
+    seen = set()
+
+
+    for (
+        display_name,
+        email_address,
+    ) in getaddresses(
+        [
+            str(value)
+            for value in (
+                values or []
+            )
+            if value
+        ]
+    ):
+
+        email_value = (
+            str(
+                email_address
+                or ""
+            )
+            .strip()
+            .lower()
+        )
+
+        if (
+            not email_value
+            or
+            email_value in seen
+        ):
+            continue
+
+
+        seen.add(
+            email_value
+        )
+
+
+        addresses.append(
+            {
+                "name":
+                    _decode_header_value(
+                        display_name
+                    ).strip(),
+
+                "email":
+                    email_value,
+            }
+        )
+
+
+    return addresses
+
+
+def _flatten_recipient_emails(
+    recipient_meta,
+):
+    values = []
+
+    seen = set()
+
+
+    for key in (
+        "to",
+        "cc",
+        "bcc",
+    ):
+
+        for item in (
+            recipient_meta.get(
+                key,
+                [],
+            )
+            or []
+        ):
+
+            email_value = (
+                str(
+                    item.get(
+                        "email",
+                        "",
+                    )
+                )
+                .strip()
+                .lower()
+            )
+
+            if (
+                not email_value
+                or
+                email_value in seen
+            ):
+                continue
+
+
+            seen.add(
+                email_value
+            )
+
+            values.append(
+                email_value
+            )
+
+
+    return ", ".join(
+        values
+    )
+
+
+def _message_identities(
+    headers,
+):
+    sender_candidates = (
+        _normalize_addresses(
+            _header_values(
+                headers,
+                "from",
+            )
+        )
+    )
+
+    sender_meta = (
+        sender_candidates[0]
+        if sender_candidates
+        else {}
+    )
+
+
+    recipient_meta = {
+        "to":
+            _normalize_addresses(
+                _header_values(
+                    headers,
+                    "to",
+                )
+            ),
+
+        "cc":
+            _normalize_addresses(
+                _header_values(
+                    headers,
+                    "cc",
+                )
+            ),
+
+        "bcc":
+            _normalize_addresses(
+                _header_values(
+                    headers,
+                    "bcc",
+                )
+            ),
+
+        "reply_to":
+            _normalize_addresses(
+                _header_values(
+                    headers,
+                    "reply-to",
+                )
+            ),
+    }
+
+
+    return (
+        sender_meta,
+        recipient_meta,
+    )
+
+
+# ============================================================
+# GMAIL BODY NORMALIZATION
+# ============================================================
+
+def _content_charset(
+    headers,
+):
+    content_type = (
+        _first_header(
+            headers,
+            "content-type",
+        )
+    )
+
+    if not content_type:
+        return "utf-8"
+
+
+    message = Message()
+
+    message[
+        "content-type"
+    ] = content_type
+
+
+    return (
+        message.get_content_charset()
+        or "utf-8"
+    )
+
+
+def _decode_body_data(
+    data,
+    *,
+    charset="utf-8",
+):
+    if not data:
+        return ""
+
+
+    raw = str(
+        data
+    )
+
+
+    padding = (
+        "="
+        *
+        (
+            (
+                4
+                - len(raw) % 4
+            )
+            % 4
+        )
+    )
+
+
+    try:
+
+        decoded = (
+            base64.urlsafe_b64decode(
+                raw + padding
+            )
+        )
+
+    except Exception:
+
+        return ""
+
+
+    try:
+
+        return decoded.decode(
+            charset
+        )
+
+    except (
+        LookupError,
+        UnicodeDecodeError,
+    ):
+
+        return decoded.decode(
+            "utf-8",
+            errors="replace",
+        )
+
+
+def _iter_payload_parts(
+    payload,
+):
+    yield payload
+
+
+    for child in (
+        payload.get(
+            "parts",
+            [],
+        )
+        or []
+    ):
+
+        yield from (
+            _iter_payload_parts(
+                child
+            )
+        )
+
+
+def _is_attachment_part(
+    part,
+):
+    if (
+        part.get(
+            "filename"
+        )
+    ):
+        return True
+
+
+    disposition = (
+        _first_header(
+            part.get(
+                "headers",
+                [],
+            ),
+            "content-disposition",
+        )
+        .lower()
+    )
+
+
+    return disposition.startswith(
+        "attachment"
+    )
+
+
+def _html_to_text(
+    value,
+):
+    parser = (
+        _HTMLTextExtractor()
+    )
+
+    try:
+
+        parser.feed(
+            str(
+                value or ""
+            )
+        )
+
+        parser.close()
+
+
+        return unescape(
+            parser.text()
+        )
+
+    except Exception:
+
+        return unescape(
+            str(
+                value or ""
+            )
+        )
+
+
+def extract_gmail_body(
+    payload,
+    *,
+    snippet="",
+):
+    plain_parts = []
+
+    html_parts = []
+
+
+    for part in (
+        _iter_payload_parts(
+            payload or {}
+        )
+    ):
+
+        if _is_attachment_part(
+            part
+        ):
+            continue
+
+
+        mime_type = (
+            str(
+                part.get(
+                    "mimeType",
+                    "",
+                )
+            )
+            .lower()
+        )
+
+
+        if mime_type not in {
+            "text/plain",
+            "text/html",
+        }:
+            continue
+
+
+        text = (
+            _decode_body_data(
+                (
+                    part.get(
+                        "body",
+                        {},
+                    )
+                    or {}
+                ).get(
+                    "data"
+                ),
+                charset=(
+                    _content_charset(
+                        part.get(
+                            "headers",
+                            [],
+                        )
+                    )
+                ),
+            )
+        ).strip()
+
+
+        if not text:
+            continue
+
+
+        if mime_type == "text/plain":
+
+            plain_parts.append(
+                text
+            )
+
+        else:
+
+            html_parts.append(
+                text
+            )
+
+
+    if plain_parts:
+
+        return "\n\n".join(
+            plain_parts
+        ).strip()
+
+
+    if html_parts:
+
+        return "\n\n".join(
+            _html_to_text(
+                value
+            )
+            for value in html_parts
+        ).strip()
+
+
+    return str(
+        snippet or ""
+    ).strip()
+
+
+# ============================================================
+# ATTACHMENT METADATA
+# ============================================================
+
+def extract_attachments(
+    payload,
+):
     attachments = []
 
-    def parse_parts(parts):
-        for part in parts:
-            filename = part.get("filename")
-            body = part.get("body", {})
-            mime_type = part.get("mimeType")
 
-            # ✅ REAL attachment
-            if filename and body.get("attachmentId"):
-                attachments.append({
-                    "filename": filename,
-                    "attachment_id": body.get("attachmentId"),
-                    "mime_type": mime_type,
-                })
+    for part in (
+        _iter_payload_parts(
+            payload or {}
+        )
+    ):
 
-            # ✅ INLINE attachment (IMPORTANT EDGE CASE)
-            elif filename and body.get("data"):
-                attachments.append({
-                    "filename": filename,
-                    "attachment_id": None,
-                    "mime_type": mime_type,
-                })
+        filename = (
+            part.get(
+                "filename"
+            )
+        )
 
-            # 🔁 RECURSIVE (VERY IMPORTANT)
-            if part.get("parts"):
-                parse_parts(part["parts"])
+        if not filename:
+            continue
 
-    if payload.get("parts"):
-        parse_parts(payload["parts"])
+
+        body = (
+            part.get(
+                "body",
+                {},
+            )
+            or {}
+        )
+
+
+        if (
+            body.get(
+                "attachmentId"
+            )
+            or
+            body.get(
+                "data"
+            )
+        ):
+
+            attachments.append(
+                {
+                    "filename":
+                        filename,
+
+                    "attachment_id":
+                        body.get(
+                            "attachmentId"
+                        ),
+
+                    "mime_type":
+                        part.get(
+                            "mimeType"
+                        ),
+                }
+            )
+
 
     return attachments
 
 
-def _fetch_gmail_emails_impl(*, user, email_account, limit=20):
+# ============================================================
+# PROVIDER PAGINATION
+# ============================================================
 
-    # Resolve credentials through the governed provider
-    # utility so scheduled execution respects OAuth policy,
-    # including administrator disable and token refresh rules.
-    creds = get_gmail_credentials(
-        user
+def _gmail_query(
+    cutoff,
+):
+    # Gmail's search query uses date granularity here.
+    # Incremental sync deliberately includes a one-day overlap
+    # and provider message IDs enforce idempotency.
+    date_value = (
+        cutoff.strftime(
+            "%Y/%m/%d"
+        )
     )
 
-    service = build("gmail", "v1", credentials=creds)
 
-    # 🔥 USE THREADS API (NOT MESSAGES)
-    results = service.users().threads().list(
-        userId="me",
-        q=f"to:{email_account.email_address} OR from:{email_account.email_address}",
-        maxResults=limit
-    ).execute()
+    return (
+        f"after:{date_value} "
+        "{in:inbox in:sent}"
+    )
 
-    threads = results.get("threads", [])
 
-    organization = user.organization_membership.organization
+def _iter_gmail_message_references(
+    *,
+    service,
+    cutoff,
+):
+    page_token = None
 
-    # A single thread failure must not abort the remaining
-    # mailbox traversal, but the final synchronization must
-    # still report that the provider view was incomplete.
-    failed_thread_count = 0
 
-    for thread in threads:
+    while True:
+
+        kwargs = {
+            "userId":
+                "me",
+
+            "q":
+                _gmail_query(
+                    cutoff
+                ),
+
+            "maxResults":
+                GMAIL_PAGE_SIZE,
+        }
+
+
+        if page_token:
+
+            kwargs[
+                "pageToken"
+            ] = page_token
+
+
+        result = (
+            service
+            .users()
+            .messages()
+            .list(
+                **kwargs
+            )
+            .execute()
+        )
+
+
+        for reference in (
+            result.get(
+                "messages",
+                [],
+            )
+            or []
+        ):
+
+            yield reference
+
+
+        page_token = (
+            result.get(
+                "nextPageToken"
+            )
+        )
+
+
+        if not page_token:
+            break
+
+
+# ============================================================
+# CONVERSATION MATERIALIZATION
+# ============================================================
+
+def _resolve_conversation(
+    *,
+    user,
+    organization,
+    email_account,
+    thread_id,
+    subject,
+):
+    conversation_key = (
+        f"gmail_{thread_id}"
+    )
+
+
+    conversation = (
+        Conversation.objects
+        .filter(
+            user=user,
+            conversation_key=(
+                conversation_key
+            ),
+        )
+        .first()
+    )
+
+
+    if conversation is None:
+
+        conversation = (
+            Conversation.objects.create(
+                user=user,
+                organization=(
+                    organization
+                ),
+                email_account=(
+                    email_account
+                ),
+                conversation_key=(
+                    conversation_key
+                ),
+                external_conversation_id=(
+                    thread_id
+                ),
+                subject=(
+                    subject
+                    or "No Subject"
+                ),
+            )
+        )
+
+        return conversation
+
+
+    changed = []
+
+
+    if (
+        conversation
+        .email_account_id
+        !=
+        email_account.id
+    ):
+
+        conversation.email_account = (
+            email_account
+        )
+
+        changed.append(
+            "email_account"
+        )
+
+
+    if (
+        conversation
+        .organization_id
+        !=
+        organization.id
+    ):
+
+        conversation.organization = (
+            organization
+        )
+
+        changed.append(
+            "organization"
+        )
+
+
+    if (
+        not conversation
+        .external_conversation_id
+    ):
+
+        conversation.external_conversation_id = (
+            thread_id
+        )
+
+        changed.append(
+            "external_conversation_id"
+        )
+
+
+    if changed:
+
+        conversation.save(
+            update_fields=changed
+        )
+
+
+    return conversation
+
+
+def _update_conversation_if_newer(
+    *,
+    conversation,
+    message,
+):
+    if (
+        conversation.last_message_at
+        is not None
+        and
+        message.received_at
+        <
+        conversation.last_message_at
+    ):
+
+        return
+
+
+    conversation.last_message = (
+        message
+    )
+
+    conversation.last_message_at = (
+        message.received_at
+    )
+
+    conversation.last_message_preview = (
+        message.body[:120]
+        if message.body
+        else "No preview"
+    )
+
+    conversation.subject = (
+        message.subject
+        or conversation.subject
+    )
+
+
+    if (
+        message.direction
+        ==
+        "inbound"
+    ):
+
+        conversation.unread_count = (
+            InboxMessage.objects
+            .filter(
+                conversation=(
+                    conversation
+                ),
+                is_read=False,
+                direction="inbound",
+            )
+            .count()
+        )
+
+
+    conversation.save(
+        update_fields=[
+            "last_message",
+            "last_message_at",
+            "last_message_preview",
+            "subject",
+            "unread_count",
+        ]
+    )
+
+
+# ============================================================
+# GMAIL INGESTION
+# ============================================================
+
+def _fetch_gmail_emails_impl(
+    *,
+    user,
+    email_account,
+    limit=None,
+):
+    # `limit` remains accepted for backwards compatibility
+    # with older callers/tests. P1A intentionally performs
+    # complete provider pagination for the resolved sync window.
+    del limit
+
+
+    credentials = (
+        get_gmail_credentials(
+            user
+        )
+    )
+
+
+    service = (
+        build(
+            "gmail",
+            "v1",
+            credentials=(
+                credentials
+            ),
+        )
+    )
+
+
+    window = (
+        resolve_mail_sync_window(
+            email_account=(
+                email_account
+            )
+        )
+    )
+
+
+    organization = (
+        user
+        .organization_membership
+        .organization
+    )
+
+
+    processed_count = 0
+
+    created_count = 0
+
+    upgraded_count = 0
+
+    skipped_count = 0
+
+    failed_count = 0
+
+
+    for reference in (
+        _iter_gmail_message_references(
+            service=service,
+            cutoff=window.cutoff,
+        )
+    ):
 
         try:
-            thread_id = thread["id"]
 
-            thread_data = service.users().threads().get(
-                userId="me",
-                id=thread_id
-            ).execute()
-
-            messages = thread_data.get("messages", [])
-
-            for msg in messages:
-
-                external_id = msg["id"]
-
-                # Skip duplicates
-                existing_message = InboxMessage.objects.filter(
-                    external_message_id=external_id,
-                    email_account=email_account,
-                ).first()
-
-                if existing_message:
-
-                    log_event(
-                        logger,
-                        "debug",
-                        "gmail.message.skipped_existing",
-                        provider="gmail",
-                        account_id=email_account.id,
-                        message_id=existing_message.id,
-                    )
-
-                    continue
-
-                # =========================
-                # EXTRACT DATA
-                # =========================
-
-                platform = "gmail"
-                payload = msg.get("payload", {})
-                headers = payload.get("headers", [])
-
-                # 🔥 ENTERPRISE ATTACHMENT EXTRACTION (NESTED SAFE)
-                attachments = []
-
-                def extract_parts(parts):
-                    for part in parts:
-                        filename = part.get("filename")
-                        body = part.get("body", {})
-
-                        if filename and body.get("attachmentId"):
-                            attachments.append({
-                                "filename": filename,
-                                "attachment_id": body.get("attachmentId"),
-                                "mime_type": part.get("mimeType"),
-                            })
-
-                        # 🔁 recursive (VERY IMPORTANT)
-                        if part.get("parts"):
-                            extract_parts(part.get("parts"))
-
-                # run extraction
-                if payload.get("parts"):
-                    extract_parts(payload.get("parts"))  
-
-                subject = None
-                sender = ""
-                recipients = ""
-
-                for h in headers:
-                    name = h.get("name", "").lower()
-                    value = h.get("value", "")
-
-                    if name == "subject":
-                        subject = value
-
-                    elif name == "from":
-                        sender = value
-
-                    elif name == "to":
-                        recipients = value
+            provider_id = (
+                reference.get(
+                    "id"
+                )
+            )
 
 
-                # =========================
-                # 🚨 LABELS + DIRECTION (FIRST DEFINE THIS)
-                # =========================
+            if not provider_id:
 
-                label_ids = msg.get("labelIds", [])
-                user_email = email_account.email_address.lower()
-                # 🎯 FINAL DIRECTION LOGIC (NO DUPLICATES)
+                failed_count += 1
 
-                if "INBOX" in label_ids:
-                    direction = "inbound"
+                continue
 
-                elif "SENT" in label_ids:
-                    direction = "outbound"
 
-                else:
-                    continue
+            existing = (
+                InboxMessage.objects
+                .filter(
+                    user=user,
+                    email_account=(
+                        email_account
+                    ),
+                    external_message_id=(
+                        provider_id
+                    ),
+                )
+                .first()
+            )
 
-                # =========================
-                # FALLBACK SUBJECT
-                # =========================
 
-                if not subject:
-                    subject = msg.get("snippet")
+            if (
+                existing
+                and
+                not window.initial_history
+            ):
 
-                if not subject:
-                    subject = "No Subject"
-
-                # =========================
-                # BODY
-                # =========================
-
-                body = msg.get("snippet", "")
-
-                # =========================
-                # THREAD + MESSAGE ID
-                # =========================
-
-                thread_id = msg.get("threadId")
-                external_id = msg.get("id")
-
-                # =========================
-                # TIME
-                # =========================
-
-                internal_date = int(msg.get("internalDate", 0)) / 1000
-                received_at = datetime.fromtimestamp(internal_date, tz=dt_timezone.utc)
-
-                # =========================
-                # FLAGS
-                # =========================
-
-                is_read = "UNREAD" not in label_ids
-                is_starred = "STARRED" in label_ids
+                skipped_count += 1
 
                 log_event(
                     logger,
                     "debug",
-                    "gmail.attachments.detected",
+                    (
+                        "gmail.message."
+                        "skipped_existing"
+                    ),
                     provider="gmail",
-                    account_id=email_account.id,
-                    attachment_count=len(attachments),
+                    account_id=(
+                        email_account.id
+                    ),
+                    message_id=(
+                        existing.id
+                    ),
                 )
 
-                # =========================
-                # CONVERSATION FIX
-                # =========================
+                continue
 
-                conversation_key = f"gmail_{thread_id}"
 
-                conversation = Conversation.objects.filter(
+            message = (
+                service
+                .users()
+                .messages()
+                .get(
+                    userId="me",
+                    id=provider_id,
+                    format="full",
+                )
+                .execute()
+            )
+
+
+            processed_count += 1
+
+
+            payload = (
+                message.get(
+                    "payload",
+                    {},
+                )
+                or {}
+            )
+
+
+            headers = (
+                payload.get(
+                    "headers",
+                    [],
+                )
+                or []
+            )
+
+
+            subject = (
+                _first_header(
+                    headers,
+                    "subject",
+                )
+                or
+                message.get(
+                    "snippet",
+                    "",
+                )
+                or
+                "No Subject"
+            )
+
+
+            (
+                sender_meta,
+                recipient_meta,
+            ) = (
+                _message_identities(
+                    headers
+                )
+            )
+
+
+            sender = (
+                sender_meta.get(
+                    "email",
+                    "",
+                )
+            )
+
+
+            recipients = (
+                _flatten_recipient_emails(
+                    recipient_meta
+                )
+            )
+
+
+            label_ids = set(
+                message.get(
+                    "labelIds",
+                    [],
+                )
+                or []
+            )
+
+
+            if "SENT" in label_ids:
+
+                direction = (
+                    "outbound"
+                )
+
+                folder = (
+                    "sent"
+                )
+
+            elif "INBOX" in label_ids:
+
+                direction = (
+                    "inbound"
+                )
+
+                folder = (
+                    "inbox"
+                )
+
+            else:
+
+                # The provider query is deliberately limited to
+                # Inbox/Sent. Ignore a stale/non-matching result
+                # rather than creating an incorrect folder.
+                continue
+
+
+            thread_id = (
+                message.get(
+                    "threadId"
+                )
+                or provider_id
+            )
+
+
+            internal_date = int(
+                message.get(
+                    "internalDate",
+                    0,
+                )
+                or 0
+            )
+
+
+            if internal_date <= 0:
+
+                raise RuntimeError(
+                    "Gmail message does not "
+                    "contain a valid internalDate."
+                )
+
+
+            received_at = (
+                datetime.fromtimestamp(
+                    (
+                        internal_date
+                        / 1000
+                    ),
+                    tz=(
+                        datetime_timezone.utc
+                    ),
+                )
+            )
+
+
+            body = (
+                extract_gmail_body(
+                    payload,
+                    snippet=(
+                        message.get(
+                            "snippet",
+                            "",
+                        )
+                    ),
+                )
+            )
+
+
+            attachments = (
+                extract_attachments(
+                    payload
+                )
+            )
+
+
+            conversation = (
+                _resolve_conversation(
                     user=user,
-                    conversation_key=conversation_key
-                ).first()
-
-                if not conversation:
-                    conversation = Conversation.objects.create(
-                        user=user,
-                        organization=organization,
-                        conversation_key=conversation_key,
-                        subject=subject or "No Subject",
-                        email_account=email_account,
-                    )
-
-                if not conversation.external_conversation_id:
-                    conversation.external_conversation_id = thread_id
-                    conversation.save(update_fields=["external_conversation_id"])
-
-                # =========================
-                # SAVE MESSAGE
-                # =========================
-
-                message_obj = InboxMessage.objects.create(
-                    user=user,
-                    organization=organization,
-                    conversation=conversation,
-                    platform=platform,
-                    external_message_id=external_id,
-                    external_conversation_id=thread_id,
-                    sender=sender,
-                    recipients=recipients,
+                    organization=(
+                        organization
+                    ),
+                    email_account=(
+                        email_account
+                    ),
+                    thread_id=(
+                        thread_id
+                    ),
                     subject=subject,
-                    attachment_meta=attachments,
-                    body=body,
-                    received_at=received_at,
-                    is_read=is_read,
-                    is_starred=is_starred,
-                    direction=direction,
-                    is_draft=False,
-                    email_account=email_account,
+                )
+            )
+
+
+            if existing:
+
+                message_obj = (
+                    existing
                 )
 
-                # =========================
-                # 🔄 Update Conversation
-                # =========================
-                # AFTER creating message_obj
 
-                conversation.last_message = message_obj
-                conversation.last_message_at = message_obj.received_at
-                conversation.last_message_preview = (
-                    message_obj.body[:120] if message_obj.body else "No preview"
+                message_obj.organization = (
+                    organization
                 )
-                conversation.subject = message_obj.subject or conversation.subject
-                
-                if message_obj.subject:
-                    conversation.subject = message_obj.subject
 
-                conversation.save(update_fields=[
-                    "last_message",
-                    "last_message_at",
-                    "last_message_preview",
-                    "subject"
-                    ])
-
-                invalidate_conversation_cache(user.id)
-
-                # ==========================================================
-                # Enterprise Knowledge Processing
-                # ==========================================================
-
-                try:
-
-                    processor = MessageProcessor()
-
-                    processor.process_message(
-                        organization=organization,
-                        message=message_obj,
-                        sender=sender,
-                        subject=subject,
-                        body=body,
-                        source_channel="gmail",
-                    )
-
-                    log_event(
-                        logger,
-                        "info",
-                        "gmail.knowledge.processed",
-                        provider="gmail",
-                        account_id=email_account.id,
-                    )
-
-                except Exception as exc:
-
-                    log_event(
-                        logger,
-                        "warning",
-                        "gmail.knowledge.failed",
-                        provider="gmail",
-                        account_id=email_account.id,
-                        error_type=type(exc).__name__,
-                    )
-
-                # =========================
-                # 📡 WebSocket Event
-                # =========================
-                channel_layer = get_channel_layer()
-
-                async_to_sync(channel_layer.group_send)(
-                    f"inbox_{user.id}",
-                    {
-                        "type": "inbox_update",
-                        "data": {
-                            "event": "new_email",
-                            "conversation_id": conversation.id,
-                            "subject": subject,
-                            "sender": sender,
-                            "preview": message_obj.body[:120],
-                            "received_at": received_at.isoformat(),
-                            "platform": "gmail",
-                        }
-                    }
+                message_obj.email_account = (
+                    email_account
                 )
-                
+
+                message_obj.conversation = (
+                    conversation
+                )
+
+                message_obj.platform = (
+                    "gmail"
+                )
+
+                message_obj.direction = (
+                    direction
+                )
+
+                message_obj.folder = (
+                    folder
+                )
+
+                message_obj.external_conversation_id = (
+                    thread_id
+                )
+
+                message_obj.sender = (
+                    sender
+                )
+
+                message_obj.recipients = (
+                    recipients
+                )
+
+                message_obj.sender_meta = (
+                    sender_meta
+                )
+
+                message_obj.recipient_meta = (
+                    recipient_meta
+                )
+
+                message_obj.subject = (
+                    subject
+                )
+
+                message_obj.body = (
+                    body
+                )
+
+                message_obj.attachment_meta = (
+                    attachments
+                )
+
+                message_obj.received_at = (
+                    received_at
+                )
+
+                message_obj.is_read = (
+                    "UNREAD"
+                    not in label_ids
+                )
+
+                message_obj.is_starred = (
+                    "STARRED"
+                    in label_ids
+                )
+
+                message_obj.is_draft = (
+                    False
+                )
+
+
+                message_obj.save(
+                    update_fields=[
+                        "organization",
+                        "email_account",
+                        "conversation",
+                        "platform",
+                        "direction",
+                        "folder",
+                        "external_conversation_id",
+                        "sender",
+                        "recipients",
+                        "sender_meta",
+                        "recipient_meta",
+                        "subject",
+                        "body",
+                        "attachment_meta",
+                        "received_at",
+                        "is_read",
+                        "is_starred",
+                        "is_draft",
+                    ]
+                )
+
+
+                upgraded_count += 1
+
+
                 log_event(
                     logger,
                     "info",
-                    "gmail.message.synced",
+                    (
+                        "gmail.message."
+                        "upgraded_legacy"
+                    ),
                     provider="gmail",
-                    account_id=email_account.id,
-                    conversation_id=conversation.id,
-                    message_id=message_obj.id,
+                    account_id=(
+                        email_account.id
+                    ),
+                    message_id=(
+                        message_obj.id
+                    ),
                 )
 
 
-        except Exception as e:
-            failed_thread_count += 1
+            else:
+
+                message_obj = (
+                    InboxMessage.objects.create(
+                        user=user,
+                        organization=(
+                            organization
+                        ),
+                        email_account=(
+                            email_account
+                        ),
+                        conversation=(
+                            conversation
+                        ),
+                        platform="gmail",
+                        direction=(
+                            direction
+                        ),
+                        folder=folder,
+                        external_message_id=(
+                            provider_id
+                        ),
+                        external_conversation_id=(
+                            thread_id
+                        ),
+                        sender=sender,
+                        recipients=(
+                            recipients
+                        ),
+                        sender_meta=(
+                            sender_meta
+                        ),
+                        recipient_meta=(
+                            recipient_meta
+                        ),
+                        subject=subject,
+                        body=body,
+                        attachment_meta=(
+                            attachments
+                        ),
+                        received_at=(
+                            received_at
+                        ),
+                        is_read=(
+                            "UNREAD"
+                            not in label_ids
+                        ),
+                        is_starred=(
+                            "STARRED"
+                            in label_ids
+                        ),
+                        is_draft=False,
+                    )
+                )
+
+
+                created_count += 1
+
+
+            _update_conversation_if_newer(
+                conversation=(
+                    conversation
+                ),
+                message=(
+                    message_obj
+                ),
+            )
+
+
+            invalidate_conversation_cache(
+                user.id
+            )
+
+
+            try:
+
+                MessageProcessor().process_message(
+                    organization=(
+                        organization
+                    ),
+                    message=(
+                        message_obj
+                    ),
+                    sender=sender,
+                    subject=subject,
+                    body=body,
+                    source_channel="gmail",
+                )
+
+                log_event(
+                    logger,
+                    "info",
+                    "gmail.knowledge.processed",
+                    provider="gmail",
+                    account_id=(
+                        email_account.id
+                    ),
+                )
+
+            except Exception as exc:
+
+                log_event(
+                    logger,
+                    "warning",
+                    "gmail.knowledge.failed",
+                    provider="gmail",
+                    account_id=(
+                        email_account.id
+                    ),
+                    error_type=(
+                        type(exc).__name__
+                    ),
+                )
+
+
+            # Do not flood a newly-connected browser with one
+            # WebSocket event for every historical message.
+            #
+            # Incremental synchronization still emits live mail.
+            if (
+                not window.initial_history
+            ):
+
+                channel_layer = (
+                    get_channel_layer()
+                )
+
+
+                async_to_sync(
+                    channel_layer.group_send
+                )(
+                    f"inbox_{user.id}",
+                    {
+                        "type":
+                            "inbox_update",
+
+                        "data": {
+                            "event":
+                                "new_email",
+
+                            "conversation_id":
+                                conversation.id,
+
+                            "subject":
+                                subject,
+
+                            "sender":
+                                sender,
+
+                            "preview":
+                                body[:120],
+
+                            "received_at":
+                                received_at.isoformat(),
+
+                            "platform":
+                                "gmail",
+                        },
+                    },
+                )
+
+
+            log_event(
+                logger,
+                "info",
+                "gmail.message.synced",
+                provider="gmail",
+                account_id=(
+                    email_account.id
+                ),
+                conversation_id=(
+                    conversation.id
+                ),
+                message_id=(
+                    message_obj.id
+                ),
+            )
+
+
+        except Exception as exc:
+
+            failed_count += 1
+
 
             log_event(
                 logger,
                 "warning",
-                "gmail.thread.failed",
+                "gmail.message.failed",
                 provider="gmail",
-                account_id=email_account.id,
-                failed_thread_count=failed_thread_count,
-                error_type=type(e).__name__,
+                account_id=(
+                    email_account.id
+                ),
+                failed_message_count=(
+                    failed_count
+                ),
+                error_type=(
+                    type(exc).__name__
+                ),
             )
 
-            # Preserve successfully processed threads and keep
-            # attempting the remainder of the mailbox.
+
             continue
 
-    if failed_thread_count:
+
+    if failed_count:
+
         raise RuntimeError(
             "Gmail partial sync failure: "
-            f"{failed_thread_count} thread(s) failed."
+            f"{failed_count} message(s) failed."
         )
+
+
+    if window.initial_history:
+
+        mark_initial_history_complete(
+            email_account=(
+                email_account
+            )
+        )
+
+
+    return {
+        "initial_history":
+            window.initial_history,
+
+        "processed":
+            processed_count,
+
+        "created":
+            created_count,
+
+        "upgraded":
+            upgraded_count,
+
+        "skipped":
+            skipped_count,
+
+        "failed":
+            failed_count,
+    }
 
 
 def fetch_gmail_emails(
     *,
     user,
     email_account,
-    limit=20,
+    limit=None,
 ):
-    """
-    Scheduled Gmail synchronization entry point.
-
-    Background execution owns operational sync status here.
-
-    Interactive Gmail API status handling remains unchanged in
-    googleapis/views.py.
-
-    Per-thread partial-failure semantics remain inside the
-    implementation and are handled separately in MVP-07.3C.
-    """
-
     update_sync_status(
         user=user,
         platform="gmail",
@@ -414,23 +1662,33 @@ def fetch_gmail_emails(
         error_message="",
     )
 
+
     try:
-        result = _fetch_gmail_emails_impl(
-            user=user,
-            email_account=email_account,
-            limit=limit,
+
+        result = (
+            _fetch_gmail_emails_impl(
+                user=user,
+                email_account=(
+                    email_account
+                ),
+                limit=limit,
+            )
         )
 
     except Exception as exc:
+
         update_sync_status(
             user=user,
             platform="gmail",
             status="failed",
             progress=0,
-            error_message=str(exc),
+            error_message=(
+                str(exc)
+            ),
         )
 
         raise
+
 
     update_sync_status(
         user=user,
@@ -439,5 +1697,6 @@ def fetch_gmail_emails(
         progress=100,
         error_message="",
     )
+
 
     return result

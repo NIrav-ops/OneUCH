@@ -71,6 +71,15 @@ class EmailAccount(models.Model):
         blank=True
     )
 
+    # Marks completion of the bounded initial historical
+    # mailbox import. Until this is populated, provider sync
+    # continues using the full initial-history window so a
+    # partial first import remains safely retryable.
+    history_sync_completed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
     is_active = models.BooleanField(
         default=True
     )
@@ -86,4 +95,3 @@ class EmailAccount(models.Model):
 
     def __str__(self):
         return f"{self.email_address} ({self.account_type})"
-
