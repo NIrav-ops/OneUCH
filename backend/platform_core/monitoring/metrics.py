@@ -25,9 +25,8 @@ class PlatformMetrics:
 
         return {
 
-            "services": len(
-                ServiceRegistry._services
-            ),
+            "services":
+                ServiceRegistry.count(),
 
             "queued_jobs": JobQueue.size(),
 

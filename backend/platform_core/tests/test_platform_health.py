@@ -120,3 +120,99 @@ class PlatformHealthTests(TestCase):
             result["dependencies"]["database"]["error"],
             "RuntimeError",
         )
+
+    @patch(
+        "platform_core.monitoring.monitor."
+        "settings.REDIS_CLIENT"
+    )
+    def test_false_redis_ping_marks_platform_degraded(
+        self,
+        redis_client,
+    ):
+
+        redis_client.ping.return_value = False
+
+        result = PlatformMonitor().check()
+
+        health = HealthRepository.latest()
+
+        self.assertEqual(
+            health.status,
+            "Degraded",
+        )
+
+        self.assertEqual(
+            result[
+                "dependencies"
+            ][
+                "redis"
+            ][
+                "status"
+            ],
+            "Unhealthy",
+        )
+
+        self.assertEqual(
+            result[
+                "dependencies"
+            ][
+                "redis"
+            ][
+                "error"
+            ],
+            "UnexpectedPingResponse",
+        )
+
+
+    @patch(
+        "platform_core.monitoring.monitor."
+        "log_event"
+    )
+    @patch(
+        "platform_core.monitoring.monitor."
+        "settings.REDIS_CLIENT"
+    )
+    def test_health_check_emits_structured_runtime_event(
+        self,
+        redis_client,
+        log_event_mock,
+    ):
+
+        redis_client.ping.return_value = True
+
+        PlatformMonitor().check()
+
+        log_event_mock.assert_called_once()
+
+        call = log_event_mock.call_args
+
+        self.assertEqual(
+            call.args[1],
+            "info",
+        )
+
+        self.assertEqual(
+            call.args[2],
+            "platform.health.checked",
+        )
+
+        self.assertEqual(
+            call.kwargs[
+                "status"
+            ],
+            "Healthy",
+        )
+
+        self.assertEqual(
+            call.kwargs[
+                "database_status"
+            ],
+            "Healthy",
+        )
+
+        self.assertEqual(
+            call.kwargs[
+                "redis_status"
+            ],
+            "Healthy",
+        )

@@ -13,6 +13,16 @@ from platform_core.monitoring.service import (
     MonitoringService,
 )
 
+from platform_core.observability.logger import (
+    get_logger,
+    log_event,
+)
+
+
+logger = get_logger(
+    "oneuch.runtime.health"
+)
+
 
 class PlatformMonitor:
 
@@ -45,7 +55,16 @@ class PlatformMonitor:
 
         try:
 
-            settings.REDIS_CLIENT.ping()
+            result = (
+                settings.REDIS_CLIENT.ping()
+            )
+
+            if result is not True:
+
+                return {
+                    "status": "Unhealthy",
+                    "error": "UnexpectedPingResponse",
+                }
 
             return {
                 "status": "Healthy",
@@ -83,12 +102,39 @@ class PlatformMonitor:
             "dependencies": dependencies,
         }
 
+        health_status = HealthStatus(
+            service="Platform",
+            status=status,
+            details=details,
+        )
+
         MonitoringService().report(
-            HealthStatus(
-                service="Platform",
-                status=status,
-                details=details,
-            )
+            health_status
+        )
+
+        log_event(
+            logger,
+            (
+                "info"
+                if dependencies_healthy
+                else "warning"
+            ),
+            "platform.health.checked",
+            status=status,
+            database_status=(
+                dependencies[
+                    "database"
+                ][
+                    "status"
+                ]
+            ),
+            redis_status=(
+                dependencies[
+                    "redis"
+                ][
+                    "status"
+                ]
+            ),
         )
 
         return details

@@ -1,5 +1,9 @@
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import (
+    dataclass,
+    field,
+)
+
+from django.utils import timezone
 
 
 @dataclass
@@ -11,4 +15,6 @@ class HealthStatus:
 
     details: dict
 
-    checked_at: datetime = datetime.utcnow()
+    checked_at: object = field(
+        default_factory=timezone.now
+    )
