@@ -23,7 +23,18 @@ import {
   useNavigate,
 } from "react-router-dom";
 
-import axios from "../axiosConfig";
+import axios, {
+  invalidateSession,
+  refreshSessionAccessToken,
+} from "../axiosConfig";
+
+import {
+  isJwtTokenFailurePayload,
+} from "../authSession";
+
+import {
+  API_BASE_URL,
+} from "../runtimeConfig";
 
 
 const EMPTY_SUMMARY = {
@@ -566,8 +577,7 @@ export default function Settings() {
         }
 
         const baseURL =
-          axios.defaults.baseURL ||
-          "http://127.0.0.1:8000";
+          API_BASE_URL;
 
         /*
          * Deliberately do not use the shared Axios response
@@ -578,28 +588,94 @@ export default function Settings() {
          * same thing as an expired One UCH JWT and must not log
          * the user out of the application.
          */
-        const response =
-          await fetch(
-            `${baseURL}${provider.sync_path}`,
-            {
-              method: "POST",
-              headers: {
-                Authorization:
-                  `Bearer ${accessToken}`,
-                "Content-Type":
-                  "application/json",
-              },
+        const performSyncRequest =
+          async (token) => {
+
+            const response =
+              await fetch(
+                `${baseURL}${provider.sync_path}`,
+                {
+                  method: "POST",
+                  headers: {
+                    Authorization:
+                      `Bearer ${token}`,
+                    "Content-Type":
+                      "application/json",
+                  },
+                }
+              );
+
+
+            let payload = {};
+
+
+            try {
+
+              payload =
+                await response.json();
+
+            } catch {
+
+              payload = {};
+
             }
+
+
+            return {
+              response,
+              payload,
+            };
+
+          };
+
+
+        let {
+          response,
+          payload,
+        } =
+          await performSyncRequest(
+            accessToken
           );
 
-        let payload = {};
 
-        try {
-          payload =
-            await response.json();
-        } catch {
-          payload = {};
+        /*
+         * Distinguish an expired One UCH access token from the
+         * provider's own "reauthenticate mailbox" HTTP 401.
+         */
+        if (
+          response.status === 401
+          && isJwtTokenFailurePayload(
+            payload
+          )
+        ) {
+
+          let refreshedAccessToken;
+
+
+          try {
+
+            refreshedAccessToken =
+              await refreshSessionAccessToken();
+
+          } catch (refreshError) {
+
+            invalidateSession();
+
+            throw refreshError;
+
+          }
+
+
+          ({
+            response,
+            payload,
+          } =
+            await performSyncRequest(
+              refreshedAccessToken
+            ));
+
         }
+
 
         if (!response.ok) {
           throw new Error(

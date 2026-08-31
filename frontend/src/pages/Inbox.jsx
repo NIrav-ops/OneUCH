@@ -10,14 +10,14 @@ import { useLocation } from "react-router-dom";
 import axios from "../axiosConfig";
 import ConversationTimeline from "../components/ConversationTimeline";
 
+import {
+  API_BASE_URL,
+  WS_BASE_URL,
+} from "../runtimeConfig";
 
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ||
-  "http://127.0.0.1:8000";
-
-const WS_BASE_URL =
-  import.meta.env.VITE_WS_BASE_URL ||
-  "ws://127.0.0.1:8000";
+import {
+  createInboxWebSocket,
+} from "../websocketAuth";
 
 
 export default function Inbox() {
@@ -546,9 +546,12 @@ export default function Inbox() {
 
 
     const socket =
-      new WebSocket(
-        `${WS_BASE_URL}/ws/inbox/?token=${token}`
-      );
+      createInboxWebSocket({
+        baseUrl:
+          WS_BASE_URL,
+        accessToken:
+          token,
+      });
 
 
     socket.onopen = () => {

@@ -1,47 +1,154 @@
-from urllib.parse import parse_qs
 from channels.middleware import BaseMiddleware
-from asgiref.sync import sync_to_async
+from channels.db import database_sync_to_async
+
 from django.db import close_old_connections
-from django.conf import settings
-import jwt
 
 
-class JWTAuthMiddleware(BaseMiddleware):
+WS_AUTH_SUBPROTOCOL = "oneuch.jwt"
 
-    async def __call__(self, scope, receive, send):
+
+def extract_websocket_access_token(
+    scope,
+):
+    """
+    Extract the One UCH access JWT from the WebSocket
+    subprotocol offer.
+
+    Browser WebSocket APIs do not support arbitrary
+    Authorization headers. The fixed protocol marker is
+    followed by the bearer token:
+
+        ["oneuch.jwt", "<access-jwt>"]
+
+    Query-string authentication is intentionally unsupported.
+    """
+
+    subprotocols = (
+        scope.get(
+            "subprotocols"
+        )
+        or []
+    )
+
+    try:
+        marker_index = (
+            subprotocols.index(
+                WS_AUTH_SUBPROTOCOL
+            )
+        )
+    except ValueError:
+        return None
+
+    token_index = (
+        marker_index + 1
+    )
+
+    if (
+        token_index
+        >= len(subprotocols)
+    ):
+        return None
+
+    token = (
+        subprotocols[
+            token_index
+        ]
+    )
+
+    if (
+        not isinstance(
+            token,
+            str,
+        )
+        or not token.strip()
+    ):
+        return None
+
+    return token.strip()
+
+
+@database_sync_to_async
+def resolve_websocket_user(
+    validated_token,
+):
+    """
+    Resolve the token user through SimpleJWT's canonical
+    authentication rules instead of decoding the JWT manually.
+    """
+
+    from rest_framework_simplejwt.authentication import (
+        JWTAuthentication,
+    )
+
+    return (
+        JWTAuthentication()
+        .get_user(
+            validated_token
+        )
+    )
+
+
+class JWTAuthMiddleware(
+    BaseMiddleware
+):
+
+    async def __call__(
+        self,
+        scope,
+        receive,
+        send,
+    ):
         close_old_connections()
 
-        # 🔥 Lazy imports (VERY IMPORTANT)
-        from django.contrib.auth.models import AnonymousUser
-        from django.contrib.auth import get_user_model
+        # Lazy imports remain intentional because this middleware
+        # module is imported by ASGI during Django bootstrap.
+        from django.contrib.auth.models import (
+            AnonymousUser,
+        )
 
-        User = get_user_model()
+        from rest_framework_simplejwt.tokens import (
+            AccessToken,
+        )
 
-        query_string = scope.get("query_string", b"").decode()
-        query_params = parse_qs(query_string)
 
-        token = query_params.get("token")
+        scope["user"] = (
+            AnonymousUser()
+        )
+
+
+        token = (
+            extract_websocket_access_token(
+                scope
+            )
+        )
+
 
         if token:
+
             try:
-                token = token[0]
 
-                decoded_data = jwt.decode(
-                    token,
-                    settings.SECRET_KEY,
-                    algorithms=["HS256"]
+                validated_token = (
+                    AccessToken(
+                        token
+                    )
                 )
 
-                user = await sync_to_async(User.objects.get)(
-                    id=decoded_data["user_id"]
+                scope["user"] = (
+                    await resolve_websocket_user(
+                        validated_token
+                    )
                 )
 
-                scope["user"] = user
+            except Exception:
+                # Authentication must fail closed. Do not log
+                # bearer-token material or provider payloads.
+                scope["user"] = (
+                    AnonymousUser()
+                )
 
-            except Exception as e:
-                print("JWT WS ERROR:", str(e))
-                scope["user"] = AnonymousUser()
-        else:
-            scope["user"] = AnonymousUser()
 
-        return await super().__call__(scope, receive, send)
+        return await super().__call__(
+            scope,
+            receive,
+            send,
+        )

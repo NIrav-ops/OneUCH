@@ -1,3 +1,12 @@
+import {
+  WS_BASE_URL,
+} from "../runtimeConfig";
+
+import {
+  createInboxWebSocket,
+} from "../websocketAuth";
+
+
 let socket = null;
 
 export function getInboxSocket() {
@@ -6,9 +15,12 @@ export function getInboxSocket() {
 
   if (!socket || socket.readyState === WebSocket.CLOSED) {
 
-    socket = new WebSocket(
-      `ws://127.0.0.1:8000/ws/inbox/?token=${token}`
-    );
+    socket = createInboxWebSocket({
+      baseUrl:
+        WS_BASE_URL,
+      accessToken:
+        token,
+    });
 
     socket.onopen = () => {
       console.log("WebSocket connected");
