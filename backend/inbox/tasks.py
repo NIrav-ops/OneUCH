@@ -109,7 +109,7 @@ def periodic_sync_all_users():
 
         finally:
 
-            release_sync_lock(account.id)
+            release_sync_lock(lock)
 
 # ============================================
 # TASK 2: SEND EMAIL (ASYNC)

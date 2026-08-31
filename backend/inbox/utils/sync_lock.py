@@ -4,7 +4,7 @@ from django.conf import settings
 redis_client = redis.Redis.from_url(settings.CELERY_BROKER_URL)
 
 
-def acquire_sync_lock(account_id, timeout=60):
+def acquire_sync_lock(account_id, timeout=900):
 
     lock_key = f"email_sync_lock:{account_id}"
 

@@ -1,4 +1,3 @@
-from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from datetime import datetime, timezone as dt_timezone
 
@@ -7,9 +6,9 @@ from asgiref.sync import async_to_sync
 
 from inbox.models import Conversation, InboxMessage
 from inbox.utils.conversation_key import generate_conversation_key
-from oauth_tokens.models import OAuthToken
+from googleapis.utils import get_gmail_credentials
+from inbox.services.sync_status import update_sync_status
 from inbox.services.conversation_cache import invalidate_conversation_cache
-from django.conf import settings
 from knowledge.services.message_processor import MessageProcessor
 
 def extract_attachments(payload):
@@ -47,25 +46,13 @@ def extract_attachments(payload):
     return attachments
 
 
-def fetch_gmail_emails(*, user, email_account, limit=20):
+def _fetch_gmail_emails_impl(*, user, email_account, limit=20):
 
-    token = OAuthToken.objects.filter(
-        user=user,
-        provider="google",
-        is_active=True
-    ).first()
-
-    if not token:
-        print("❌ No active Google OAuth token found.")
-        return
-
-    creds = Credentials(
-        token=token.access_token,
-        refresh_token=token.refresh_token,
-        token_uri="https://oauth2.googleapis.com/token",
-        client_id=settings.GOOGLE_CLIENT_ID,
-        client_secret=settings.GOOGLE_CLIENT_SECRET,
-        scopes=["https://www.googleapis.com/auth/gmail.modify"],
+    # Resolve credentials through the governed provider
+    # utility so scheduled execution respects OAuth policy,
+    # including administrator disable and token refresh rules.
+    creds = get_gmail_credentials(
+        user
     )
 
     service = build("gmail", "v1", credentials=creds)
@@ -80,6 +67,11 @@ def fetch_gmail_emails(*, user, email_account, limit=20):
     threads = results.get("threads", [])
 
     organization = user.organization_membership.organization
+
+    # A single thread failure must not abort the remaining
+    # mailbox traversal, but the final synchronization must
+    # still report that the provider view was incomplete.
+    failed_thread_count = 0
 
     for thread in threads:
 
@@ -348,5 +340,74 @@ def fetch_gmail_emails(*, user, email_account, limit=20):
                     )
 
         except Exception as e:
-            print("❌ Gmail Sync Failed:", str(e))
+            failed_thread_count += 1
+
+            print(
+                "? Gmail thread sync failed:",
+                str(e),
+            )
+
+            # Preserve successfully processed threads and keep
+            # attempting the remainder of the mailbox.
             continue
+
+    if failed_thread_count:
+        raise RuntimeError(
+            "Gmail partial sync failure: "
+            f"{failed_thread_count} thread(s) failed."
+        )
+
+
+def fetch_gmail_emails(
+    *,
+    user,
+    email_account,
+    limit=20,
+):
+    """
+    Scheduled Gmail synchronization entry point.
+
+    Background execution owns operational sync status here.
+
+    Interactive Gmail API status handling remains unchanged in
+    googleapis/views.py.
+
+    Per-thread partial-failure semantics remain inside the
+    implementation and are handled separately in MVP-07.3C.
+    """
+
+    update_sync_status(
+        user=user,
+        platform="gmail",
+        status="syncing",
+        progress=0,
+        error_message="",
+    )
+
+    try:
+        result = _fetch_gmail_emails_impl(
+            user=user,
+            email_account=email_account,
+            limit=limit,
+        )
+
+    except Exception as exc:
+        update_sync_status(
+            user=user,
+            platform="gmail",
+            status="failed",
+            progress=0,
+            error_message=str(exc),
+        )
+
+        raise
+
+    update_sync_status(
+        user=user,
+        platform="gmail",
+        status="success",
+        progress=100,
+        error_message="",
+    )
+
+    return result

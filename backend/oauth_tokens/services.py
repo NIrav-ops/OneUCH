@@ -18,7 +18,17 @@ def refresh_google_token(token: OAuthToken):
     )
 
     if not token.refresh_token:
-        raise Exception("Google refresh token missing. Please reconnect Gmail.")
+        token.is_active = False
+        token.save(
+            update_fields=[
+                "is_active",
+            ]
+        )
+
+        raise Exception(
+            "Google refresh token missing. "
+            "Please reconnect Gmail."
+        )
 
     response = requests.post(
         "https://oauth2.googleapis.com/token",
@@ -31,7 +41,16 @@ def refresh_google_token(token: OAuthToken):
     ).json()
 
     if "access_token" not in response:
-        raise Exception(f"Failed to refresh Google token: {response}")
+        token.is_active = False
+        token.save(
+            update_fields=[
+                "is_active",
+            ]
+        )
+
+        raise Exception(
+            f"Failed to refresh Google token: {response}"
+        )
 
     token.access_token = response["access_token"]
     token.expires_at = timezone.now() + timedelta(

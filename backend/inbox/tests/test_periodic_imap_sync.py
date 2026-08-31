@@ -83,8 +83,10 @@ class PeriodicIMAPSyncTests(
             password="temporary-app-password",
         )
 
+        lock = Mock()
+
         acquire_sync_lock.return_value = (
-            Mock()
+            lock
         )
 
         periodic_sync_all_users.run()
@@ -102,7 +104,9 @@ class PeriodicIMAPSyncTests(
         # Lock-release correctness is a separate
         # MVP-07.3A concern. This test only proves
         # the IMAP credential contract.
-        release_sync_lock.assert_called_once()
+        release_sync_lock.assert_called_once_with(
+            lock
+        )
 
     @patch(
         "inbox.tasks.release_sync_lock"
@@ -127,8 +131,10 @@ class PeriodicIMAPSyncTests(
             password=None,
         )
 
+        lock = Mock()
+
         acquire_sync_lock.return_value = (
-            Mock()
+            lock
         )
 
         periodic_sync_all_users.run()
@@ -137,4 +143,6 @@ class PeriodicIMAPSyncTests(
 
         analyze_approvals.assert_not_called()
 
-        release_sync_lock.assert_called_once()
+        release_sync_lock.assert_called_once_with(
+            lock
+        )
