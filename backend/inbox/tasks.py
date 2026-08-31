@@ -23,6 +23,9 @@ from googleapis.services.gmail_sync import fetch_gmail_emails
 from microsoftapis.services.outlook_sync import fetch_outlook_emails
 
 from approvals.tasks import analyze_new_approvals
+from platform_core.observability.logger import get_logger, log_event
+
+logger = get_logger("oneuch.runtime.scheduler")
 
 User = get_user_model()
 MAX_RETRIES = 3
@@ -45,10 +48,22 @@ def periodic_sync_all_users():
         lock = acquire_sync_lock(account.id)
 
         if not lock:
-            print("SYNC SKIPPED - LOCK ACTIVE:", account.email_address)
+            log_event(
+                logger,
+                "info",
+                "sync.account.skipped_lock",
+                account_id=account.id,
+                provider=account.account_type,
+            )
             continue
 
-        print("ACCOUNT TYPE:", account.account_type)
+        log_event(
+            logger,
+            "debug",
+            "sync.account.selected",
+            account_id=account.id,
+            provider=account.account_type,
+        )
 
         try:
 
@@ -57,7 +72,13 @@ def periodic_sync_all_users():
             # -----------------------------
             if account.account_type == "gmail":
 
-                print("SYNC START - GMAIL:", account.email_address)
+                log_event(
+                    logger,
+                    "info",
+                    "sync.account.started",
+                    account_id=account.id,
+                    provider="gmail",
+                )
 
                 fetch_gmail_emails(
                     user=account.user,
@@ -69,7 +90,13 @@ def periodic_sync_all_users():
             # -----------------------------
             elif account.account_type == "outlook":
 
-                print("SYNC START - OUTLOOK:", account.email_address)
+                log_event(
+                    logger,
+                    "info",
+                    "sync.account.started",
+                    account_id=account.id,
+                    provider="outlook",
+                )
 
                 fetch_outlook_emails(
                     user=account.user,
@@ -81,7 +108,13 @@ def periodic_sync_all_users():
             # -----------------------------
             elif account.account_type == "imap":
 
-                print("SYNC START - IMAP:", account.email_address)
+                log_event(
+                    logger,
+                    "info",
+                    "sync.account.started",
+                    account_id=account.id,
+                    provider="imap",
+                )
 
                 # Generic IMAP / SMTP accounts currently use one
                 # temporary app-password field on EmailAccount.
@@ -105,7 +138,14 @@ def periodic_sync_all_users():
 
         except Exception as e:
 
-            print("SYNC ERROR:", str(e))
+            log_event(
+                logger,
+                "error",
+                "sync.account.failed",
+                account_id=account.id,
+                provider=account.account_type,
+                error_type=type(e).__name__,
+            )
 
         finally:
 

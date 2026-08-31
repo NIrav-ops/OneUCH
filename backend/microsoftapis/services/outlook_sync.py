@@ -28,6 +28,16 @@ from microsoftapis.utils import (
     get_microsoft_access_token,
 )
 
+from platform_core.observability.logger import (
+    get_logger,
+    log_event,
+)
+
+
+logger = get_logger(
+    "oneuch.runtime.outlook"
+)
+
 
 OUTLOOK_FOLDER_CONFIG = (
     {
@@ -227,10 +237,13 @@ def _fetch_folder(
         },
     )
 
-    print(
-        "OUTLOOK API STATUS "
-        f"[{graph_folder}]:",
-        response.status_code,
+    log_event(
+        logger,
+        "info",
+        "outlook.graph.response",
+        provider="outlook",
+        folder=graph_folder,
+        status_code=response.status_code,
     )
 
     if response.status_code != 200:
@@ -580,10 +593,13 @@ def fetch_outlook_emails(
         messages,
     ) in folder_batches:
 
-        print(
-            "OUTLOOK MESSAGES COUNT "
-            f"[{config['graph_folder']}]:",
-            len(messages),
+        log_event(
+            logger,
+            "info",
+            "outlook.folder.batch",
+            provider="outlook",
+            folder=config['graph_folder'],
+            message_count=len(messages),
         )
 
         for graph_message in messages:
@@ -915,10 +931,13 @@ def fetch_outlook_emails(
                 )
 
             except Exception as exc:
-                print(
-                    "Outlook Knowledge "
-                    "Processing Failed:",
-                    exc,
+                log_event(
+                    logger,
+                    "warning",
+                    "outlook.knowledge.failed",
+                    provider="outlook",
+                    message_id=message_obj.id,
+                    error_type=type(exc).__name__,
                 )
 
             _update_conversation_if_newer(
@@ -1001,6 +1020,10 @@ def fetch_outlook_emails(
             },
         )
 
-    print(
-        "Outlook sync completed."
+    log_event(
+        logger,
+        "info",
+        "outlook.sync.completed",
+        provider="outlook",
+        folder_count=len(folder_batches),
     )

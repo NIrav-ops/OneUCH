@@ -465,12 +465,25 @@ KNOWLEDGE_JOB_CHECKPOINT_INTERVAL = 25
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
+    "filters": {
+        "request_context": {
+            "()": (
+                "platform_core.observability."
+                "context_filter.RequestContextFilter"
+            ),
+        },
+    },
     "formatters": {
         "enterprise": {
             "format": (
                 "%(asctime)s | "
                 "%(levelname)s | "
                 "%(name)s | "
+                "[Request=%(request_id)s] "
+                "[Correlation=%(correlation_id)s] "
+                "[Org=%(organization_id)s] "
+                "[Tenant=%(tenant_id)s] "
+                "[User=%(user_id)s] "
                 "%(message)s"
             ),
         },
@@ -479,11 +492,23 @@ LOGGING = {
         "console": {
             "class": "logging.StreamHandler",
             "formatter": "enterprise",
+            "filters": [
+                "request_context",
+            ],
         },
     },
     "loggers": {
         "knowledge": {
-            "handlers": ["console"],
+            "handlers": [
+                "console",
+            ],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "oneuch.runtime": {
+            "handlers": [
+                "console",
+            ],
             "level": "INFO",
             "propagate": False,
         },

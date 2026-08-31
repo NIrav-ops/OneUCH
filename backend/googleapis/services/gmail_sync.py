@@ -10,6 +10,10 @@ from googleapis.utils import get_gmail_credentials
 from inbox.services.sync_status import update_sync_status
 from inbox.services.conversation_cache import invalidate_conversation_cache
 from knowledge.services.message_processor import MessageProcessor
+from platform_core.observability.logger import get_logger, log_event
+
+logger = get_logger("oneuch.runtime.gmail")
+
 
 def extract_attachments(payload):
     attachments = []
@@ -97,8 +101,13 @@ def _fetch_gmail_emails_impl(*, user, email_account, limit=20):
 
                 if existing_message:
 
-                    print(
-                        f"⏭️ Skipping existing Gmail message: {existing_message.id}"
+                    log_event(
+                        logger,
+                        "debug",
+                        "gmail.message.skipped_existing",
+                        provider="gmail",
+                        account_id=email_account.id,
+                        message_id=existing_message.id,
                     )
 
                     continue
@@ -206,7 +215,14 @@ def _fetch_gmail_emails_impl(*, user, email_account, limit=20):
                 is_read = "UNREAD" not in label_ids
                 is_starred = "STARRED" in label_ids
 
-                print("📎 ATTACHMENTS FOUND:", attachments)
+                log_event(
+                    logger,
+                    "debug",
+                    "gmail.attachments.detected",
+                    provider="gmail",
+                    account_id=email_account.id,
+                    attachment_count=len(attachments),
+                )
 
                 # =========================
                 # CONVERSATION FIX
@@ -297,15 +313,24 @@ def _fetch_gmail_emails_impl(*, user, email_account, limit=20):
                         source_channel="gmail",
                     )
 
-                    print(
-                        f"🧠 Knowledge processed: {subject}"
+                    log_event(
+                        logger,
+                        "info",
+                        "gmail.knowledge.processed",
+                        provider="gmail",
+                        account_id=email_account.id,
                     )
 
                 except Exception as exc:
 
-                    print(
-                        f"❌ Knowledge Processing Failed: {exc}"
-                    )  
+                    log_event(
+                        logger,
+                        "warning",
+                        "gmail.knowledge.failed",
+                        provider="gmail",
+                        account_id=email_account.id,
+                        error_type=type(exc).__name__,
+                    )
 
                 # =========================
                 # 📡 WebSocket Event
@@ -328,23 +353,28 @@ def _fetch_gmail_emails_impl(*, user, email_account, limit=20):
                     }
                 )
                 
-                print(
-                        f"✅ Gmail synced: {subject}"
-                    )
-                print(
-                        f"Conversation ID : {conversation.id}"
-                    )
+                log_event(
+                    logger,
+                    "info",
+                    "gmail.message.synced",
+                    provider="gmail",
+                    account_id=email_account.id,
+                    conversation_id=conversation.id,
+                    message_id=message_obj.id,
+                )
 
-                print(
-                        f"Message ID : {message_obj.id}"
-                    )
 
         except Exception as e:
             failed_thread_count += 1
 
-            print(
-                "? Gmail thread sync failed:",
-                str(e),
+            log_event(
+                logger,
+                "warning",
+                "gmail.thread.failed",
+                provider="gmail",
+                account_id=email_account.id,
+                failed_thread_count=failed_thread_count,
+                error_type=type(e).__name__,
             )
 
             # Preserve successfully processed threads and keep
