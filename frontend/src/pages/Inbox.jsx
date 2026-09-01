@@ -120,6 +120,11 @@ export default function Inbox() {
   const [activeDraftId, setActiveDraftId] =
     useState(null);
 
+  const [
+    composePersistedAttachments,
+    setComposePersistedAttachments,
+  ] = useState([]);
+
 
   // ==========================================================
   // UI STATE
@@ -1030,8 +1035,13 @@ export default function Inbox() {
       ];
 
 
+      const totalCount =
+        composePersistedAttachments.length +
+        next.length;
+
+
       if (
-        next.length >
+        totalCount >
         10
       ) {
 
@@ -1044,7 +1054,22 @@ export default function Inbox() {
       }
 
 
-      const total =
+      const persistedTotal =
+        composePersistedAttachments.reduce(
+          (
+            current,
+            attachment
+          ) =>
+            current +
+            Number(
+              attachment.size ||
+              0
+            ),
+          0
+        );
+
+
+      const newTotal =
         next.reduce(
           (
             current,
@@ -1060,7 +1085,8 @@ export default function Inbox() {
 
 
       if (
-        total >
+        persistedTotal +
+        newTotal >
         composeAttachmentLimitBytes
       ) {
 
@@ -1102,6 +1128,25 @@ export default function Inbox() {
             ) =>
               fileIndex !==
               index
+          )
+      );
+
+    };
+
+
+  const removePersistedDraftAttachment =
+    (attachmentId) => {
+
+      setComposePersistedAttachments(
+        (current) =>
+          current.filter(
+            (attachment) =>
+              String(
+                attachment.id
+              ) !==
+              String(
+                attachmentId
+              )
           )
       );
 
@@ -1400,6 +1445,8 @@ export default function Inbox() {
 
       setComposeFiles([]);
 
+      setComposePersistedAttachments([]);
+
 
       setComposeData({
         to: [],
@@ -1577,56 +1624,130 @@ export default function Inbox() {
   // SAVE DRAFT
   // ==========================================================
 
-  const saveDraft = async () => {
+  const persistCurrentDraft =
+    async () => {
 
-    if (
-      composeFiles.length >
-      0
-    ) {
+      if (!composeAccountId) {
 
-      setError(
-        "Draft attachments are not persisted yet. Send now or remove the files before saving this draft."
+        throw new Error(
+          "Select the sending mailbox."
+        );
+
+      }
+
+
+      const formData =
+        new FormData();
+
+
+      if (activeDraftId) {
+
+        formData.append(
+          "draft_id",
+          activeDraftId
+        );
+
+      }
+
+
+      if (selectedId) {
+
+        formData.append(
+          "conversation_id",
+          selectedId
+        );
+
+      }
+
+
+      formData.append(
+        "subject",
+        composeData.subject
       );
 
-      return;
-    }
+      formData.append(
+        "body",
+        composeData.body
+      );
 
+      formData.append(
+        "recipients",
+        serializeRecipients(
+          composeData.to
+        )
+      );
+
+      formData.append(
+        "to",
+        serializeRecipients(
+          composeData.to
+        )
+      );
+
+      formData.append(
+        "cc",
+        serializeRecipients(
+          composeData.cc
+        )
+      );
+
+      formData.append(
+        "bcc",
+        serializeRecipients(
+          composeData.bcc
+        )
+      );
+
+      formData.append(
+        "account_id",
+        composeAccountId
+      );
+
+      formData.append(
+        "retained_attachment_ids",
+        JSON.stringify(
+          composePersistedAttachments.map(
+            (attachment) =>
+              attachment.id
+          )
+        )
+      );
+
+
+      for (
+        const file
+        of composeFiles
+      ) {
+
+        formData.append(
+          "attachments",
+          file,
+          file.name
+        );
+
+      }
+
+
+      const response =
+        await axios.post(
+          "/api/inbox/draft/save/",
+          formData
+        );
+
+
+      return response.data;
+
+    };
+
+
+  const saveDraft = async () => {
 
     try {
 
       setError("");
 
 
-      await axios.post(
-        "/api/inbox/draft/save/",
-        {
-          conversation_id:
-            selectedId,
-
-          subject:
-            composeData.subject,
-
-          body:
-            composeData.body,
-
-          recipients:
-            serializeRecipients(
-              composeData.to
-            ),
-
-          to:
-            composeData.to,
-
-          cc:
-            composeData.cc,
-
-          bcc:
-            composeData.bcc,
-
-          account_id:
-            composeAccountId,
-        }
-      );
+      await persistCurrentDraft();
 
 
       setShowCompose(false);
@@ -1635,11 +1756,15 @@ export default function Inbox() {
 
       setSelectedId(null);
 
+      setComposeFiles([]);
+
+      setComposePersistedAttachments([]);
+
 
       setComposeData({
         to: [],
-    cc: [],
-    bcc: [],
+        cc: [],
+        bcc: [],
         subject: "",
         body: "",
       });
@@ -1648,6 +1773,7 @@ export default function Inbox() {
       setActiveTab("draft");
 
       await loadDrafts();
+
 
     } catch (err) {
 
@@ -1659,6 +1785,7 @@ export default function Inbox() {
 
       setError(
         err.response?.data?.error ||
+          err.message ||
           "Unable to save draft."
       );
 
@@ -1689,8 +1816,17 @@ export default function Inbox() {
       setError("");
 
 
+      const saved =
+        await persistCurrentDraft();
+
+
+      const savedDraftId =
+        saved?.draft_id ||
+        activeDraftId;
+
+
       await axios.post(
-        `/api/inbox/draft/send/${activeDraftId}/`
+        `/api/inbox/draft/send/${savedDraftId}/`
       );
 
 
@@ -1700,11 +1836,15 @@ export default function Inbox() {
 
       setSelectedId(null);
 
+      setComposeFiles([]);
+
+      setComposePersistedAttachments([]);
+
 
       setComposeData({
         to: [],
-    cc: [],
-    bcc: [],
+        cc: [],
+        bcc: [],
         subject: "",
         body: "",
       });
@@ -1713,6 +1853,7 @@ export default function Inbox() {
       await loadDrafts();
 
       setActiveTab("sent");
+
 
     } catch (err) {
 
@@ -1724,6 +1865,7 @@ export default function Inbox() {
 
       setError(
         err.response?.data?.error ||
+          err.message ||
           "Unable to send draft."
       );
 
@@ -2527,6 +2669,14 @@ export default function Inbox() {
 
     setComposeFiles([]);
 
+    setComposePersistedAttachments(
+      Array.isArray(
+        draft.attachments
+      )
+        ? draft.attachments
+        : []
+    );
+
     setForwardSourceId(null);
 
     setActiveDraftId(
@@ -2614,6 +2764,8 @@ export default function Inbox() {
 
     setComposeFiles([]);
 
+    setComposePersistedAttachments([]);
+
 
     if (activeTab === "draft") {
       setSelectedId(null);
@@ -2676,6 +2828,10 @@ export default function Inbox() {
                   setActiveDraftId(
                     null
                   );
+
+                  setComposeFiles([]);
+
+                  setComposePersistedAttachments([]);
 
                   setForwardSourceId(
                     null
@@ -4130,33 +4286,80 @@ export default function Inbox() {
                   </div>
 
 
-                  {!activeDraftId && (
+                  <label className="inline-flex cursor-pointer items-center justify-center rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50">
 
-                    <label className="inline-flex cursor-pointer items-center justify-center rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50">
+                    Add files
 
-                      Add files
+                    <input
+                      type="file"
+                      multiple
+                      onChange={
+                        handleComposeFiles
+                      }
+                      className="hidden"
+                    />
 
-                      <input
-                        type="file"
-                        multiple
-                        onChange={
-                          handleComposeFiles
-                        }
-                        className="hidden"
-                      />
-
-                    </label>
-
-                  )}
+                  </label>
 
                 </div>
 
 
                 {activeDraftId && (
 
-                  <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[11px] leading-5 text-amber-800">
-                    Persistent attachments in saved drafts are not available yet. Existing drafts can still be sent normally.
+                  <p className="mt-3 text-[11px] leading-5 text-slate-500">
+                    Saved draft files stay attached when you close and reopen this draft.
                   </p>
+
+                )}
+
+
+                {composePersistedAttachments.length > 0 && (
+
+                  <div className="mt-3 space-y-2">
+
+                    {composePersistedAttachments.map(
+                      (attachment) => (
+
+                        <div
+                          key={`saved-${attachment.id}`}
+                          className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5"
+                        >
+
+                          <div className="min-w-0">
+
+                            <p className="truncate text-xs font-semibold text-slate-700">
+                              {attachment.filename}
+                            </p>
+
+                            <p className="mt-0.5 text-[10px] text-slate-400">
+                              Saved in draft
+                              {" ? "}
+                              {formatComposeFileSize(
+                                attachment.size
+                              )}
+                            </p>
+
+                          </div>
+
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              removePersistedDraftAttachment(
+                                attachment.id
+                              )
+                            }
+                            className="shrink-0 rounded-lg px-2 py-1 text-[10px] font-semibold text-rose-600 hover:bg-rose-50"
+                          >
+                            Remove
+                          </button>
+
+                        </div>
+
+                      )
+                    )}
+
+                  </div>
 
                 )}
 

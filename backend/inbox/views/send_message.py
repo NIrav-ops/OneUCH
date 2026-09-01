@@ -84,6 +84,7 @@ class UnifiedSendMessageAPIView(
         request,
         data,
         signature_already_applied=False,
+        prepared_attachments=None,
     ):
 
         try:
@@ -213,12 +214,20 @@ class UnifiedSendMessageAPIView(
 
             try:
 
-                outbound_attachments = (
-                    prepare_outbound_attachments(
-                        request=request,
-                        account=account,
+                if prepared_attachments is None:
+
+                    outbound_attachments = (
+                        prepare_outbound_attachments(
+                            request=request,
+                            account=account,
+                        )
                     )
-                )
+
+                else:
+
+                    outbound_attachments = list(
+                        prepared_attachments
+                    )
 
             except ValueError as exc:
 

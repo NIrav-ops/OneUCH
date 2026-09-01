@@ -533,7 +533,7 @@ class OutboundAttachmentTests(
         mocked_build.assert_not_called()
 
 
-    def test_draft_save_rejects_uploaded_file_instead_of_silent_loss(
+    def test_draft_save_persists_uploaded_file_instead_of_silent_loss(
         self,
     ):
         upload = (
@@ -573,14 +573,83 @@ class OutboundAttachmentTests(
 
         self.assertEqual(
             response.status_code,
-            400,
+            200,
         )
 
-        self.assertIn(
-            "Draft attachment persistence",
+
+        self.assertEqual(
             response.data[
-                "error"
+                "status"
             ],
+            "draft_saved",
+        )
+
+
+        self.assertEqual(
+            response.data[
+                "attachment_count"
+            ],
+            1,
+        )
+
+
+        draft = (
+            InboxMessage.objects
+            .get(
+                id=response.data[
+                    "draft_id"
+                ]
+            )
+        )
+
+
+        self.assertTrue(
+            draft.is_draft
+        )
+
+
+        self.assertEqual(
+            draft.attachments.count(),
+            1,
+        )
+
+
+        attachment = (
+            draft.attachments.first()
+        )
+
+
+        self.assertEqual(
+            attachment.filename,
+            "draft.pdf",
+        )
+
+
+        self.assertEqual(
+            attachment.content_type,
+            "application/pdf",
+        )
+
+
+        attachment.file.open(
+            "rb"
+        )
+
+
+        try:
+
+            content = (
+                attachment.file.read()
+            )
+
+        finally:
+
+            attachment.file.close()
+
+
+        self.assertEqual(
+            content,
+            b"draft-file",
         )
 
 
