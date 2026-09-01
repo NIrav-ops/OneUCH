@@ -4,6 +4,18 @@ from email.mime.text import (
     MIMEText,
 )
 
+from email.mime.multipart import (
+    MIMEMultipart,
+)
+
+from email.mime.base import (
+    MIMEBase,
+)
+
+from email import (
+    encoders,
+)
+
 import requests
 
 from oauth_tokens.services import (
@@ -142,6 +154,69 @@ def _gmail_reply_headers(
     return values
 
 
+def _gmail_attachment_part(
+    item,
+):
+    content_type = (
+        str(
+            item.get(
+                "content_type",
+                "",
+            )
+            or
+            "application/octet-stream"
+        )
+        .strip()
+    )
+
+
+    if "/" in content_type:
+
+        main_type, sub_type = (
+            content_type.split(
+                "/",
+                1,
+            )
+        )
+
+    else:
+
+        main_type = "application"
+        sub_type = "octet-stream"
+
+
+    part = MIMEBase(
+        main_type,
+        sub_type,
+    )
+
+
+    part.set_payload(
+        item[
+            "content"
+        ]
+    )
+
+
+    encoders.encode_base64(
+        part
+    )
+
+
+    part.add_header(
+        "Content-Disposition",
+        "attachment",
+        filename=(
+            item[
+                "filename"
+            ]
+        ),
+    )
+
+
+    return part
+
+
 def send_gmail_reply(
     user,
     to_email,
@@ -151,6 +226,7 @@ def send_gmail_reply(
     cc_emails=None,
     thread_id=None,
     reply_to_message_id=None,
+    attachments=None,
 ):
     token = (
         get_valid_oauth_token(
@@ -160,11 +236,40 @@ def send_gmail_reply(
     )
 
 
-    message = (
-        MIMEText(
-            body
-        )
+    attachments = (
+        attachments
+        or []
     )
+
+
+    if attachments:
+
+        message = (
+            MIMEMultipart()
+        )
+
+        message.attach(
+            MIMEText(
+                body
+            )
+        )
+
+
+        for item in attachments:
+
+            message.attach(
+                _gmail_attachment_part(
+                    item
+                )
+            )
+
+    else:
+
+        message = (
+            MIMEText(
+                body
+            )
+        )
 
 
     message[

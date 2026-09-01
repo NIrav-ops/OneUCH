@@ -105,6 +105,11 @@ export default function Inbox() {
 
   const [replying, setReplying] = useState(false);
 
+  const [
+    replyFiles,
+    setReplyFiles,
+  ] = useState([]);
+
 
   // ==========================================================
   // DRAFT STATE
@@ -1104,6 +1109,158 @@ export default function Inbox() {
 
 
   // ==========================================================
+  // REPLY ATTACHMENT HELPERS
+  // ==========================================================
+
+  const replySourceMessage =
+    messages.length > 0
+      ? messages[
+          messages.length - 1
+        ]
+      : null;
+
+
+  const replySourceAccount =
+    accounts.find(
+      (account) =>
+        String(
+          account.id
+        ) ===
+        String(
+          replySourceMessage
+            ?.email_account_id ||
+          ""
+        )
+    );
+
+
+  const replyAttachmentLimitBytes =
+    replySourceAccount
+      ?.account_type ===
+      "outlook"
+        ? 3 * 1024 * 1024
+        : 18 * 1024 * 1024;
+
+
+  const handleReplyFiles =
+    (event) => {
+
+      const selected =
+        Array.from(
+          event.target.files ||
+          []
+        );
+
+
+      event.target.value =
+        "";
+
+
+      if (
+        !replySourceAccount ||
+        ![
+          "gmail",
+          "outlook",
+        ].includes(
+          replySourceAccount
+            .account_type
+        )
+      ) {
+
+        setError(
+          "Reply attachments are available for Gmail and Microsoft 365."
+        );
+
+        return;
+
+      }
+
+
+      const next = [
+        ...replyFiles,
+        ...selected,
+      ];
+
+
+      if (
+        next.length >
+        10
+      ) {
+
+        setError(
+          "A maximum of 10 attachments can be sent at once."
+        );
+
+        return;
+
+      }
+
+
+      const total =
+        next.reduce(
+          (
+            current,
+            file
+          ) =>
+            current +
+            Number(
+              file.size ||
+              0
+            ),
+          0
+        );
+
+
+      if (
+        total >
+        replyAttachmentLimitBytes
+      ) {
+
+        const limitMb =
+          replySourceAccount
+            .account_type ===
+            "outlook"
+              ? 3
+              : 18;
+
+
+        setError(
+          `Attachments exceed the ${limitMb} MB outbound limit for this mailbox.`
+        );
+
+        return;
+
+      }
+
+
+      setError("");
+
+      setReplyFiles(
+        next
+      );
+
+    };
+
+
+  const removeReplyFile =
+    (index) => {
+
+      setReplyFiles(
+        (current) =>
+          current.filter(
+            (
+              _file,
+              fileIndex
+            ) =>
+              fileIndex !==
+              index
+          )
+      );
+
+    };
+
+
+  // ==========================================================
   // SEND EMAIL
   // ==========================================================
 
@@ -1288,7 +1445,6 @@ export default function Inbox() {
       );
 
       return;
-
     }
 
 
@@ -1299,7 +1455,6 @@ export default function Inbox() {
       );
 
       return;
-
     }
 
 
@@ -1310,20 +1465,68 @@ export default function Inbox() {
       setReplying(true);
 
 
-      await axios.post(
-        `/api/inbox/conversations/${selectedId}/reply/`,
-        {
-          body:
-            replyBody.trim(),
+      const endpoint =
+        `/api/inbox/conversations/${selectedId}/reply/`;
 
-          mode:
-            replyMode,
+
+      if (
+        replyFiles.length >
+        0
+      ) {
+
+        const formData =
+          new FormData();
+
+
+        formData.append(
+          "body",
+          replyBody.trim()
+        );
+
+        formData.append(
+          "mode",
+          replyMode
+        );
+
+
+        for (
+          const file
+          of replyFiles
+        ) {
+
+          formData.append(
+            "attachments",
+            file,
+            file.name
+          );
 
         }
-      );
+
+
+        await axios.post(
+          endpoint,
+          formData
+        );
+
+      } else {
+
+        await axios.post(
+          endpoint,
+          {
+            body:
+              replyBody.trim(),
+
+            mode:
+              replyMode,
+          }
+        );
+
+      }
 
 
       setReplyBody("");
+
+      setReplyFiles([]);
 
       setShowReply(false);
 
@@ -1346,6 +1549,7 @@ export default function Inbox() {
 
       await loadConversations();
 
+
     } catch (err) {
 
       console.error(
@@ -1358,6 +1562,7 @@ export default function Inbox() {
         err.response?.data?.error ||
           "Unable to send reply."
       );
+
 
     } finally {
 
@@ -3311,6 +3516,8 @@ export default function Inbox() {
                             "reply"
                           );
 
+                          setReplyFiles([]);
+
                           setShowReply(
                             true
                           );
@@ -3333,6 +3540,8 @@ export default function Inbox() {
                           setReplyMode(
                             "reply_all"
                           );
+
+                          setReplyFiles([]);
 
                           setShowReply(
                             true
@@ -4129,7 +4338,7 @@ export default function Inbox() {
             </div>
 
 
-            <div className="px-5 py-5">
+            <div className="space-y-4 px-5 py-5">
 
               <textarea
                 rows={9}
@@ -4147,6 +4356,107 @@ export default function Inbox() {
                 }
                 className="w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm leading-6 text-slate-800 outline-none placeholder:text-slate-400 focus:border-slate-400 focus:ring-2 focus:ring-slate-100 disabled:bg-slate-50"
               />
+
+
+              <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+
+                  <div>
+
+                    <p className="text-sm font-semibold text-slate-800">
+                      Attach files
+                    </p>
+
+                    <p className="mt-1 text-[11px] leading-5 text-slate-500">
+                      Up to 10 files. Gmail: 18 MB total. Microsoft 365: 3 MB total.
+                    </p>
+
+                  </div>
+
+
+                  <label
+                    className={`inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 shadow-sm ${
+                      replying
+                        ? "cursor-not-allowed opacity-50"
+                        : "cursor-pointer hover:bg-slate-50"
+                    }`}
+                  >
+
+                    Add files
+
+                    <input
+                      type="file"
+                      multiple
+                      disabled={
+                        replying
+                      }
+                      onChange={
+                        handleReplyFiles
+                      }
+                      className="hidden"
+                    />
+
+                  </label>
+
+                </div>
+
+
+                {replyFiles.length > 0 && (
+
+                  <div className="mt-3 space-y-2">
+
+                    {replyFiles.map(
+                      (
+                        file,
+                        index
+                      ) => (
+
+                        <div
+                          key={`${file.name}-${file.size}-${index}`}
+                          className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5"
+                        >
+
+                          <div className="min-w-0">
+
+                            <p className="truncate text-xs font-semibold text-slate-700">
+                              {file.name}
+                            </p>
+
+                            <p className="mt-0.5 text-[10px] text-slate-400">
+                              {formatComposeFileSize(
+                                file.size
+                              )}
+                            </p>
+
+                          </div>
+
+
+                          <button
+                            type="button"
+                            disabled={
+                              replying
+                            }
+                            onClick={() =>
+                              removeReplyFile(
+                                index
+                              )
+                            }
+                            className="shrink-0 rounded-lg px-2 py-1 text-[10px] font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50"
+                          >
+                            Remove
+                          </button>
+
+                        </div>
+
+                      )
+                    )}
+
+                  </div>
+
+                )}
+
+              </div>
 
             </div>
 

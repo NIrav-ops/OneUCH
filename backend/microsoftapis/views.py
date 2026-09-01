@@ -44,7 +44,7 @@ class MicrosoftOAuthStart(APIView):
             "response_type": "code",
             "redirect_uri": settings.MICROSOFT_REDIRECT_URI,
             "response_mode": "query",
-            "scope": "offline_access Mail.Read Mail.Send User.Read",
+            "scope": "offline_access Mail.ReadWrite Mail.Send User.Read",
             "state": state,
         }
 

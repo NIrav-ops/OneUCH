@@ -19,6 +19,10 @@ from email_accounts.services.gmail_api import send_gmail_reply
 from email_accounts.services.microsoft_api import send_outlook_reply
 from email_accounts.services.imap_smtp import send_via_smtp, fetch_imap_emails
 
+from inbox.services.persistent_outbound_attachments import (
+    load_persisted_outbound_attachments,
+)
+
 from googleapis.services.gmail_sync import fetch_gmail_emails
 from microsoftapis.services.outlook_sync import fetch_outlook_emails
 
@@ -533,60 +537,114 @@ def _deliver_reply_message(
     )
 
 
+    attachments = (
+        load_persisted_outbound_attachments(
+            message=inbox_message
+        )
+    )
+
+
     if email_account.account_type == "gmail":
 
-        return (
-            send_gmail_reply(
-                user=(
-                    email_account.user
-                ),
-                to_email=(
-                    to_value
-                ),
-                subject=subject,
-                body=body,
-                cc_emails=(
-                    cc_addresses
-                ),
-                thread_id=(
+        gmail_kwargs = {
+            "user":
+                email_account.user,
+
+            "to_email":
+                to_value,
+
+            "subject":
+                subject,
+
+            "body":
+                body,
+
+            "cc_emails":
+                cc_addresses,
+
+            "thread_id":
+                (
                     inbox_message
                     .external_conversation_id
                 ),
-                reply_to_message_id=(
+
+            "reply_to_message_id":
+                (
                     inbox_message
                     .in_reply_to
                 ),
+        }
+
+
+        # Preserve the legacy call signature when there are no
+        # files. Existing provider behavior and tests therefore
+        # remain backward compatible.
+        if attachments:
+
+            gmail_kwargs[
+                "attachments"
+            ] = attachments
+
+
+        return (
+            send_gmail_reply(
+                **gmail_kwargs
             )
         )
 
 
     if email_account.account_type == "outlook":
 
-        return (
-            send_outlook_reply(
-                user=(
-                    email_account.user
-                ),
-                to_email=(
-                    to_value
-                ),
-                subject=subject,
-                body=body,
-                cc_emails=(
-                    cc_addresses
-                ),
-                reply_to_message_id=(
+        outlook_kwargs = {
+            "user":
+                email_account.user,
+
+            "to_email":
+                to_value,
+
+            "subject":
+                subject,
+
+            "body":
+                body,
+
+            "cc_emails":
+                cc_addresses,
+
+            "reply_to_message_id":
+                (
                     inbox_message
                     .in_reply_to
                 ),
-                reply_mode=(
-                    reply_mode
-                ),
+
+            "reply_mode":
+                reply_mode,
+        }
+
+
+        if attachments:
+
+            outlook_kwargs[
+                "attachments"
+            ] = attachments
+
+
+        return (
+            send_outlook_reply(
+                **outlook_kwargs
             )
         )
 
 
     if email_account.account_type == "imap":
+
+        if attachments:
+
+            raise ValueError(
+                "Reply attachments are currently supported "
+                "only for Gmail and Microsoft 365."
+            )
+
 
         smtp_to = (
             to_value

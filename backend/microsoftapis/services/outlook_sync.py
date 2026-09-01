@@ -799,6 +799,21 @@ def _fetch_folder(
 
     return messages
 
+def _normalized_reconciliation_text(
+    value,
+):
+    return (
+        " ".join(
+            str(
+                value
+                or ""
+            )
+            .split()
+        )
+        .casefold()
+    )
+
+
 def _find_local_outbound_candidate(
     *,
     user,
@@ -807,45 +822,80 @@ def _find_local_outbound_candidate(
     recipients,
     body_preview,
     sent_at,
+    thread_id=None,
 ):
     """
-    Reconcile a Graph Sent Item with a message that One UCH
-    already persisted at send/reply time.
+    Conservatively reconcile a Graph Sent Item with a One UCH
+    outbound placeholder.
 
-    Matching is intentionally conservative:
-    - same account
-    - outbound Outlook message
-    - provider id not yet known (sent/pending)
-    - sent status
-    - exact subject
-    - same normalized recipients
-    - near the Graph sent timestamp
-    - compatible body preview
+    Native Microsoft Reply / Reply-All can normalize:
+    - subject casing (Re: / RE:)
+    - whitespace and line breaks in the reply body
+    - quoted body formatting.
 
-    If zero or multiple candidates match, no reconciliation
-    is attempted. This avoids attaching a provider message to
-    the wrong local business record.
+    Graph conversationId is therefore the strongest available
+    stable identity for a native reply.
+
+    Rules:
+    - same user/account
+    - Outlook outbound
+    - unresolved provider id only (sent/pending)
+    - sent state
+    - within ten minutes of provider Sent time
+    - same Graph conversation when both sides have one
+    - normalized subject equality
+    - same normalized To recipients
+
+    If exactly one candidate survives those strong constraints,
+    it is safe to reconcile.
+
+    If more than one survives (for example, two replies in the
+    same thread within ten minutes), normalized body text is used
+    only as a secondary discriminator.
+
+    Zero or ambiguous matches are intentionally not reconciled.
     """
-
     lower_bound = (
         sent_at
-        - timedelta(
+        -
+        timedelta(
             minutes=10
         )
     )
+
 
     upper_bound = (
         sent_at
-        + timedelta(
+        +
+        timedelta(
             minutes=10
         )
     )
 
+
     graph_recipient_set = {
-        value.lower()
-        for value in recipients
-        if value
+        str(
+            value
+        )
+        .strip()
+        .lower()
+
+        for value
+        in recipients
+
+        if str(
+            value
+            or ""
+        ).strip()
     }
+
+
+    normalized_subject = (
+        _normalized_reconciliation_text(
+            subject
+        )
+    )
+
 
     candidates = (
         InboxMessage.objects
@@ -859,7 +909,6 @@ def _find_local_outbound_candidate(
                 "pending",
             ],
             status="sent",
-            subject=subject,
             received_at__gte=(
                 lower_bound
             ),
@@ -872,47 +921,131 @@ def _find_local_outbound_candidate(
         )
     )
 
-    matches = []
 
-    normalized_preview = (
-        body_preview
-        or ""
-    ).strip()
+    strong_matches = []
+
 
     for candidate in candidates:
+
+        candidate_thread = (
+            str(
+                candidate.external_conversation_id
+                or ""
+            )
+            .strip()
+        )
+
+
+        provider_thread = (
+            str(
+                thread_id
+                or ""
+            )
+            .strip()
+        )
+
+
+        if (
+            provider_thread
+            and
+            candidate_thread
+            and
+            provider_thread
+            !=
+            candidate_thread
+        ):
+            continue
+
+
+        if (
+            _normalized_reconciliation_text(
+                candidate.subject
+            )
+            !=
+            normalized_subject
+        ):
+            continue
+
+
         if (
             _candidate_to_recipient_set(
                 candidate
             )
-            != graph_recipient_set
+            !=
+            graph_recipient_set
         ):
             continue
 
-        local_body = (
-            candidate.body
-            or ""
-        ).strip()
 
-        if (
-            normalized_preview
-            and local_body
-            and not (
-                local_body.startswith(
-                    normalized_preview
-                )
-                or normalized_preview.startswith(
-                    local_body
-                )
-            )
-        ):
-            continue
-
-        matches.append(
+        strong_matches.append(
             candidate
         )
 
-    if len(matches) == 1:
-        return matches[0]
+
+    if len(
+        strong_matches
+    ) == 1:
+
+        return (
+            strong_matches[0]
+        )
+
+
+    if len(
+        strong_matches
+    ) != 0:
+
+        normalized_preview = (
+            _normalized_reconciliation_text(
+                body_preview
+            )
+        )
+
+
+        body_matches = []
+
+
+        for candidate in strong_matches:
+
+            normalized_local_body = (
+                _normalized_reconciliation_text(
+                    candidate.body
+                )
+            )
+
+
+            if (
+                not normalized_preview
+                or
+                not normalized_local_body
+            ):
+
+                continue
+
+
+            if (
+                normalized_local_body.startswith(
+                    normalized_preview
+                )
+                or
+                normalized_preview.startswith(
+                    normalized_local_body
+                )
+            ):
+
+                body_matches.append(
+                    candidate
+                )
+
+
+        if len(
+            body_matches
+        ) == 1:
+
+            return (
+                body_matches[0]
+            )
+
 
     return None
 
@@ -1453,6 +1586,9 @@ def fetch_outlook_emails(
                                 ),
                                 sent_at=(
                                     received_at
+                                ),
+                                thread_id=(
+                                    thread_id
                                 ),
                             )
                         )

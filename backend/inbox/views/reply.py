@@ -36,6 +36,15 @@ from inbox.services.reply_recipients import (
     resolve_reply_recipients,
 )
 
+from inbox.services.outbound_attachments import (
+    attachment_metadata,
+    prepare_outbound_attachments,
+)
+
+from inbox.services.persistent_outbound_attachments import (
+    persist_outbound_attachments,
+)
+
 from inbox.tasks import (
     send_email_task,
 )
@@ -268,6 +277,26 @@ class ReplyConversationAPIView(
             )
 
 
+        try:
+
+            outbound_attachments = (
+                prepare_outbound_attachments(
+                    request=request,
+                    account=email_account,
+                )
+            )
+
+        except ValueError as exc:
+
+            return Response(
+                {
+                    "error":
+                        str(exc)
+                },
+                status=400,
+            )
+
+
         body = (
             apply_account_signature(
                 account=email_account,
@@ -349,6 +378,11 @@ class ReplyConversationAPIView(
                     latest_message
                     .external_message_id
                 ),
+                attachment_meta=(
+                    attachment_metadata(
+                        outbound_attachments
+                    )
+                ),
                 sender=(
                     sender_email
                 ),
@@ -371,6 +405,28 @@ class ReplyConversationAPIView(
                 status="queued",
             )
         )
+
+
+        try:
+
+            persist_outbound_attachments(
+                message=reply_message,
+                prepared=outbound_attachments,
+            )
+
+        except Exception:
+
+            reply_message.delete()
+
+            return Response(
+                {
+                    "error": (
+                        "Unable to persist "
+                        "reply attachments."
+                    )
+                },
+                status=500,
+            )
 
 
         primary_to = (
@@ -414,6 +470,11 @@ class ReplyConversationAPIView(
 
                 "mode":
                     mode,
+
+                "attachment_count":
+                    len(
+                        outbound_attachments
+                    ),
 
                 "message_id":
                     reply_message.id,
