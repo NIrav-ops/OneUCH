@@ -22,6 +22,12 @@ from email_accounts.services.signatures import (
     apply_account_signature,
 )
 
+from inbox.services.forward_attachments import (
+    ForwardAttachmentProviderError,
+    prepare_forward_attachments,
+    serialize_forward_source_attachments,
+)
+
 
 def _forward_subject(
     source_subject,
@@ -45,7 +51,8 @@ def _forward_subject(
 
     return (
         "Fwd: "
-        + value
+        +
+        value
     )
 
 
@@ -64,37 +71,82 @@ def _forwarded_body(
     )
 
 
-    cc_addresses = [
-        str(
-            item.get(
-                "email",
-                "",
-            )
-        )
-        .strip()
+    # Intentionally only materialize To and Cc from the source.
+    # Bcc is private envelope information and must never be
+    # disclosed to the new forwarding recipient.
+    def bucket_addresses(
+        bucket,
+    ):
+        values = []
 
-        for item
-        in (
+        seen = set()
+
+
+        for item in (
             source_recipient_meta.get(
-                "cc",
+                bucket,
                 [],
             )
             or []
-        )
+        ):
 
-        if (
-            isinstance(
+            if not isinstance(
                 item,
                 dict,
+            ):
+                continue
+
+
+            email_value = (
+                str(
+                    item.get(
+                        "email",
+                        "",
+                    )
+                )
+                .strip()
+                .lower()
             )
-            and
-            item.get(
-                "email"
+
+
+            if (
+                not email_value
+                or
+                email_value in seen
+            ):
+                continue
+
+
+            seen.add(
+                email_value
             )
+
+            values.append(
+                email_value
+            )
+
+
+        return values
+
+
+    to_addresses = (
+        bucket_addresses(
+            "to"
         )
-    ]
+    )
 
 
+    cc_addresses = (
+        bucket_addresses(
+            "cc"
+        )
+    )
+
+
+    # Do not use the legacy flat `source.recipients` field in
+    # quoted Forward headers. Modern sync intentionally flattens
+    # To + Cc + Bcc into that compatibility field, so using it
+    # here could disclose a source Bcc recipient.
     lines = [
         "---------- Forwarded message ----------",
         (
@@ -124,15 +176,18 @@ def _forwarded_body(
                 "No Subject"
             )
         ),
-        (
+    ]
+
+
+    if to_addresses:
+
+        lines.append(
             "To: "
             +
-            str(
-                source.recipients
-                or ""
+            ", ".join(
+                to_addresses
             )
-        ),
-    ]
+        )
 
 
     if cc_addresses:
@@ -196,16 +251,19 @@ class ForwardMessageAPIView(
     ]
 
 
-    def post(
+    def _source(
         self,
         request,
         message_id,
     ):
-        source = (
+        return (
             InboxMessage.objects
             .select_related(
                 "email_account",
                 "conversation",
+            )
+            .prefetch_related(
+                "attachments"
             )
             .filter(
                 id=message_id,
@@ -219,6 +277,11 @@ class ForwardMessageAPIView(
         )
 
 
+    def _account_error(
+        self,
+        request,
+        source,
+    ):
         if source is None:
 
             return Response(
@@ -252,6 +315,100 @@ class ForwardMessageAPIView(
                 },
                 status=400,
             )
+
+
+        return None
+
+
+    def get(
+        self,
+        request,
+        message_id,
+    ):
+        """
+        Read-only Forward preflight.
+
+        The frontend uses this to display the original files that
+        are selected by default. No provider content is downloaded
+        during preflight.
+        """
+        source = (
+            self._source(
+                request,
+                message_id,
+            )
+        )
+
+
+        error = (
+            self._account_error(
+                request,
+                source,
+            )
+        )
+
+
+        if error is not None:
+            return error
+
+
+        source_attachments = (
+            serialize_forward_source_attachments(
+                source
+            )
+        )
+
+
+        return Response(
+            {
+                "message_id":
+                    source.id,
+
+                "account_id":
+                    source.email_account_id,
+
+                "source_attachment_count":
+                    len(
+                        source_attachments
+                    ),
+
+                "source_attachments":
+                    source_attachments,
+
+                "attachments_forwarded_by_default":
+                    True,
+            }
+        )
+
+
+    def post(
+        self,
+        request,
+        message_id,
+    ):
+        source = (
+            self._source(
+                request,
+                message_id,
+            )
+        )
+
+
+        error = (
+            self._account_error(
+                request,
+                source,
+            )
+        )
+
+
+        if error is not None:
+            return error
+
+
+        account = (
+            source.email_account
+        )
 
 
         subject = (
@@ -309,11 +466,44 @@ class ForwardMessageAPIView(
                     note=signed_note,
                 ),
 
-            # A forward must use the mailbox that owns
-            # the source message.
+            # Forward remains bound to the mailbox that owns
+            # the original message.
             "account_id":
                 account.id,
         }
+
+
+        try:
+
+            prepared = (
+                prepare_forward_attachments(
+                    request=request,
+                    source=source,
+                    account=account,
+                )
+            )
+
+
+        except ValueError as exc:
+
+            return Response(
+                {
+                    "error":
+                        str(exc)
+                },
+                status=400,
+            )
+
+
+        except ForwardAttachmentProviderError as exc:
+
+            return Response(
+                {
+                    "error":
+                        str(exc)
+                },
+                status=502,
+            )
 
 
         response = (
@@ -322,6 +512,11 @@ class ForwardMessageAPIView(
                 request=request,
                 data=payload,
                 signature_already_applied=True,
+                prepared_attachments=(
+                    prepared[
+                        "attachments"
+                    ]
+                ),
             )
         )
 
@@ -337,28 +532,42 @@ class ForwardMessageAPIView(
             )
         ):
 
-            source_attachment_count = (
-                len(
-                    source.attachment_meta
-                    or []
-                )
-            )
-
-
             response.data[
                 "source_attachment_count"
             ] = (
-                source_attachment_count
+                prepared[
+                    "source_attachment_count"
+                ]
             )
 
 
-            # Attachment forwarding is intentionally explicit.
-            # Current provider-native attachment download remains
-            # available, and advanced attachment-forwarding can
-            # be completed in Gmail/Outlook through Open Provider.
+            response.data[
+                "source_attachments_forwarded"
+            ] = (
+                prepared[
+                    "source_attachments_forwarded"
+                ]
+            )
+
+
+            response.data[
+                "user_attachment_count"
+            ] = (
+                prepared[
+                    "user_attachment_count"
+                ]
+            )
+
+
             response.data[
                 "attachments_forwarded"
-            ] = False
+            ] = (
+                prepared[
+                    "source_attachments_forwarded"
+                ]
+                >
+                0
+            )
 
 
         return response

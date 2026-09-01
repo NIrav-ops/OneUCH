@@ -430,6 +430,9 @@ class MailExperienceTests(
 
                     "body":
                         "FYI",
+
+                    "source_attachment_keys":
+                        [],
                 },
                 format="json",
             )

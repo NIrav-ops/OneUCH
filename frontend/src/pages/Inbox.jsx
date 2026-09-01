@@ -88,6 +88,11 @@ export default function Inbox() {
   ] = useState(null);
 
   const [
+    forwardSourceAttachments,
+    setForwardSourceAttachments,
+  ] = useState([]);
+
+  const [
     composeFiles,
     setComposeFiles,
   ] = useState([]);
@@ -1037,6 +1042,7 @@ export default function Inbox() {
 
       const totalCount =
         composePersistedAttachments.length +
+        forwardSourceAttachments.length +
         next.length;
 
 
@@ -1069,6 +1075,21 @@ export default function Inbox() {
         );
 
 
+      const forwardedTotal =
+        forwardSourceAttachments.reduce(
+          (
+            current,
+            attachment
+          ) =>
+            current +
+            Number(
+              attachment.size ||
+              0
+            ),
+          0
+        );
+
+
       const newTotal =
         next.reduce(
           (
@@ -1086,6 +1107,7 @@ export default function Inbox() {
 
       if (
         persistedTotal +
+        forwardedTotal +
         newTotal >
         composeAttachmentLimitBytes
       ) {
@@ -1147,6 +1169,21 @@ export default function Inbox() {
               String(
                 attachmentId
               )
+          )
+      );
+
+    };
+
+
+  const removeForwardSourceAttachment =
+    (attachmentKey) => {
+
+      setForwardSourceAttachments(
+        (current) =>
+          current.filter(
+            (attachment) =>
+              attachment.key !==
+              attachmentKey
           )
       );
 
@@ -1344,9 +1381,16 @@ export default function Inbox() {
           : "/api/inbox/send/";
 
 
+      // Forward always uses multipart, even when the user added
+      // no new files, because it must explicitly transmit the
+      // set of inherited originals that remain selected.
       if (
         composeFiles.length >
         0
+        ||
+        Boolean(
+          forwardSourceId
+        )
       ) {
 
         const formData =
@@ -1390,6 +1434,21 @@ export default function Inbox() {
         );
 
 
+        if (forwardSourceId) {
+
+          formData.append(
+            "source_attachment_keys",
+            JSON.stringify(
+              forwardSourceAttachments.map(
+                (attachment) =>
+                  attachment.key
+              )
+            )
+          );
+
+        }
+
+
         for (
           const file
           of composeFiles
@@ -1408,6 +1467,7 @@ export default function Inbox() {
           sendEndpoint,
           formData
         );
+
 
       } else {
 
@@ -1443,6 +1503,8 @@ export default function Inbox() {
 
       setForwardSourceId(null);
 
+      setForwardSourceAttachments([]);
+
       setComposeFiles([]);
 
       setComposePersistedAttachments([]);
@@ -1460,6 +1522,7 @@ export default function Inbox() {
       setSelectedId(null);
 
       setActiveTab("sent");
+
 
     } catch (err) {
 
@@ -2585,7 +2648,7 @@ export default function Inbox() {
     };
 
 
-  const beginForward = () => {
+  const beginForward = async () => {
 
     const latestMessage =
       messages.length > 0
@@ -2606,55 +2669,100 @@ export default function Inbox() {
     }
 
 
-    setError("");
+    try {
 
-    setActiveDraftId(null);
+      setError("");
 
-    setComposeFiles([]);
+      setActiveDraftId(null);
 
-    setForwardSourceId(
-      latestMessage.id
-    );
+      setComposeFiles([]);
 
-
-    setComposeAccountId(
-      latestMessage.email_account_id
-        ? String(
-            latestMessage.email_account_id
-          )
-        : ""
-    );
+      setComposePersistedAttachments([]);
 
 
-    const currentSubject =
-      latestMessage.subject ||
-      "No Subject";
+      const preflight =
+        await axios.get(
+          `/api/inbox/message/${latestMessage.id}/forward/`
+        );
 
 
-    const forwardSubject =
-      currentSubject
-        .toLowerCase()
-        .startsWith(
-          "fwd:"
+      const inherited =
+        Array.isArray(
+          preflight.data?.source_attachments
         )
-          ? currentSubject
-          : `Fwd: ${currentSubject}`;
+          ? preflight.data.source_attachments
+          : [];
 
 
-    setComposeData({
-      to: [],
-      cc: [],
-      bcc: [],
-      subject:
-        forwardSubject,
-      body:
-        "",
-    });
+      setForwardSourceAttachments(
+        inherited
+      );
 
 
-    setShowCompose(
-      true
-    );
+      setForwardSourceId(
+        latestMessage.id
+      );
+
+
+      setComposeAccountId(
+        latestMessage.email_account_id
+          ? String(
+              latestMessage.email_account_id
+            )
+          : ""
+      );
+
+
+      const currentSubject =
+        latestMessage.subject ||
+        "No Subject";
+
+
+      const forwardSubject =
+        currentSubject
+          .toLowerCase()
+          .startsWith(
+            "fwd:"
+          )
+            ? currentSubject
+            : `Fwd: ${currentSubject}`;
+
+
+      setComposeData({
+        to: [],
+        cc: [],
+        bcc: [],
+        subject:
+          forwardSubject,
+        body:
+          "",
+      });
+
+
+      setShowCompose(
+        true
+      );
+
+
+    } catch (err) {
+
+      console.error(
+        "Forward preflight error:",
+        err
+      );
+
+
+      setForwardSourceAttachments(
+        []
+      );
+
+
+      setError(
+        err.response?.data?.error ||
+          "Unable to prepare this message for forwarding."
+      );
+
+    }
 
   };
 
@@ -2678,6 +2786,8 @@ export default function Inbox() {
     );
 
     setForwardSourceId(null);
+
+    setForwardSourceAttachments([]);
 
     setActiveDraftId(
       draft.id
@@ -2762,6 +2872,8 @@ export default function Inbox() {
 
     setForwardSourceId(null);
 
+    setForwardSourceAttachments([]);
+
     setComposeFiles([]);
 
     setComposePersistedAttachments([]);
@@ -2835,6 +2947,10 @@ export default function Inbox() {
 
                   setForwardSourceId(
                     null
+                  );
+
+                  setForwardSourceAttachments(
+                    []
                   );
 
                   setSelectedId(
@@ -4087,17 +4203,13 @@ export default function Inbox() {
 
               {forwardSourceId && (
 
-                <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-5 text-amber-800">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs leading-5 text-slate-600">
 
                   Forwarding remains bound to the original mailbox.
 
-                  {attachments.some(
-                    (attachment) =>
-                      attachment.message_id ===
-                      forwardSourceId
-                  )
-                    ? " Original attachments are not automatically forwarded; download them or use Open in Provider when attachment forwarding is required."
-                    : ""}
+                  {forwardSourceAttachments.length > 0
+                    ? ` ${forwardSourceAttachments.length} original attachment${forwardSourceAttachments.length === 1 ? "" : "s"} selected automatically.`
+                    : " No original attachments are selected."}
 
                 </div>
 
@@ -4366,9 +4478,71 @@ export default function Inbox() {
 
                 {forwardSourceId && (
 
-                  <p className="mt-3 text-[11px] leading-5 text-slate-500">
-                    Files added here will be sent. Original attachments from the forwarded message are not copied automatically.
-                  </p>
+                  <div className="mt-3">
+
+                    <p className="text-[11px] leading-5 text-slate-500">
+                      Original attachments are included automatically. Remove any file you do not want to forward.
+                    </p>
+
+
+                    {forwardSourceAttachments.length > 0 && (
+
+                      <div className="mt-2 space-y-2">
+
+                        {forwardSourceAttachments.map(
+                          (attachment) => (
+
+                            <div
+                              key={`forward-source-${attachment.key}`}
+                              className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5"
+                            >
+
+                              <div className="min-w-0">
+
+                                <p className="truncate text-xs font-semibold text-slate-700">
+                                  {attachment.filename ||
+                                    "Attachment"}
+                                </p>
+
+                                <p className="mt-0.5 text-[10px] text-slate-400">
+                                  Original attachment
+                                  {Number(
+                                    attachment.size ||
+                                    0
+                                  ) > 0
+                                    ? ` ? ${formatComposeFileSize(
+                                        Number(
+                                          attachment.size
+                                        )
+                                      )}`
+                                    : ""}
+                                </p>
+
+                              </div>
+
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  removeForwardSourceAttachment(
+                                    attachment.key
+                                  )
+                                }
+                                className="shrink-0 rounded-lg px-2 py-1 text-[10px] font-semibold text-rose-600 hover:bg-rose-50"
+                              >
+                                Remove
+                              </button>
+
+                            </div>
+
+                          )
+                        )}
+
+                      </div>
+
+                    )}
+
+                  </div>
 
                 )}
 
