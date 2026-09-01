@@ -118,277 +118,728 @@ export default function ApprovalCenter() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <div className="mx-auto max-w-7xl px-4 py-6">
-        <div className="mb-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold text-slate-900">Approval Center</h1>
-            <p className="mt-1 text-sm text-slate-600">
-              Requests that need approval, rejection, clarification, assignment, or follow-through.
-            </p>
+    <div className="min-h-full bg-slate-50/70 px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
+
+      <div className="mx-auto max-w-[1500px]">
+
+
+        {/* ===================================================
+            GOVERNANCE HERO
+        ==================================================== */}
+
+        <section className="overflow-hidden rounded-[28px] border border-slate-800 bg-slate-950 text-white shadow-sm">
+
+          <div className="flex flex-col gap-7 px-6 py-7 lg:flex-row lg:items-end lg:justify-between lg:px-8 lg:py-8">
+
+            <div className="max-w-3xl">
+
+              <div className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-300">
+                Governed decision queue
+              </div>
+
+              <h1 className="mt-5 text-3xl font-semibold tracking-tight text-white">
+                Approval Center
+              </h1>
+
+              <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
+                Review communication-backed requests, capture decision rationale and keep decision ownership explicit.
+              </p>
+
+
+              <div className="mt-5 flex flex-wrap gap-2">
+
+                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[10px] font-medium text-slate-300">
+                  Explicit decision
+                </span>
+
+                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[10px] font-medium text-slate-300">
+                  Assigned reviewer
+                </span>
+
+                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[10px] font-medium text-slate-300">
+                  Decision notes preserved
+                </span>
+
+              </div>
+
+            </div>
+
+
+            <button
+              type="button"
+              onClick={
+                fetchData
+              }
+              className="shrink-0 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 shadow-sm transition hover:bg-slate-100"
+            >
+              {refreshing
+                ? "Refreshing..."
+                : "Refresh decisions"}
+            </button>
+
           </div>
 
-          <button
-            onClick={fetchData}
-            className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-100"
-          >
-            {refreshing ? "Refreshing..." : "Refresh"}
-          </button>
-        </div>
+        </section>
+
 
         {error && (
-          <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+
+          <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
             {error}
           </div>
+
         )}
 
-        <div className="mb-6 grid gap-4 md:grid-cols-4">
-          <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
-            <p className="text-sm text-slate-500">Pending Approvals</p>
-            <p className="mt-2 text-3xl font-semibold text-slate-900">{pendingCount}</p>
+
+        {/* ===================================================
+            DECISION KPI CARDS
+        ==================================================== */}
+
+        <section className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+
+          {[
+            {
+              label:
+                "Pending",
+              value:
+                pendingCount,
+              description:
+                "Requests currently waiting for a decision.",
+              style:
+                "border-amber-200 bg-amber-50/50",
+              valueStyle:
+                "text-amber-800",
+            },
+            {
+              label:
+                "Approved",
+              value:
+                approvedCount,
+              description:
+                "Requests explicitly authorized.",
+              style:
+                "border-emerald-200 bg-emerald-50/50",
+              valueStyle:
+                "text-emerald-800",
+            },
+            {
+              label:
+                "Rejected",
+              value:
+                rejectedCount,
+              description:
+                "Requests explicitly declined.",
+              style:
+                "border-rose-200 bg-rose-50/50",
+              valueStyle:
+                "text-rose-800",
+            },
+            {
+              label:
+                "Ignored",
+              value:
+                ignoredCount,
+              description:
+                "Requests explicitly removed from active review.",
+              style:
+                "border-slate-200 bg-white",
+              valueStyle:
+                "text-slate-800",
+            },
+          ].map(
+            (metric) => (
+
+              <div
+                key={
+                  metric.label
+                }
+                className={`rounded-2xl border p-5 shadow-sm ${metric.style}`}
+              >
+
+                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                  {metric.label}
+                </p>
+
+                <p className={`mt-3 text-3xl font-semibold tracking-tight ${metric.valueStyle}`}>
+                  {metric.value}
+                </p>
+
+                <p className="mt-2 text-xs leading-5 text-slate-500">
+                  {metric.description}
+                </p>
+
+              </div>
+
+            )
+          )}
+
+        </section>
+
+
+        {/* ===================================================
+            DECISION COVERAGE
+        ==================================================== */}
+
+        <section className="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm sm:px-5">
+
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+
+            <div>
+
+              <h2 className="text-sm font-semibold text-slate-900">
+                Decision coverage
+              </h2>
+
+              <p className="mt-1 text-xs leading-5 text-slate-500">
+                Every final state remains reviewable after the active approval queue is cleared.
+              </p>
+
+            </div>
+
+
+            <div className="flex flex-wrap gap-2 text-[10px] font-semibold">
+
+              <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-amber-700">
+                Pending {pendingCount}
+              </span>
+
+              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-emerald-700">
+                Approved {approvedCount}
+              </span>
+
+              <span className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-rose-700">
+                Rejected {rejectedCount}
+              </span>
+
+              <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-slate-500">
+                Ignored {ignoredCount}
+              </span>
+
+            </div>
+
           </div>
 
-          <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
-            <p className="text-sm text-slate-500">Approved</p>
-            <p className="mt-2 text-3xl font-semibold text-slate-900">{approvedCount}</p>
+        </section>
+
+
+        {/* ===================================================
+            FILTER BAR
+        ==================================================== */}
+
+        <section className="mt-5 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+
+            <div className="flex flex-wrap gap-1.5">
+
+              {[
+                [
+                  "pending",
+                  "Pending",
+                ],
+                [
+                  "approved",
+                  "Approved",
+                ],
+                [
+                  "rejected",
+                  "Rejected",
+                ],
+                [
+                  "ignored",
+                  "Ignored",
+                ],
+                [
+                  "all",
+                  "All",
+                ],
+              ].map(
+                (
+                  [
+                    value,
+                    label,
+                  ]
+                ) => (
+
+                  <button
+                    type="button"
+                    key={
+                      value
+                    }
+                    onClick={() =>
+                      setView(
+                        value
+                      )
+                    }
+                    className={`rounded-xl px-3.5 py-2 text-xs font-semibold transition ${
+                      view ===
+                      value
+                        ? "bg-slate-950 text-white shadow-sm"
+                        : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+                    }`}
+                  >
+                    {label}
+                  </button>
+
+                )
+              )}
+
+            </div>
+
+
+            <div className="w-full xl:max-w-md">
+
+              <input
+                value={
+                  search
+                }
+                onChange={(event) =>
+                  setSearch(
+                    event.target.value
+                  )
+                }
+                placeholder="Search approval, requester or reviewer..."
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-100"
+              />
+
+            </div>
+
           </div>
 
-          <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
-            <p className="text-sm text-slate-500">Rejected</p>
-            <p className="mt-2 text-3xl font-semibold text-slate-900">{rejectedCount}</p>
-          </div>
+        </section>
 
-          <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
-            <p className="text-sm text-slate-500">Ignored</p>
-            <p className="mt-2 text-3xl font-semibold text-slate-900">{ignoredCount}</p>
-          </div>
-        </div>
 
-        <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => setView("pending")}
-              className={`rounded-xl px-4 py-2 text-sm font-medium ${
-                view === "pending"
-                  ? "bg-slate-900 text-white"
-                  : "bg-white text-slate-700 ring-1 ring-slate-300 hover:bg-slate-100"
-              }`}
-            >
-              Pending
-            </button>
-
-            <button
-              onClick={() => setView("approved")}
-              className={`rounded-xl px-4 py-2 text-sm font-medium ${
-                view === "approved"
-                  ? "bg-slate-900 text-white"
-                  : "bg-white text-slate-700 ring-1 ring-slate-300 hover:bg-slate-100"
-              }`}
-            >
-              Approved
-            </button>
-
-            <button
-              onClick={() => setView("rejected")}
-              className={`rounded-xl px-4 py-2 text-sm font-medium ${
-                view === "rejected"
-                  ? "bg-slate-900 text-white"
-                  : "bg-white text-slate-700 ring-1 ring-slate-300 hover:bg-slate-100"
-              }`}
-            >
-              Rejected
-            </button>
-
-            <button
-              onClick={() => setView("ignored")}
-              className={`rounded-xl px-4 py-2 text-sm font-medium ${
-                view === "ignored"
-                  ? "bg-slate-900 text-white"
-                  : "bg-white text-slate-700 ring-1 ring-slate-300 hover:bg-slate-100"
-              }`}
-            >
-              Ignored
-            </button>
-
-            <button
-              onClick={() => setView("all")}
-              className={`rounded-xl px-4 py-2 text-sm font-medium ${
-                view === "all"
-                  ? "bg-slate-900 text-white"
-                  : "bg-white text-slate-700 ring-1 ring-slate-300 hover:bg-slate-100"
-              }`}
-            >
-              All
-            </button>
-          </div>
-
-          <div className="w-full md:max-w-md">
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search approvals..."
-              className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm outline-none focus:border-slate-500"
-            />
-          </div>
-        </div>
+        {/* ===================================================
+            APPROVAL QUEUE
+        ==================================================== */}
 
         {loading ? (
-          <div className="rounded-2xl bg-white p-6 text-sm text-slate-600 shadow-sm ring-1 ring-slate-200">
-            Loading Approval Center...
-          </div>
+
+          <section className="mt-5 rounded-[26px] border border-slate-200 bg-white px-6 py-16 text-center shadow-sm">
+
+            <div className="mx-auto h-8 w-8 animate-pulse rounded-full bg-slate-200" />
+
+            <p className="mt-4 text-sm font-medium text-slate-500">
+              Loading approval queue...
+            </p>
+
+          </section>
+
         ) : (
-          <div className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
-            <div className="border-b border-slate-200 px-5 py-4">
-              <h2 className="text-lg font-semibold text-slate-900">Approvals</h2>
-              <p className="text-sm text-slate-500">
-                Items requiring a decision.
-              </p>
+
+          <section className="mt-5 overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-sm">
+
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 sm:px-6">
+
+              <div>
+
+                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-violet-500">
+                  Decision queue
+                </p>
+
+                <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-950">
+                  Approvals
+                </h2>
+
+                <p className="mt-1 text-xs text-slate-500">
+                  Review, assign and record explicit decisions.
+                </p>
+
+              </div>
+
+
+              <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500">
+                {filteredApprovals.length}
+              </span>
+
             </div>
 
-            <div className="divide-y divide-slate-200">
-              {filteredApprovals.length === 0 ? (
-                <div className="px-5 py-8 text-sm text-slate-500">
-                  No approvals found.
-                </div>
-              ) : (
-                filteredApprovals.map((item) => (
-                  <div key={item.id} className="px-5 py-4">
-                    <div className="flex flex-col gap-4">
-                      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                        <div className="min-w-0 w-full">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <h3 className="text-base font-semibold text-slate-900">
-                              {item.title}
+
+            {filteredApprovals.length ===
+            0 ? (
+
+              <div className="px-6 py-16 text-center">
+
+                <p className="text-sm font-semibold text-slate-700">
+                  No approvals in this view
+                </p>
+
+                <p className="mt-1 text-xs text-slate-400">
+                  Change the filter or search to review another decision state.
+                </p>
+
+              </div>
+
+            ) : (
+
+              <div className="divide-y divide-slate-100">
+
+                {filteredApprovals.map(
+                  (item) => {
+
+                    const pending =
+                      item.status ===
+                      "pending";
+
+
+                    return (
+
+                      <article
+                        key={
+                          item.id
+                        }
+                        className="px-5 py-5 sm:px-6"
+                      >
+
+                        <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+
+
+                          {/* ===============================
+                              DECISION CONTEXT
+                          ================================ */}
+
+                          <div className="min-w-0">
+
+                            <div className="flex flex-wrap items-center gap-2">
+
+                              <span
+                                className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${
+                                  item.status ===
+                                  "approved"
+                                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                    : item.status ===
+                                      "rejected"
+                                    ? "border-rose-200 bg-rose-50 text-rose-700"
+                                    : item.status ===
+                                      "ignored"
+                                    ? "border-slate-200 bg-slate-50 text-slate-500"
+                                    : "border-amber-200 bg-amber-50 text-amber-700"
+                                }`}
+                              >
+                                {item.status ||
+                                  "pending"}
+                              </span>
+
+
+                              <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold text-slate-500">
+                                Confidence {item.confidence_score ?? 0}%
+                              </span>
+
+                            </div>
+
+
+                            <h3 className="mt-3 text-lg font-semibold tracking-tight text-slate-950">
+                              {item.title ||
+                                "Untitled approval"}
                             </h3>
-                            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
-                              {item.status}
-                            </span>
-                          </div>
 
-                          {item.description && (
-                            <p className="mt-2 text-sm text-slate-600">
-                              {item.description}
-                            </p>
-                          )}
 
-                          <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-500">
-                            <span className="rounded-full bg-slate-100 px-2 py-1">
-                              Requested by: {item.requested_by || "Unknown"}
-                            </span>
-                            <span className="rounded-full bg-slate-100 px-2 py-1">
-                              Confidence: {item.confidence_score ?? 0}%
-                            </span>
-                            <span className="rounded-full bg-slate-100 px-2 py-1">
-                              Due: {formatDate(item.due_date)}
-                            </span>
-                            <span className="rounded-full bg-slate-100 px-2 py-1">
-                              Assigned: {item.assigned_to_email || "Unassigned"}
-                            </span>
-                          </div>
+                            {item.description && (
 
-                          <div className="mt-4">
-                            <div className="mb-1 text-sm font-medium text-slate-700">
-                              Decision notes
+                              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+                                {item.description}
+                              </p>
+
+                            )}
+
+
+                            <div className="mt-4 grid gap-3 rounded-2xl border border-slate-100 bg-slate-50/70 p-4 sm:grid-cols-2 lg:grid-cols-4">
+
+                              <div>
+
+                                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                                  Requested by
+                                </p>
+
+                                <p className="mt-1 break-words text-xs font-semibold text-slate-700">
+                                  {item.requested_by ||
+                                    "Unknown"}
+                                </p>
+
+                              </div>
+
+
+                              <div>
+
+                                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                                  Assigned reviewer
+                                </p>
+
+                                <p className="mt-1 break-words text-xs font-semibold text-slate-700">
+                                  {item.assigned_to_email ||
+                                    "Unassigned"}
+                                </p>
+
+                              </div>
+
+
+                              <div>
+
+                                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                                  Due
+                                </p>
+
+                                <p className="mt-1 text-xs font-semibold text-slate-700">
+                                  {formatDate(
+                                    item.due_date
+                                  )}
+                                </p>
+
+                              </div>
+
+
+                              <div>
+
+                                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                                  Confidence
+                                </p>
+
+                                <p className="mt-1 text-xs font-semibold text-slate-700">
+                                  {item.confidence_score ?? 0}%
+                                </p>
+
+                              </div>
+
                             </div>
-                            <textarea
-                              value={notesById[item.id] ?? item.decision_notes ?? ""}
-                              onChange={(e) =>
-                                setNotesById((prev) => ({
-                                  ...prev,
-                                  [item.id]: e.target.value,
-                                }))
-                              }
-                              rows={3}
-                              placeholder="Add decision notes..."
-                              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-500"
-                            />
-                          </div>
 
-                          <div className="mt-4">
-                            <div className="mb-1 text-sm font-medium text-slate-700">
-                              Assign to teammate
-                            </div>
-                            <div className="flex flex-col gap-2 md:flex-row md:items-center">
-                              <select
-                                value={assignedById[item.id] ?? item.assigned_to ?? ""}
-                                onChange={(e) =>
-                                  setAssignedById((prev) => ({
-                                    ...prev,
-                                    [item.id]: e.target.value,
-                                  }))
-                                }
-                                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-slate-500 md:max-w-xs"
-                              >
-                                <option value="">Unassigned</option>
-                                {teamMembers.map((member) => (
-                                  <option key={member.id} value={member.id}>
-                                    {member.email} ({member.role})
+
+                            {/* =============================
+                                REVIEWER ASSIGNMENT
+                            ============================== */}
+
+                            <div className="mt-5">
+
+                              <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                                Assign reviewer
+                              </label>
+
+
+                              <div className="flex flex-col gap-2 sm:flex-row">
+
+                                <select
+                                  value={
+                                    assignedById[
+                                      item.id
+                                    ] ??
+                                    item.assigned_to ??
+                                    ""
+                                  }
+                                  onChange={(event) =>
+                                    setAssignedById(
+                                      (current) => ({
+                                        ...current,
+                                        [item.id]:
+                                          event.target.value,
+                                      })
+                                    )
+                                  }
+                                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs text-slate-700 outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-100 sm:max-w-sm"
+                                >
+
+                                  <option value="">
+                                    Unassigned
                                   </option>
-                                ))}
-                              </select>
 
-                              <button
-                                onClick={() => handleAssign(item.id)}
-                                className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
-                              >
-                                Assign & Notify
-                              </button>
+
+                                  {teamMembers.map(
+                                    (member) => (
+
+                                      <option
+                                        key={
+                                          member.id
+                                        }
+                                        value={
+                                          member.id
+                                        }
+                                      >
+                                        {member.email} ({member.role})
+                                      </option>
+
+                                    )
+                                  )}
+
+                                </select>
+
+
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleAssign(
+                                      item.id
+                                    )
+                                  }
+                                  className="rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+                                >
+                                  Assign & Notify
+                                </button>
+
+                              </div>
+
                             </div>
+
+
+                            {/* =============================
+                                DECISION CONTROLS
+                            ============================== */}
+
+                            <div className="mt-5 flex flex-wrap gap-2 border-t border-slate-100 pt-4">
+
+                              {pending ? (
+
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleAction(
+                                        item.id,
+                                        "approve"
+                                      )
+                                    }
+                                    className="rounded-xl bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700"
+                                  >
+                                    Approve
+                                  </button>
+
+
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleAction(
+                                        item.id,
+                                        "reject"
+                                      )
+                                    }
+                                    className="rounded-xl bg-rose-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm hover:bg-rose-700"
+                                  >
+                                    Reject
+                                  </button>
+
+
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleAction(
+                                        item.id,
+                                        "needs-info"
+                                      )
+                                    }
+                                    className="rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-100"
+                                  >
+                                    Needs Info
+                                  </button>
+
+
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleAction(
+                                        item.id,
+                                        "ignore"
+                                      )
+                                    }
+                                    className="rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                                  >
+                                    Ignore
+                                  </button>
+                                </>
+
+                              ) : (
+
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleAction(
+                                      item.id,
+                                      "reopen"
+                                    )
+                                  }
+                                  className="rounded-xl bg-slate-950 px-3.5 py-2 text-xs font-semibold text-white shadow-sm hover:bg-slate-800"
+                                >
+                                  Reopen
+                                </button>
+
+                              )}
+
+                            </div>
+
                           </div>
 
-                          {item.decision_notes ? (
-                            <div className="mt-3 text-xs text-slate-500">
-                              Saved notes: {item.decision_notes}
-                            </div>
-                          ) : null}
-                        </div>
-                      </div>
 
-                      <div className="flex flex-wrap gap-2">
-                        {item.status === "pending" ? (
-                          <>
-                            <button
-                              onClick={() => handleAction(item.id, "approve")}
-                              className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
-                            >
-                              Approve
-                            </button>
-                            <button
-                              onClick={() => handleAction(item.id, "reject")}
-                              className="rounded-xl bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700"
-                            >
-                              Reject
-                            </button>
-                            <button
-                              onClick={() => handleAction(item.id, "needs-info")}
-                              className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-medium text-white hover:bg-amber-600"
-                            >
-                              Needs Info
-                            </button>
-                            <button
-                              onClick={() => handleAction(item.id, "ignore")}
-                              className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
-                            >
-                              Ignore
-                            </button>
-                          </>
-                        ) : (
-                          <button
-                            onClick={() => handleAction(item.id, "reopen")}
-                            className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
-                          >
-                            Reopen
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
+                          {/* ===============================
+                              DECISION NOTES PANEL
+                          ================================ */}
+
+                          <aside className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 sm:p-5">
+
+                            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                              Decision rationale
+                            </p>
+
+                            <p className="mt-1 text-xs leading-5 text-slate-500">
+                              Capture the reviewer context that should remain with the decision.
+                            </p>
+
+
+                            <textarea
+                              value={
+                                notesById[
+                                  item.id
+                                ] ??
+                                item.decision_notes ??
+                                ""
+                              }
+                              onChange={(event) =>
+                                setNotesById(
+                                  (current) => ({
+                                    ...current,
+                                    [item.id]:
+                                      event.target.value,
+                                  })
+                                )
+                              }
+                              rows={7}
+                              placeholder="Add decision notes..."
+                              className="mt-4 w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm leading-6 text-slate-700 outline-none placeholder:text-slate-400 focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
+                            />
+
+
+                            {item.decision_notes && (
+
+                              <div className="mt-4 rounded-xl border border-slate-200 bg-white p-3">
+
+                                <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-slate-400">
+                                  Persisted note
+                                </p>
+
+                                <p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-slate-600">
+                                  {item.decision_notes}
+                                </p>
+
+                              </div>
+
+                            )}
+
+                          </aside>
+
+                        </div>
+
+                      </article>
+
+                    );
+
+                  }
+                )}
+
+              </div>
+
+            )}
+
+          </section>
+
         )}
+
       </div>
+
     </div>
   );
 }

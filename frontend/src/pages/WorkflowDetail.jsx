@@ -401,1046 +401,728 @@ export default function WorkflowDetail() {
 
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="min-h-full bg-slate-50/70 px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
 
-      {/* Header */}
-
-      <div
-        className="
-          flex
-          flex-col
-          gap-4
-          lg:flex-row
-          lg:items-start
-          lg:justify-between
-        "
-      >
-
-        <div>
-
-          <button
-            type="button"
-            onClick={() =>
-              navigate("/workflows")
-            }
-            className="
-              mb-4
-              flex
-              items-center
-              gap-2
-              text-sm
-              text-slate-500
-              hover:text-slate-900
-            "
-          >
-            <ArrowLeft size={16} />
-            Back to workflows
-          </button>
-
-          <div className="flex items-center gap-3">
-
-            <div
-              className="
-                flex
-                h-11
-                w-11
-                items-center
-                justify-center
-                rounded-xl
-                bg-slate-100
-              "
-            >
-              <GitBranch
-                size={21}
-                className="text-slate-700"
-              />
-            </div>
-
-            <div>
-
-              <h1
-                className="
-                  text-2xl
-                  font-semibold
-                  text-slate-900
-                "
-              >
-                {workflow?.name ||
-                  "Unnamed workflow"}
-              </h1>
-
-              <p
-                className="
-                  mt-1
-                  text-sm
-                  text-slate-500
-                "
-              >
-                {workflow?.code ||
-                  "No workflow code"}
-              </p>
-
-            </div>
-
-          </div>
-
-        </div>
+      <div className="mx-auto max-w-[1540px] space-y-5">
 
 
-        <div
-          className="
-            flex
-            flex-wrap
-            items-center
-            gap-2
-          "
-        >
+        <section className="relative overflow-hidden rounded-[28px] border border-slate-800 bg-slate-950 text-white shadow-sm">
 
-          <button
-            type="button"
-            onClick={handleRefresh}
-            disabled={
-              refreshing ||
-              loadingRuntime
-            }
-            className="
-              flex
-              items-center
-              gap-2
-              rounded-xl
-              border
-              border-slate-300
-              bg-white
-              px-4
-              py-2
-              text-sm
-              font-medium
-              text-slate-700
-              hover:bg-slate-50
-              disabled:opacity-50
-            "
-          >
-            <RefreshCw
-              size={16}
-              className={
-                refreshing
-                  ? "animate-spin"
-                  : ""
+          <div className="absolute right-0 top-0 h-64 w-64 rounded-full bg-violet-500/10 blur-3xl" />
+
+          <div className="relative px-6 py-7 lg:px-8 lg:py-8">
+
+            <button
+              type="button"
+              onClick={() =>
+                navigate(
+                  "/workflows"
+                )
               }
-            />
-
-            Refresh
-          </button>
-
-
-          {!isActive && (
-            <button
-              type="button"
-              onClick={handlePublish}
-              disabled={publishing}
-              className="
-                flex
-                items-center
-                gap-2
-                rounded-xl
-                bg-slate-900
-                px-4
-                py-2
-                text-sm
-                font-medium
-                text-white
-                hover:bg-slate-800
-                disabled:opacity-50
-              "
+              className="inline-flex items-center gap-2 text-xs font-semibold text-slate-400 transition hover:text-white"
             >
-              <Upload size={16} />
 
-              {publishing
-                ? "Publishing..."
-                : "Publish"}
-            </button>
-          )}
-
-
-          {isActive && !runtime && (
-            <button
-              type="button"
-              onClick={
-                handleStartWorkflow
-              }
-              disabled={starting}
-              className="
-                flex
-                items-center
-                gap-2
-                rounded-xl
-                bg-emerald-600
-                px-4
-                py-2
-                text-sm
-                font-medium
-                text-white
-                hover:bg-emerald-700
-                disabled:opacity-50
-              "
-            >
-              {starting ? (
-                <LoaderCircle
-                  size={16}
-                  className="animate-spin"
-                />
-              ) : (
-                <Play size={16} />
-              )}
-
-              {starting
-                ? "Starting..."
-                : "Start Workflow"}
-            </button>
-          )}
-
-        </div>
-
-      </div>
-
-
-      {/* Publish error */}
-
-      {publishError && (
-        <div
-          className="
-            flex
-            items-center
-            gap-3
-            rounded-xl
-            border
-            border-red-200
-            bg-red-50
-            px-4
-            py-3
-            text-sm
-            text-red-700
-          "
-        >
-          <AlertCircle size={18} />
-          {publishError}
-        </div>
-      )}
-
-
-      {/* Runtime error */}
-
-      {runtimeError && (
-        <div
-          className="
-            flex
-            items-center
-            gap-3
-            rounded-xl
-            border
-            border-red-200
-            bg-red-50
-            px-4
-            py-3
-            text-sm
-            text-red-700
-          "
-        >
-          <AlertCircle size={18} />
-          {runtimeError}
-        </div>
-      )}
-
-
-      {/* Runtime */}
-
-      {runtime && (
-        <section
-          className="
-            rounded-2xl
-            border
-            border-blue-200
-            bg-white
-            p-6
-          "
-        >
-
-          <div
-            className="
-              flex
-              flex-col
-              gap-4
-              md:flex-row
-              md:items-start
-              md:justify-between
-            "
-          >
-
-            <div>
-
-              <div
-                className="
-                  flex
-                  items-center
-                  gap-2
-                "
-              >
-                <Play
-                  size={18}
-                  className="text-blue-600"
-                />
-
-                <h2
-                  className="
-                    text-base
-                    font-semibold
-                    text-slate-900
-                  "
-                >
-                  Current execution
-                </h2>
-              </div>
-
-              <p
-                className="
-                  mt-1
-                  text-sm
-                  text-slate-500
-                "
-              >
-                Runtime instance created from
-                this workflow definition.
-              </p>
-
-            </div>
-
-
-            <span
-              className={`
-                rounded-full
-                border
-                px-3
-                py-1
-                text-xs
-                font-medium
-                ${getRuntimeStatusClass(
-                  runtime.status
-                )}
-              `}
-            >
-              {formatStatus(
-                runtime.status
-              )}
-            </span>
-
-          </div>
-
-
-          <div
-            className="
-              mt-5
-              grid
-              gap-4
-              md:grid-cols-3
-            "
-          >
-
-            <div>
-              <p className="text-xs text-slate-500">
-                Instance ID
-              </p>
-
-              <p
-                className="
-                  mt-1
-                  break-all
-                  text-sm
-                  font-medium
-                  text-slate-900
-                "
-              >
-                {runtime.id ||
-                  runtime.instance_id ||
-                  "—"}
-              </p>
-            </div>
-
-
-            <div>
-              <p className="text-xs text-slate-500">
-                Workflow
-              </p>
-
-              <p className="mt-1 text-sm font-medium">
-                {runtime.workflow ||
-                  workflow?.id ||
-                  "—"}
-              </p>
-            </div>
-
-
-            <div>
-              <p className="text-xs text-slate-500">
-                Started
-              </p>
-
-              <p className="mt-1 text-sm font-medium">
-                {runtime.started_at
-                  ? new Date(
-                      runtime.started_at
-                    ).toLocaleString()
-                  : "—"}
-              </p>
-            </div>
-
-          </div>
-
-
-          <div className="mt-5 flex flex-wrap gap-2">
-
-            <button
-              type="button"
-              onClick={() => {
-                const instanceId =
-                  runtime.id ||
-                  runtime.instance_id;
-
-                if (instanceId) {
-                  loadRuntime(
-                    instanceId
-                  );
-                }
-              }}
-              disabled={loadingRuntime}
-              className="
-                flex
-                items-center
-                gap-2
-                rounded-xl
-                border
-                border-slate-300
-                bg-white
-                px-4
-                py-2
-                text-sm
-                font-medium
-                text-slate-700
-                hover:bg-slate-50
-                disabled:opacity-50
-              "
-            >
-              <RefreshCw
-                size={15}
-                className={
-                  loadingRuntime
-                    ? "animate-spin"
-                    : ""
-                }
+              <ArrowLeft
+                size={14}
               />
 
-              Refresh execution
+              Back to workflows
+
             </button>
 
 
-            <button
-              type="button"
-              onClick={() => {
-                const instanceId =
-                  runtime.id ||
-                  runtime.instance_id;
+            <div className="mt-5 flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
 
-                if (instanceId) {
-                  navigate(
-                    `/workflows/runtime/${instanceId}`
-                  );
-                }
-              }}
-              className="
-                flex
-                items-center
-                gap-2
-                rounded-xl
-                border
-                border-slate-300
-                bg-white
-                px-4
-                py-2
-                text-sm
-                font-medium
-                text-slate-700
-                hover:bg-slate-50
-              "
-            >
-              <Play size={15} />
-              Open Runtime
-            </button>
+              <div className="max-w-3xl">
+
+                <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.17em] text-slate-300">
+
+                  <GitBranch
+                    size={14}
+                  />
+
+                  Workflow definition
+
+                </div>
 
 
-            <button
-              type="button"
-              onClick={() => {
-                const instanceId =
-                  runtime.id ||
-                  runtime.instance_id;
-
-                if (instanceId) {
-                  navigate(
-                    `/workflows/runtime/${instanceId}/history`
-                  );
-                }
-              }}
-              className="
-                flex
-                items-center
-                gap-2
-                rounded-xl
-                border
-                border-slate-300
-                bg-white
-                px-4
-                py-2
-                text-sm
-                font-medium
-                text-slate-700
-                hover:bg-slate-50
-              "
-            >
-              <History size={15} />
-              Execution History
-            </button>
-
-          </div>
-
-        </section>
-      )}
+                <h1 className="mt-4 text-3xl font-semibold tracking-tight lg:text-4xl">
+                  {workflow?.name ||
+                    "Unnamed workflow"}
+                </h1>
 
 
-      {/* Overview */}
-
-      <div
-        className="
-          grid
-          gap-4
-          md:grid-cols-4
-        "
-      >
-
-        <div
-          className="
-            rounded-2xl
-            border
-            border-slate-200
-            bg-white
-            p-5
-          "
-        >
-          <p className="text-xs text-slate-500">
-            Status
-          </p>
-
-          <div className="mt-2 flex items-center gap-2">
-
-            {isActive ? (
-              <CheckCircle2
-                size={17}
-                className="text-emerald-600"
-              />
-            ) : (
-              <CircleDashed
-                size={17}
-                className="text-slate-500"
-              />
-            )}
-
-            <span className="font-medium">
-              {formatStatus(
-                workflow?.status
-              )}
-            </span>
-
-          </div>
-        </div>
+                <p className="mt-2 text-sm text-slate-300">
+                  {workflow?.code ||
+                    "No workflow code"}
+                </p>
 
 
-        <div
-          className="
-            rounded-2xl
-            border
-            border-slate-200
-            bg-white
-            p-5
-          "
-        >
-          <p className="text-xs text-slate-500">
-            Version
-          </p>
+                <div className="mt-5 flex flex-wrap gap-2">
 
-          <p className="mt-2 text-lg font-semibold">
-            {workflow?.version ?? "—"}
-          </p>
-        </div>
+                  <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[10px] font-medium text-slate-300">
+                    {formatStatus(
+                      workflow?.status
+                    )}
+                  </span>
 
+                  <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[10px] font-medium text-slate-300">
+                    Version {workflow?.version ?? "?"}
+                  </span>
 
-        <div
-          className="
-            rounded-2xl
-            border
-            border-slate-200
-            bg-white
-            p-5
-          "
-        >
-          <p className="text-xs text-slate-500">
-            Nodes
-          </p>
+                  <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[10px] font-medium text-slate-300">
+                    {nodes.length} nodes
+                  </span>
 
-          <p className="mt-2 text-lg font-semibold">
-            {nodes.length}
-          </p>
-        </div>
-
-
-        <div
-          className="
-            rounded-2xl
-            border
-            border-slate-200
-            bg-white
-            p-5
-          "
-        >
-          <p className="text-xs text-slate-500">
-            Transitions
-          </p>
-
-          <p className="mt-2 text-lg font-semibold">
-            {transitions.length}
-          </p>
-        </div>
-
-      </div>
-
-
-      {/* Description */}
-
-      <section
-        className="
-          rounded-2xl
-          border
-          border-slate-200
-          bg-white
-          p-6
-        "
-      >
-
-        <h2
-          className="
-            text-base
-            font-semibold
-            text-slate-900
-          "
-        >
-          Workflow definition
-        </h2>
-
-        <p
-          className="
-            mt-3
-            whitespace-pre-wrap
-            text-sm
-            leading-6
-            text-slate-600
-          "
-        >
-          {workflow?.description ||
-            "No description provided."}
-        </p>
-
-      </section>
-
-
-      {/* Graph */}
-
-      <section
-        className="
-          rounded-2xl
-          border
-          border-slate-200
-          bg-white
-          p-6
-        "
-      >
-
-        <div
-          className="
-            flex
-            items-center
-            justify-between
-            gap-4
-          "
-        >
-
-          <div>
-
-            <h2
-              className="
-                text-base
-                font-semibold
-                text-slate-900
-              "
-            >
-              Workflow graph
-            </h2>
-
-            <p
-              className="
-                mt-1
-                text-sm
-                text-slate-500
-              "
-            >
-              Current workflow structure returned
-              by the workflow engine.
-            </p>
-
-          </div>
-
-          {graph?.editable !== undefined && (
-            <span
-              className="
-                rounded-full
-                bg-slate-100
-                px-3
-                py-1
-                text-xs
-                font-medium
-                text-slate-600
-              "
-            >
-              {graph.editable
-                ? "Editable"
-                : "Read only"}
-            </span>
-          )}
-
-        </div>
-
-
-        {nodes.length === 0 ? (
-          <div
-            className="
-              mt-6
-              rounded-xl
-              border
-              border-dashed
-              border-slate-300
-              p-8
-              text-center
-              text-sm
-              text-slate-500
-            "
-          >
-            No workflow nodes defined.
-          </div>
-        ) : (
-          <div className="mt-6 space-y-3">
-
-            {nodes.map((node, index) => (
-              <div
-                key={
-                  node.id ||
-                  node.client_id ||
-                  `node-${index}`
-                }
-                className="
-                  rounded-xl
-                  border
-                  border-slate-200
-                  bg-slate-50
-                  p-4
-                "
-              >
-
-                <div
-                  className="
-                    flex
-                    items-start
-                    justify-between
-                    gap-4
-                  "
-                >
-
-                  <div>
-
-                    <p
-                      className="
-                        font-medium
-                        text-slate-900
-                      "
-                    >
-                      {getNodeLabel(node)}
-                    </p>
-
-                    <p
-                      className="
-                        mt-1
-                        text-xs
-                        uppercase
-                        tracking-wide
-                        text-slate-500
-                      "
-                    >
-                      {node.node_type}
-                    </p>
-
-                  </div>
-
-                  <span
-                    className="
-                      rounded-lg
-                      bg-white
-                      px-2
-                      py-1
-                      text-xs
-                      text-slate-500
-                    "
-                  >
-                    #{index + 1}
+                  <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[10px] font-medium text-slate-300">
+                    {transitions.length} transitions
                   </span>
 
                 </div>
 
               </div>
-            ))}
-
-          </div>
-        )}
-
-      </section>
 
 
-      {/* Transitions */}
+              <div className="flex flex-wrap gap-2">
 
-      <section
-        className="
-          rounded-2xl
-          border
-          border-slate-200
-          bg-white
-          p-6
-        "
-      >
-
-        <h2
-          className="
-            text-base
-            font-semibold
-            text-slate-900
-          "
-        >
-          Transitions
-        </h2>
-
-        {transitions.length === 0 ? (
-          <p
-            className="
-              mt-4
-              text-sm
-              text-slate-500
-            "
-          >
-            No transitions defined.
-          </p>
-        ) : (
-          <div className="mt-4 space-y-3">
-
-            {transitions.map(
-              (transition, index) => (
-                <div
-                  key={
-                    transition.id ||
-                    `transition-${index}`
+                <button
+                  type="button"
+                  onClick={
+                    handleRefresh
                   }
-                  className="
-                    rounded-xl
-                    border
-                    border-slate-200
-                    p-4
-                  "
+                  disabled={
+                    refreshing ||
+                    loadingRuntime
+                  }
+                  className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-4 py-2.5 text-xs font-semibold text-white hover:bg-white/10 disabled:opacity-50"
                 >
 
-                  <div
-                    className="
-                      grid
-                      gap-3
-                      md:grid-cols-4
-                    "
-                  >
-
-                    <div>
-                      <p className="text-xs text-slate-500">
-                        Source
-                      </p>
-
-                      <p className="mt-1 text-sm font-medium break-all">
-                        {transition.source}
-                      </p>
-                    </div>
-
-                    <div>
-                      <p className="text-xs text-slate-500">
-                        Target
-                      </p>
-
-                      <p className="mt-1 text-sm font-medium break-all">
-                        {transition.target}
-                      </p>
-                    </div>
-
-                    <div>
-                      <p className="text-xs text-slate-500">
-                        Priority
-                      </p>
-
-                      <p className="mt-1 text-sm font-medium">
-                        {transition.priority ?? 100}
-                      </p>
-                    </div>
-
-                    <div>
-                      <p className="text-xs text-slate-500">
-                        Condition
-                      </p>
-
-                      <p className="mt-1 text-sm font-medium break-words">
-                        {transition.condition ||
-                          "Always"}
-                      </p>
-                    </div>
-
-                  </div>
-
-                </div>
-              )
-            )}
-
-          </div>
-        )}
-
-      </section>
-
-
-      {/* Execution history preview */}
-
-      {runtime && (
-        <section
-          className="
-            rounded-2xl
-            border
-            border-slate-200
-            bg-white
-            p-6
-          "
-        >
-
-          <div className="flex items-center gap-2">
-
-            <History
-              size={18}
-              className="text-slate-700"
-            />
-
-            <h2
-              className="
-                text-base
-                font-semibold
-                text-slate-900
-              "
-            >
-              Execution history
-            </h2>
-
-          </div>
-
-
-          {executionHistory.length === 0 ? (
-            <p
-              className="
-                mt-4
-                text-sm
-                text-slate-500
-              "
-            >
-              No execution events recorded yet.
-            </p>
-          ) : (
-            <div className="mt-4 space-y-2">
-
-              {executionHistory
-                .slice(0, 10)
-                .map((event, index) => (
-                  <div
-                    key={
-                      event.id ||
-                      `event-${index}`
+                  <RefreshCw
+                    size={14}
+                    className={
+                      refreshing
+                        ? "animate-spin"
+                        : ""
                     }
-                    className="
-                      rounded-xl
-                      border
-                      border-slate-200
-                      bg-slate-50
-                      px-4
-                      py-3
-                    "
+                  />
+
+                  Refresh
+
+                </button>
+
+
+                {!isActive && (
+
+                  <button
+                    type="button"
+                    onClick={
+                      handlePublish
+                    }
+                    disabled={
+                      publishing
+                    }
+                    className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-xs font-semibold text-slate-950 hover:bg-slate-100 disabled:opacity-50"
                   >
 
-                    <div
-                      className="
-                        flex
-                        flex-col
-                        gap-1
-                        md:flex-row
-                        md:items-center
-                        md:justify-between
-                      "
-                    >
+                    <Upload
+                      size={14}
+                    />
 
-                      <span
-                        className="
-                          text-sm
-                          font-medium
-                          text-slate-900
-                        "
-                      >
-                        {formatStatus(
-                          event.event
-                        )}
-                      </span>
+                    {publishing
+                      ? "Publishing..."
+                      : "Publish"}
 
-                      {event.created_at && (
-                        <span
-                          className="
-                            text-xs
-                            text-slate-500
-                          "
-                        >
-                          {new Date(
-                            event.created_at
-                          ).toLocaleString()}
-                        </span>
-                      )}
+                  </button>
 
-                    </div>
+                )}
 
-                  </div>
-                ))}
+
+                {isActive &&
+                  !runtime && (
+
+                  <button
+                    type="button"
+                    onClick={
+                      handleStartWorkflow
+                    }
+                    disabled={
+                      starting
+                    }
+                    className="inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-4 py-2.5 text-xs font-semibold text-white hover:bg-emerald-600 disabled:opacity-50"
+                  >
+
+                    {starting ? (
+
+                      <LoaderCircle
+                        size={14}
+                        className="animate-spin"
+                      />
+
+                    ) : (
+
+                      <Play
+                        size={14}
+                      />
+
+                    )}
+
+                    {starting
+                      ? "Starting..."
+                      : "Start workflow"}
+
+                  </button>
+
+                )}
+
+              </div>
 
             </div>
-          )}
+
+          </div>
 
         </section>
-      )}
+
+
+        {publishError && (
+
+          <div className="flex items-start gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3.5 text-sm text-rose-700">
+
+            <AlertCircle
+              size={17}
+              className="mt-0.5 shrink-0"
+            />
+
+            {publishError}
+
+          </div>
+
+        )}
+
+
+        {runtimeError && (
+
+          <div className="flex items-start gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3.5 text-sm text-rose-700">
+
+            <AlertCircle
+              size={17}
+              className="mt-0.5 shrink-0"
+            />
+
+            {runtimeError}
+
+          </div>
+
+        )}
+
+
+        {runtime && (
+
+          <section className="rounded-[26px] border border-sky-200 bg-white p-5 shadow-sm sm:p-6">
+
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+
+              <div>
+
+                <div className="flex items-center gap-2">
+
+                  <Play
+                    size={17}
+                    className="text-sky-600"
+                  />
+
+                  <h2 className="text-base font-semibold text-slate-950">
+                    Current execution
+                  </h2>
+
+                </div>
+
+
+                <p className="mt-2 text-xs text-slate-500">
+                  Runtime instance created from this published workflow definition.
+                </p>
+
+              </div>
+
+
+              <span
+                className={`rounded-full border px-3 py-1 text-xs font-semibold ${getRuntimeStatusClass(
+                  runtime.status
+                )}`}
+              >
+                {formatStatus(
+                  runtime.status
+                )}
+              </span>
+
+            </div>
+
+
+            <div className="mt-5 grid gap-3 sm:grid-cols-3">
+
+              <div className="rounded-xl bg-slate-50 p-3">
+
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                  Instance
+                </p>
+
+                <p className="mt-1 break-all text-xs font-semibold text-slate-700">
+                  {runtime.id ||
+                    runtime.instance_id ||
+                    "?"}
+                </p>
+
+              </div>
+
+
+              <div className="rounded-xl bg-slate-50 p-3">
+
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                  Workflow
+                </p>
+
+                <p className="mt-1 break-all text-xs font-semibold text-slate-700">
+                  {runtime.workflow ||
+                    workflow?.id ||
+                    "?"}
+                </p>
+
+              </div>
+
+
+              <div className="rounded-xl bg-slate-50 p-3">
+
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                  Events
+                </p>
+
+                <p className="mt-1 text-xs font-semibold text-slate-700">
+                  {executionHistory.length}
+                </p>
+
+              </div>
+
+            </div>
+
+
+            <div className="mt-4 flex flex-wrap gap-2">
+
+              <button
+                type="button"
+                onClick={() => {
+
+                  const instanceId =
+                    runtime.id ||
+                    runtime.instance_id;
+
+
+                  if (instanceId) {
+
+                    navigate(
+                      `/workflows/${workflowId}/runtime/${instanceId}`
+                    );
+
+                  }
+
+                }}
+                className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white hover:bg-slate-800"
+              >
+
+                <Play
+                  size={14}
+                />
+
+                Open runtime
+
+              </button>
+
+
+              <button
+                type="button"
+                onClick={() => {
+
+                  const instanceId =
+                    runtime.id ||
+                    runtime.instance_id;
+
+
+                  if (instanceId) {
+
+                    navigate(
+                      `/workflows/${workflowId}/runtime/${instanceId}#history`
+                    );
+
+                  }
+
+                }}
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              >
+
+                <History
+                  size={14}
+                />
+
+                Execution history
+
+              </button>
+
+            </div>
+
+          </section>
+
+        )}
+
+
+        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+
+            <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-400">
+              Status
+            </p>
+
+            <div className="mt-3 flex items-center gap-2">
+
+              {isActive ? (
+
+                <CheckCircle2
+                  size={17}
+                  className="text-emerald-600"
+                />
+
+              ) : (
+
+                <CircleDashed
+                  size={17}
+                  className="text-slate-400"
+                />
+
+              )}
+
+              <span className="text-sm font-semibold text-slate-800">
+                {formatStatus(
+                  workflow?.status
+                )}
+              </span>
+
+            </div>
+
+          </div>
+
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+
+            <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-400">
+              Version
+            </p>
+
+            <p className="mt-3 text-xl font-semibold text-slate-950">
+              {workflow?.version ?? "?"}
+            </p>
+
+          </div>
+
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+
+            <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-400">
+              Nodes
+            </p>
+
+            <p className="mt-3 text-xl font-semibold text-slate-950">
+              {nodes.length}
+            </p>
+
+          </div>
+
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+
+            <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-400">
+              Transitions
+            </p>
+
+            <p className="mt-3 text-xl font-semibold text-slate-950">
+              {transitions.length}
+            </p>
+
+          </div>
+
+        </section>
+
+
+        <div className="grid gap-5 xl:grid-cols-2">
+
+          <section className="overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-sm">
+
+            <div className="border-b border-slate-100 px-5 py-4">
+
+              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-indigo-500">
+                Workflow graph
+              </p>
+
+              <h2 className="mt-1 text-base font-semibold text-slate-950">
+                Nodes
+              </h2>
+
+            </div>
+
+
+            {nodes.length ===
+            0 ? (
+
+              <div className="px-5 py-10 text-center text-xs text-slate-400">
+                No nodes defined.
+              </div>
+
+            ) : (
+
+              <div className="divide-y divide-slate-100">
+
+                {nodes.map(
+                  (
+                    node,
+                    index
+                  ) => (
+
+                    <div
+                      key={
+                        node.id ||
+                        node.pk ||
+                        `node-${index}`
+                      }
+                      className="px-5 py-4"
+                    >
+
+                      <p className="text-sm font-semibold text-slate-900">
+                        {getNodeLabel(
+                          node
+                        )}
+                      </p>
+
+                      <p className="mt-1 text-xs text-slate-500">
+                        {formatStatus(
+                          node.node_type ||
+                          "node"
+                        )}
+                      </p>
+
+                    </div>
+
+                  )
+                )}
+
+              </div>
+
+            )}
+
+          </section>
+
+
+          <section className="overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-sm">
+
+            <div className="border-b border-slate-100 px-5 py-4">
+
+              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-violet-500">
+                Execution path
+              </p>
+
+              <h2 className="mt-1 text-base font-semibold text-slate-950">
+                Transitions
+              </h2>
+
+            </div>
+
+
+            {transitions.length ===
+            0 ? (
+
+              <div className="px-5 py-10 text-center text-xs text-slate-400">
+                No transitions defined.
+              </div>
+
+            ) : (
+
+              <div className="divide-y divide-slate-100">
+
+                {transitions.map(
+                  (
+                    transition,
+                    index
+                  ) => (
+
+                    <div
+                      key={
+                        transition.id ||
+                        `transition-${index}`
+                      }
+                      className="px-5 py-4"
+                    >
+
+                      <div className="grid gap-3 sm:grid-cols-3">
+
+                        <div>
+
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-slate-400">
+                            From
+                          </p>
+
+                          <p className="mt-1 break-words text-xs font-semibold text-slate-700">
+                            {transition.source_node ||
+                              transition.from_node ||
+                              transition.source ||
+                              "?"}
+                          </p>
+
+                        </div>
+
+
+                        <div>
+
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-slate-400">
+                            To
+                          </p>
+
+                          <p className="mt-1 break-words text-xs font-semibold text-slate-700">
+                            {transition.target_node ||
+                              transition.to_node ||
+                              transition.target ||
+                              "?"}
+                          </p>
+
+                        </div>
+
+
+                        <div>
+
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-slate-400">
+                            Priority
+                          </p>
+
+                          <p className="mt-1 text-xs font-semibold text-slate-700">
+                            {transition.priority ?? 100}
+                          </p>
+
+                        </div>
+
+                      </div>
+
+
+                      <div className="mt-3 rounded-xl bg-slate-50 px-3 py-2">
+
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-slate-400">
+                          Condition
+                        </p>
+
+                        <p className="mt-1 break-words text-xs text-slate-600">
+                          {transition.condition ||
+                            "Always"}
+                        </p>
+
+                      </div>
+
+                    </div>
+
+                  )
+                )}
+
+              </div>
+
+            )}
+
+          </section>
+
+        </div>
+
+
+        {runtime && (
+
+          <section className="overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-sm">
+
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+
+              <div>
+
+                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-sky-500">
+                  Runtime audit
+                </p>
+
+                <h2 className="mt-1 text-base font-semibold text-slate-950">
+                  Execution history
+                </h2>
+
+              </div>
+
+
+              <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-semibold text-slate-500">
+                {executionHistory.length}
+              </span>
+
+            </div>
+
+
+            {executionHistory.length ===
+            0 ? (
+
+              <div className="px-5 py-10 text-center text-xs text-slate-400">
+                No execution events recorded yet.
+              </div>
+
+            ) : (
+
+              <div className="divide-y divide-slate-100">
+
+                {executionHistory
+                  .slice(
+                    0,
+                    10
+                  )
+                  .map(
+                    (
+                      event,
+                      index
+                    ) => (
+
+                      <div
+                        key={
+                          event.id ||
+                          `event-${index}`
+                        }
+                        className="flex flex-col gap-2 px-5 py-4 sm:flex-row sm:items-center sm:justify-between"
+                      >
+
+                        <span className="text-sm font-semibold text-slate-800">
+                          {formatStatus(
+                            event.event
+                          )}
+                        </span>
+
+
+                        {event.created_at && (
+
+                          <span className="text-xs text-slate-400">
+                            {new Date(
+                              event.created_at
+                            ).toLocaleString()}
+                          </span>
+
+                        )}
+
+                      </div>
+
+                    )
+                  )}
+
+              </div>
+
+            )}
+
+          </section>
+
+        )}
+
+      </div>
 
     </div>
   );
+
 }

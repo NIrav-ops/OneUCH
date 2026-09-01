@@ -628,9 +628,9 @@ export default function Relationships() {
 
 
   return (
-    <div className="min-h-full bg-slate-50">
+    <div className="min-h-full bg-slate-50/70">
 
-      <div className="mx-auto max-w-[1580px] px-5 py-6 lg:px-8 lg:py-8">
+      <div className="mx-auto max-w-[1580px] px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
 
         {/* ==================================================
             HERO

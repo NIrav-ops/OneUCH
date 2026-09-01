@@ -82,6 +82,72 @@ def _source_type_provenance(
     }
 
 
+def _normalize_evidence_text(
+    value,
+):
+    """
+    Normalize evidence only for truthful source containment
+    checks.
+
+    This intentionally mirrors the strict validator's
+    whitespace/case normalization without changing the
+    validator itself.
+    """
+    return " ".join(
+        str(
+            value or ""
+        ).split()
+    ).lower()
+
+
+def _source_contains_exact_text(
+    *,
+    source_message,
+    evidence_text,
+):
+    """
+    Return True only when legacy evidence text is actually
+    present in the source communication.
+
+    Historical ExpectedResponseItem.evidence_text values
+    predate the strict IntelligenceEvidence contract and may
+    contain extracted/paraphrased obligation text.
+
+    Such text remains useful as the obligation itself, but
+    must not be represented as a verbatim quote.
+    """
+    normalized_evidence = (
+        _normalize_evidence_text(
+            evidence_text
+        )
+    )
+
+    if (
+        source_message is None
+        or
+        not normalized_evidence
+    ):
+        return False
+
+    source_text = (
+        _normalize_evidence_text(
+            " ".join(
+                [
+                    source_message.subject
+                    or "",
+                    source_message.body
+                    or "",
+                ]
+            )
+        )
+    )
+
+    return (
+        normalized_evidence
+        in source_text
+    )
+
+
 def _persisted_evidence(
     *,
     instance,
@@ -416,10 +482,31 @@ def build_expected_response_evidence(
     if persisted is not None:
         return persisted
 
-    evidence_text = (
+    legacy_evidence_text = (
         item.evidence_text
         or ""
     ).strip()
+
+    exact_evidence = (
+        _source_contains_exact_text(
+            source_message=(
+                source_message
+            ),
+            evidence_text=(
+                legacy_evidence_text
+            ),
+        )
+    )
+
+    # Historical ExpectedResponseItem.evidence_text predates
+    # the strict evidence contract. If it is not a verifiable
+    # substring of the source message, preserve the source
+    # linkage but do not fabricate an exact quotation.
+    evidence_text = (
+        legacy_evidence_text
+        if exact_evidence
+        else ""
+    )
 
     evidence = IntelligenceEvidence(
         object_type=(
@@ -449,7 +536,7 @@ def build_expected_response_evidence(
         confidence=100,
         evidence_quality=(
             "exact"
-            if evidence_text
+            if exact_evidence
             else "source_only"
         ),
     )

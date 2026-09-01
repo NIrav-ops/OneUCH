@@ -309,6 +309,64 @@ class IntelligenceEvidenceBuilderTests(
             100,
         )
 
+    def test_legacy_non_verbatim_expected_response_downgrades_to_source_only(
+        self,
+    ):
+        item = (
+            ExpectedResponseItem
+            .objects.create(
+                user=self.user,
+                organization=(
+                    self.organization
+                ),
+                conversation=(
+                    self.conversation
+                ),
+                source_message=(
+                    self.message
+                ),
+                evidence_text=(
+                    "Customer requested updated "
+                    "commercial pricing."
+                ),
+                status="waiting",
+            )
+        )
+
+        evidence = (
+            build_expected_response_evidence(
+                item
+            )
+        )
+
+        self.assertEqual(
+            evidence.object_type,
+            "expected_response",
+        )
+
+        self.assertEqual(
+            evidence.evidence_quality,
+            "source_only",
+        )
+
+        self.assertEqual(
+            evidence.evidence_text,
+            "",
+        )
+
+        self.assertEqual(
+            evidence.source_message_id,
+            self.message.id,
+        )
+
+        self.assertEqual(
+            item.evidence_text,
+            (
+                "Customer requested updated "
+                "commercial pricing."
+            ),
+        )
+
     def test_expected_response_without_text_downgrades_to_source_only(
         self,
     ):

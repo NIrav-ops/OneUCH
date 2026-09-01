@@ -1755,144 +1755,365 @@ export default function Inbox() {
 
   return (
 
-    <div className="flex h-screen">
+    <div className="min-h-[calc(100vh-118px)] bg-slate-50/70 p-3 sm:p-4 lg:p-5">
 
-
-      {/* =====================================================
-          LEFT PANEL
-      ====================================================== */}
-
-      <div className="w-96 border-r flex flex-col">
+      <div className="mx-auto flex min-h-[720px] max-w-[1680px] flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm lg:h-[calc(100vh-154px)] lg:flex-row">
 
 
         {/* ===================================================
-            TOP CONTROLS
+            MAILBOX / CONVERSATION RAIL
         ==================================================== */}
 
-        <div className="p-3 border-b space-y-2">
+        <aside className="flex min-h-0 w-full shrink-0 flex-col border-b border-slate-200 bg-white lg:w-[390px] lg:border-b-0 lg:border-r">
+
+          {/* ===============================================
+              WORKSPACE CONTROL
+          ================================================ */}
+
+          <div className="border-b border-slate-100 px-4 py-4">
+
+            <div className="flex items-center justify-between gap-3">
+
+              <div>
+
+                <p className="text-[10px] font-semibold uppercase tracking-[0.17em] text-slate-400">
+                  Connected communication
+                </p>
+
+                <h2 className="mt-1 text-base font-semibold tracking-tight text-slate-950">
+                  Mail workspace
+                </h2>
+
+              </div>
 
 
-          {/* CONNECT */}
+              <button
+                type="button"
+                onClick={() => {
 
-          <div className="flex gap-2">
+                  setActiveDraftId(
+                    null
+                  );
 
-            <button
-              type="button"
-              onClick={() =>
-                connectProvider(
-                  "gmail"
-                )
-              }
-            >
-              Connect Gmail
-            </button>
+                  setForwardSourceId(
+                    null
+                  );
 
+                  setSelectedId(
+                    null
+                  );
 
-            <button
-              type="button"
-              onClick={() =>
-                connectProvider(
-                  "outlook"
-                )
-              }
-            >
-              Connect Outlook
-            </button>
+                  setComposeData({
+                    to:
+                      [],
+                    cc:
+                      [],
+                    bcc:
+                      [],
+                    subject:
+                      "",
+                    body:
+                      "",
+                  });
 
-          </div>
+                  setComposeAccountId(
+                    selectedAccountId ||
+                    (
+                      accounts.length > 0
+                        ? String(
+                            accounts[
+                              0
+                            ].id
+                          )
+                        : ""
+                    )
+                  );
 
+                  setShowCompose(
+                    true
+                  );
 
-          {/* SYNC */}
+                }}
+                className="rounded-xl bg-slate-950 px-3.5 py-2.5 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800"
+              >
+                + Compose
+              </button>
 
-          <div className="flex gap-2">
-
-            <button
-              type="button"
-              onClick={() =>
-                syncProvider(
-                  "gmail"
-                )
-              }
-              disabled={
-                syncing === "gmail"
-              }
-            >
-              {syncing === "gmail"
-                ? "Syncing Gmail..."
-                : "Sync Gmail"}
-            </button>
-
-
-            <button
-              type="button"
-              onClick={() =>
-                syncProvider(
-                  "outlook"
-                )
-              }
-              disabled={
-                syncing === "outlook"
-              }
-            >
-              {syncing === "outlook"
-                ? "Syncing Outlook..."
-                : "Sync Outlook"}
-            </button>
-
-          </div>
-
-
-          {/* CONNECTED ACCOUNTS */}
-
-          <div className="rounded border border-slate-200 bg-slate-50 p-2 text-xs text-slate-700">
-
-            <div className="font-semibold text-slate-900">
-              Connected Accounts
             </div>
 
 
-            {accounts.length === 0 ? (
+            {/* =============================================
+                PROVIDER HEALTH
+            ============================================== */}
 
-              <div className="mt-1 text-slate-500">
-                No accounts connected.
-              </div>
+            <div className="mt-4 grid grid-cols-2 gap-2">
 
-            ) : (
+              {[
+                {
+                  provider:
+                    "gmail",
+                  label:
+                    "Gmail",
+                },
+                {
+                  provider:
+                    "outlook",
+                  label:
+                    "Microsoft 365",
+                },
+              ].map(
+                (provider) => {
 
-              <div className="mt-1 space-y-1">
+                  const connected =
+                    accounts.some(
+                      (account) =>
+                        account.account_type ===
+                        provider.provider
+                    );
+
+
+                  const busy =
+                    syncing ===
+                    provider.provider;
+
+
+                  return (
+
+                    <div
+                      key={
+                        provider.provider
+                      }
+                      className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3"
+                    >
+
+                      <div className="flex items-center justify-between gap-2">
+
+                        <span className="text-xs font-semibold text-slate-800">
+                          {provider.label}
+                        </span>
+
+                        <span
+                          className={`h-2 w-2 rounded-full ${
+                            connected
+                              ? "bg-emerald-500"
+                              : "bg-slate-300"
+                          }`}
+                        />
+
+                      </div>
+
+
+                      <p className="mt-1 line-clamp-2 min-h-[32px] text-[10px] leading-4 text-slate-500">
+                        {formatSyncStatus(
+                          provider.provider
+                        )}
+                      </p>
+
+
+                      <div className="mt-2 flex gap-1.5">
+
+                        {!connected && (
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              connectProvider(
+                                provider.provider
+                              )
+                            }
+                            className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-50"
+                          >
+                            Connect
+                          </button>
+
+                        )}
+
+
+                        {connected && (
+
+                          <button
+                            type="button"
+                            disabled={
+                              busy
+                            }
+                            onClick={() =>
+                              syncProvider(
+                                provider.provider
+                              )
+                            }
+                            className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-wait disabled:opacity-50"
+                          >
+                            {busy
+                              ? "Syncing..."
+                              : "Sync"}
+                          </button>
+
+                        )}
+
+                      </div>
+
+                    </div>
+
+                  );
+
+                }
+              )}
+
+            </div>
+
+
+            {/* =============================================
+                ACCOUNT FILTER
+            ============================================== */}
+
+            <div className="mt-3">
+
+              <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-400">
+                Mailbox
+              </label>
+
+              <select
+                value={
+                  selectedAccountId
+                }
+                onChange={(event) =>
+                  setSelectedAccountId(
+                    event.target.value
+                  )
+                }
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-medium text-slate-700 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
+              >
+
+                <option value="">
+                  All connected mailboxes
+                </option>
+
 
                 {accounts.map(
                   (account) => (
 
-                    <div
+                    <option
                       key={
                         account.id
                       }
+                      value={
+                        account.id
+                      }
                     >
-
-                      <div>
-                        {
-                          account.email_address
-                        }
-                      </div>
-
-                      <div className="text-slate-500">
-
-                        {account.account_type
-                          ?.toUpperCase()}
-
-                        {" - "}
-
-                        {formatSyncStatus(
-                          account.account_type
-                        )}
-
-                      </div>
-
-                    </div>
+                      {account.email_address}
+                      {" ? "}
+                      {account.account_type
+                        ?.toUpperCase()}
+                    </option>
 
                   )
                 )}
+
+              </select>
+
+            </div>
+
+          </div>
+
+
+          {/* ===============================================
+              FOLDER NAVIGATION
+          ================================================ */}
+
+          <div className="border-b border-slate-100 px-4 py-3">
+
+            <div className="grid grid-cols-3 rounded-xl bg-slate-100 p-1">
+
+              {[
+                [
+                  "inbox",
+                  "Inbox",
+                ],
+                [
+                  "sent",
+                  "Sent",
+                ],
+                [
+                  "draft",
+                  "Drafts",
+                ],
+              ].map(
+                (
+                  [
+                    value,
+                    label,
+                  ]
+                ) => (
+
+                  <button
+                    type="button"
+                    key={
+                      value
+                    }
+                    onClick={() => {
+
+                      setActiveTab(
+                        value
+                      );
+
+                      setSelectedConversationIds(
+                        []
+                      );
+
+
+                      if (
+                        value ===
+                        "draft"
+                      ) {
+
+                        setSelectedId(
+                          null
+                        );
+
+                        setMessages(
+                          []
+                        );
+
+                        setAttachments(
+                          []
+                        );
+
+                      }
+
+                    }}
+                    className={`rounded-lg px-2 py-2 text-xs font-semibold transition ${
+                      activeTab ===
+                      value
+                        ? "bg-white text-slate-950 shadow-sm"
+                        : "text-slate-500 hover:text-slate-800"
+                    }`}
+                  >
+                    {label}
+                  </button>
+
+                )
+              )}
+
+            </div>
+
+
+            {activeTab !==
+              "draft" && (
+
+              <div className="mt-3">
+
+                <input
+                  value={
+                    search
+                  }
+                  onChange={(event) =>
+                    setSearch(
+                      event.target.value
+                    )
+                  }
+                  placeholder="Search this mailbox..."
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-100"
+                />
 
               </div>
 
@@ -1901,841 +2122,834 @@ export default function Inbox() {
           </div>
 
 
-          {/* COMPOSE */}
+          {/* ===============================================
+              BULK CONTROL
+          ================================================ */}
 
-          <button
-            type="button"
-            onClick={() => {
+          {activeTab !==
+            "draft" &&
+            conversations.length >
+              0 && (
 
-              setActiveDraftId(
-                null
-              );
+              <div className="border-b border-slate-100 px-4 py-2.5">
 
-              setForwardSourceId(
-                null
-              );
+                <div className="flex flex-wrap items-center gap-2">
 
-              setSelectedId(
-                null
-              );
-
-              setComposeData({
-                to: [],
-    cc: [],
-    bcc: [],
-                subject: "",
-                body: "",
-              });
-
-              setComposeAccountId(
-                selectedAccountId ||
-                (
-                  accounts.length > 0
-                    ? String(accounts[0].id)
-                    : ""
-                )
-              );
-
-              setShowCompose(
-                true
-              );
-
-            }}
-          >
-            + Compose
-          </button>
+                  <button
+                    type="button"
+                    onClick={
+                      toggleSelectAll
+                    }
+                    className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-50"
+                  >
+                    {selectedConversationIds.length ===
+                    conversations.length
+                      ? "Clear selection"
+                      : "Select all"}
+                  </button>
 
 
-          {/* TABS */}
+                  {selectedConversationIds.length >
+                    0 && (
 
-          <div className="flex gap-2">
+                    <>
+                      <span className="text-[10px] font-semibold text-slate-400">
+                        {selectedConversationIds.length} selected
+                      </span>
 
-            <button
-              type="button"
-              onClick={() => {
+                      <button
+                        type="button"
+                        onClick={
+                          bulkMarkRead
+                        }
+                        className="rounded-lg bg-slate-100 px-2.5 py-1.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-200"
+                      >
+                        Mark read
+                      </button>
 
-                setActiveTab(
-                  "inbox"
-                );
+                      <button
+                        type="button"
+                        onClick={
+                          bulkToggleStar
+                        }
+                        className="rounded-lg bg-slate-100 px-2.5 py-1.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-200"
+                      >
+                        Toggle star
+                      </button>
 
-                setSelectedConversationIds(
-                  []
-                );
+                    </>
 
-              }}
-            >
-              Inbox
-            </button>
+                  )}
 
+                </div>
 
-            <button
-              type="button"
-              onClick={() => {
+              </div>
 
-                setActiveTab(
-                  "sent"
-                );
-
-                setSelectedConversationIds(
-                  []
-                );
-
-              }}
-            >
-              Sent
-            </button>
-
-
-            <button
-              type="button"
-              onClick={() => {
-
-                setActiveTab(
-                  "draft"
-                );
-
-                setSelectedId(
-                  null
-                );
-
-                setSelectedConversationIds(
-                  []
-                );
-
-                setMessages(
-                  []
-                );
-
-                setAttachments(
-                  []
-                );
-
-              }}
-            >
-              Draft
-            </button>
-
-          </div>
-
-
-          {/* ACCOUNT SWITCH */}
-
-          <select
-            value={
-              selectedAccountId
-            }
-            onChange={(event) =>
-              setSelectedAccountId(
-                event.target.value
-              )
-            }
-          >
-
-            <option value="">
-              Select Account
-            </option>
-
-
-            {accounts.map(
-              (account) => (
-
-                <option
-                  key={
-                    account.id
-                  }
-                  value={
-                    account.id
-                  }
-                >
-                  {
-                    account.email_address
-                  }
-                </option>
-
-              )
             )}
 
-          </select>
+
+          {/* ===============================================
+              CONVERSATION LIST
+          ================================================ */}
+
+          <div className="min-h-0 flex-1 overflow-y-auto">
+
+            {error && (
+
+              <div className="m-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs leading-5 text-rose-700">
+                {error}
+              </div>
+
+            )}
 
 
-          {/* SEARCH */}
+            {activeTab ===
+            "draft" ? (
 
-          {activeTab !== "draft" && (
+              drafts.length ===
+              0 ? (
 
-            <input
-              value={search}
-              onChange={(event) =>
-                setSearch(
-                  event.target.value
-                )
-              }
-              placeholder="Search"
-            />
+                <div className="px-5 py-12 text-center">
 
-          )}
+                  <p className="text-sm font-medium text-slate-700">
+                    No saved drafts
+                  </p>
 
-        </div>
+                  <p className="mt-1 text-xs text-slate-400">
+                    Draft messages will appear here.
+                  </p>
 
+                </div>
 
-        {/* ===================================================
-            SELECT ALL
-        ==================================================== */}
+              ) : (
 
-        {activeTab !== "draft" &&
-          conversations.length > 0 && (
+                <div className="divide-y divide-slate-100">
 
-            <div className="border-b p-2">
+                  {drafts.map(
+                    (draft) => (
 
-              <button
-                type="button"
-                onClick={
-                  toggleSelectAll
-                }
-                className="rounded border px-2 py-1 text-xs"
-              >
+                      <button
+                        type="button"
+                        key={
+                          draft.id
+                        }
+                        onClick={() =>
+                          openDraft(
+                            draft
+                          )
+                        }
+                        className="block w-full px-4 py-3.5 text-left transition hover:bg-slate-50"
+                      >
 
-                {selectedConversationIds.length ===
-                conversations.length
-                  ? "Clear All"
-                  : "Select All"}
+                        <p className="truncate text-sm font-semibold text-slate-900">
+                          {draft.subject ||
+                            "No Subject"}
+                        </p>
 
-              </button>
+                        <p className="mt-1 truncate text-xs text-slate-500">
+                          {draft.recipients ||
+                            "No recipient"}
+                        </p>
 
-            </div>
+                        <p className="mt-2 text-[10px] font-semibold uppercase tracking-[0.13em] text-slate-400">
+                          Draft
+                        </p>
 
-          )}
+                      </button>
 
+                    )
+                  )}
 
-        {/* ===================================================
-            BULK TOOLBAR
-        ==================================================== */}
+                </div>
 
-        {activeTab !== "draft" &&
-          selectedConversationIds.length >
-            0 && (
+              )
 
-            <div className="border-b p-2 flex gap-2 items-center flex-wrap">
+            ) : loading ? (
 
-              <span className="text-xs text-slate-600">
+              <div className="px-5 py-12 text-center">
 
-                {
-                  selectedConversationIds.length
-                }{" "}
-                selected
+                <div className="mx-auto h-7 w-7 animate-pulse rounded-full bg-slate-200" />
 
-              </span>
+                <p className="mt-3 text-xs font-medium text-slate-500">
+                  Loading conversations...
+                </p>
 
+              </div>
 
-              <button
-                type="button"
-                onClick={
-                  bulkMarkRead
-                }
-                className="rounded border px-2 py-1 text-xs"
-              >
-                Mark Read
-              </button>
+            ) : conversations.length ===
+              0 ? (
 
+              <div className="px-5 py-12 text-center">
 
-              <button
-                type="button"
-                onClick={
-                  bulkToggleStar
-                }
-                className="rounded border px-2 py-1 text-xs"
-              >
-                Toggle Star
-              </button>
+                <p className="text-sm font-medium text-slate-700">
+                  No conversations found
+                </p>
 
+                <p className="mt-1 text-xs text-slate-400">
+                  Try another mailbox, folder or search.
+                </p>
 
-              <button
-                type="button"
-                onClick={() =>
-                  setSelectedConversationIds(
-                    []
-                  )
-                }
-                className="rounded border px-2 py-1 text-xs"
-              >
-                Clear
-              </button>
-
-            </div>
-
-          )}
-
-
-        {/* ===================================================
-            LIST
-        ==================================================== */}
-
-        <div className="overflow-y-auto flex-1">
-
-
-          {error && (
-
-            <div className="p-3 text-sm text-red-600">
-              {error}
-            </div>
-
-          )}
-
-
-          {/* DRAFT LIST */}
-
-          {activeTab === "draft" ? (
-
-            drafts.length === 0 ? (
-
-              <div className="p-3 text-sm text-slate-500">
-                No drafts found.
               </div>
 
             ) : (
 
-              drafts.map(
-                (draft) => (
+              <div className="divide-y divide-slate-100">
 
-                  <div
-                    key={
-                      draft.id
-                    }
-                    onClick={() =>
-                      openDraft(
-                        draft
-                      )
-                    }
-                    style={{
-                      padding: 10,
-                      borderBottom:
-                        "1px solid #ddd",
-                      cursor:
-                        "pointer",
-                    }}
-                  >
+                {conversations.map(
+                  (conversation) => {
 
-                    <div
-                      style={{
-                        fontWeight:
-                          "bold",
-                        fontSize: 14,
-                      }}
-                    >
-                      {draft.subject ||
-                        "No Subject"}
-                    </div>
+                    const active =
+                      conversation.conversation_id ===
+                      selectedId;
 
 
-                    <div
-                      style={{
-                        fontSize: 12,
-                        color: "#666",
-                      }}
-                    >
-                      {draft.recipients ||
-                        "No recipient"}
-                    </div>
-
-
-                    <div
-                      style={{
-                        fontSize: 11,
-                        color: "#999",
-                        marginTop: 3,
-                      }}
-                    >
-                      Draft
-                    </div>
-
-                  </div>
-
-                )
-              )
-
-            )
-
-          ) : loading ? (
-
-            <div className="p-3">
-              Loading...
-            </div>
-
-          ) : conversations.length ===
-            0 ? (
-
-            <div className="p-3 text-sm text-slate-500">
-              No conversations found.
-            </div>
-
-          ) : (
-
-            conversations.map(
-              (conversation) => (
-
-                <div
-                  key={
-                    conversation.conversation_id
-                  }
-                  onClick={() => {
-
-                    setSelectedId(
-                      conversation.conversation_id
-                    );
-
-                  }}
-                  style={{
-                    padding: 10,
-                    borderBottom:
-                      "1px solid #ddd",
-                    cursor:
-                      "pointer",
-
-                    background:
+                    const unread =
                       conversation.unread_count >
-                      0
-                        ? "#eef6ff"
-                        : "white",
-                  }}
-                >
+                      0;
 
-                  <div
-                    style={{
-                      display:
-                        "flex",
-                      alignItems:
-                        "flex-start",
-                      gap: 8,
-                    }}
-                  >
 
-                    {/* CHECKBOX */}
+                    return (
 
-                    <input
-                      type="checkbox"
-                      checked={selectedConversationIds.includes(
-                        conversation.conversation_id
-                      )}
-                      onChange={() =>
-                        toggleConversationSelection(
+                      <div
+                        key={
                           conversation.conversation_id
-                        )
-                      }
-                      onClick={(
-                        event
-                      ) => {
-
-                        event.stopPropagation();
-
-                      }}
-                    />
-
-
-                    {/* CONTENT */}
-
-                    <div
-                      style={{
-                        flex: 1,
-                        minWidth: 0,
-                      }}
-                    >
-
-                      <div
-                        style={{
-                          fontWeight:
-                            "bold",
-                          fontSize:
-                            14,
-                        }}
+                        }
+                        className={`group relative transition ${
+                          active
+                            ? "bg-slate-950"
+                            : unread
+                            ? "bg-sky-50/60 hover:bg-sky-50"
+                            : "bg-white hover:bg-slate-50"
+                        }`}
                       >
 
-                        {conversation.is_starred
-                          ? "★ "
-                          : ""}
-
-                        {conversation.subject ||
-                          "No Subject"}
-
-                      </div>
-
-
-                      {activeTab === "sent" && (
-                        <div
-                          style={{
-                            fontSize: 12,
-                            color: "#666",
-                            marginTop: 2,
-                          }}
-                        >
-                          To: {
-                            conversation.recipients ||
-                            "Unknown recipient"
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setSelectedId(
+                              conversation.conversation_id
+                            )
                           }
-                        </div>
-                      )}
+                          className="block w-full px-4 py-4 text-left"
+                        >
 
-                      <div
-                        style={{
-                          fontSize:
-                            11,
-                          color:
-                            "#999",
-                        }}
-                      >
-                        {conversation.platform
-                          ?.toUpperCase()}
+                          <div className="flex items-start gap-3">
+
+                            <input
+                              type="checkbox"
+                              checked={
+                                selectedConversationIds.includes(
+                                  conversation.conversation_id
+                                )
+                              }
+                              onChange={() =>
+                                toggleConversationSelection(
+                                  conversation.conversation_id
+                                )
+                              }
+                              onClick={(event) =>
+                                event.stopPropagation()
+                              }
+                              className="mt-1 h-3.5 w-3.5 shrink-0 rounded border-slate-300"
+                            />
+
+
+                            <div className="min-w-0 flex-1">
+
+                              <div className="flex items-start justify-between gap-2">
+
+                                <p
+                                  className={`truncate text-sm ${
+                                    unread
+                                      ? "font-bold"
+                                      : "font-semibold"
+                                  } ${
+                                    active
+                                      ? "text-white"
+                                      : "text-slate-900"
+                                  }`}
+                                >
+                                  {conversation.is_starred
+                                    ? "? "
+                                    : ""}
+                                  {conversation.subject ||
+                                    "No Subject"}
+                                </p>
+
+
+                                {unread && (
+
+                                  <span
+                                    className={`shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-bold ${
+                                      active
+                                        ? "bg-white/15 text-white"
+                                        : "bg-sky-100 text-sky-700"
+                                    }`}
+                                  >
+                                    {conversation.unread_count}
+                                  </span>
+
+                                )}
+
+                              </div>
+
+
+                              {activeTab ===
+                                "sent" && (
+
+                                <p
+                                  className={`mt-1 truncate text-xs ${
+                                    active
+                                      ? "text-slate-300"
+                                      : "text-slate-500"
+                                  }`}
+                                >
+                                  To:{" "}
+                                  {conversation.recipients ||
+                                    "Unknown recipient"}
+                                </p>
+
+                              )}
+
+
+                              <p
+                                className={`mt-1 line-clamp-2 text-xs leading-5 ${
+                                  active
+                                    ? "text-slate-300"
+                                    : "text-slate-500"
+                                }`}
+                              >
+                                {conversation.preview ||
+                                  "No preview available"}
+                              </p>
+
+
+                              <div className="mt-2 flex items-center justify-between gap-2">
+
+                                <span
+                                  className={`rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${
+                                    active
+                                      ? "bg-white/10 text-slate-300"
+                                      : conversation.platform ===
+                                        "gmail"
+                                      ? "bg-rose-50 text-rose-600"
+                                      : "bg-sky-50 text-sky-700"
+                                  }`}
+                                >
+                                  {conversation.platform ||
+                                    "mail"}
+                                </span>
+
+                                {unread && (
+
+                                  <span
+                                    className={`h-1.5 w-1.5 rounded-full ${
+                                      active
+                                        ? "bg-sky-300"
+                                        : "bg-sky-500"
+                                    }`}
+                                  />
+
+                                )}
+
+                              </div>
+
+                            </div>
+
+                          </div>
+
+                        </button>
+
                       </div>
 
-
-                      <div
-                        style={{
-                          fontSize:
-                            12,
-                          color:
-                            "#666",
-                        }}
-                      >
-                        {
-                          conversation.preview
-                        }
-                      </div>
-
-                    </div>
-
-                  </div>
-
-                </div>
-
-              )
-            )
-
-          )}
-
-        </div>
-
-      </div>
-
-
-      {/* =====================================================
-          RIGHT AREA
-      ====================================================== */}
-
-      <div className="flex-1 flex min-w-0">
-
-
-        {/* ===================================================
-            MESSAGE DETAIL
-        ==================================================== */}
-
-        <div className="flex-1 p-4 overflow-y-auto">
-
-
-          {!selectedId &&
-            activeTab !== "draft" && (
-
-              <div>
-                Select a conversation
-              </div>
-
-            )}
-
-
-          {selectedId &&
-            activeTab !== "draft" &&
-            messages.length === 0 && (
-
-              <div>
-                No messages found
-              </div>
-
-            )}
-
-
-          {/* REPLY ACTION */}
-
-          {selectedId &&
-            activeTab !== "draft" &&
-            messages.length > 0 && (
-
-              <div className="mb-4 flex flex-wrap gap-2">
-
-                <button
-                  type="button"
-                  onClick={() => {
-
-                    setError("");
-
-                    setReplyMode(
-                      "reply"
                     );
 
-                    setShowReply(
-                      true
-                    );
-
-                  }}
-                  className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white"
-                >
-                  Reply
-                </button>
-
-
-                <button
-                  type="button"
-                  onClick={() => {
-
-                    setError("");
-
-                    setReplyMode(
-                      "reply_all"
-                    );
-
-                    setShowReply(
-                      true
-                    );
-
-                  }}
-                  className="rounded border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700"
-                >
-                  Reply All
-                </button>
-
-
-                <button
-                  type="button"
-                  onClick={
-                    beginForward
                   }
-                  className="rounded border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700"
-                >
-                  Forward
-                </button>
-
-
-                <button
-                  type="button"
-                  onClick={
-                    markConversationUnread
-                  }
-                  className="rounded border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700"
-                >
-                  Mark unread
-                </button>
-
-
-                <button
-                  type="button"
-                  onClick={
-                    toggleSelectedConversationStar
-                  }
-                  className="rounded border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700"
-                >
-                  {
-                    conversations.find(
-                      (conversation) =>
-                        conversation.conversation_id ===
-                        selectedId
-                    )?.is_starred
-                      ? "Unstar"
-                      : "Star"
-                  }
-                </button>
-
-
-                <button
-                  type="button"
-                  onClick={
-                    openSelectedMessageInProvider
-                  }
-                  className="rounded border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700"
-                >
-                  {
-                    messages[
-                      messages.length - 1
-                    ]?.platform === "gmail"
-                      ? "Open in Gmail"
-                      : (
-                          messages[
-                            messages.length - 1
-                          ]?.platform === "outlook"
-                            ? "Open in Outlook"
-                            : "Open in Provider"
-                        )
-                  }
-                </button>
-
-
-                <button
-                  type="button"
-                  onClick={
-                    trashSelectedConversation
-                  }
-                  className="rounded border border-red-200 bg-white px-4 py-2 text-sm font-medium text-red-700"
-                >
-                  Trash
-                </button>
-
-              </div>
-
-            )}
-
-
-          {/* MESSAGES */}
-
-          {activeTab !== "draft" &&
-            messages.map(
-              (message) => (
-
-                <div
-                  key={
-                    message.id
-                  }
-                  style={{
-                    marginBottom:
-                      15,
-                  }}
-                >
-
-                  <div
-                    style={{
-                      fontWeight:
-                        "bold",
-                    }}
-                  >
-                    {activeTab === "sent"
-                      ? (
-                          "To: " +
-                          (
-                            message.recipients ||
-                            "Unknown recipient"
-                          )
-                        )
-                      : (
-                          message.sender ||
-                          "Unknown"
-                        )}
-                  </div>
-
-
-                  <div
-                    style={{
-                      fontSize:
-                        12,
-                      color:
-                        "#888",
-                    }}
-                  >
-                    {message.subject ||
-                      "No Subject"}
-                  </div>
-
-
-                  <div
-                    style={{
-                      marginTop:
-                        5,
-                    }}
-                  >
-                    {message.body ||
-                      "(No content)"}
-                  </div>
-
-                </div>
-
-              )
-            )}
-
-
-          {/* ATTACHMENTS */}
-
-          {activeTab !== "draft" &&
-            attachments.length > 0 && (
-
-              <div
-                style={{
-                  marginTop: 20,
-                }}
-              >
-
-                <b>
-                  Attachments:
-                </b>
-
-
-                {attachments.map(
-                  (
-                    attachment,
-                    index
-                  ) => (
-
-                    <div
-                      key={
-                        attachment.attachment_id ||
-                        index
-                      }
-                    >
-
-                      📎{" "}
-                      {
-                        attachment.filename
-                      }
-
-                      <span className="ml-2 text-xs text-slate-400">
-                        {
-                          attachment.mime_type ||
-                          "File attachment"
-                        }
-                      </span>
-
-
-                      <button
-                        type="button"
-                        disabled={
-                          attachment.downloadable ===
-                          false
-                        }
-                        onClick={() =>
-                          downloadFile(
-                            attachment.message_id,
-                            attachment.attachment_id,
-                            attachment.filename
-                          )
-                        }
-                        className="ml-3 rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {
-                          attachment.downloadable ===
-                          false
-                            ? "Unavailable"
-                            : "Download"
-                        }
-                      </button>
-
-                    </div>
-
-                  )
                 )}
 
               </div>
 
             )}
 
-        </div>
+          </div>
+
+        </aside>
 
 
         {/* ===================================================
-            TIMELINE
+            CONVERSATION WORKSPACE
         ==================================================== */}
 
-        {selectedId &&
-          activeTab !== "draft" && (
+        <section className="flex min-h-[620px] min-w-0 flex-1 flex-col bg-slate-50/50 lg:min-h-0">
 
-            <ConversationTimeline
-              conversationId={
-                selectedId
-              }
-            />
+          {!selectedId &&
+            activeTab !==
+              "draft" ? (
+
+            <div className="flex min-h-[540px] flex-1 items-center justify-center px-6 py-16">
+
+              <div className="max-w-md text-center">
+
+                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-slate-200 bg-white text-xl shadow-sm">
+                  ?
+                </div>
+
+                <h3 className="mt-5 text-lg font-semibold tracking-tight text-slate-900">
+                  Select a conversation
+                </h3>
+
+                <p className="mt-2 text-sm leading-6 text-slate-500">
+                  Open a conversation to review communication history, attachments and execution context.
+                </p>
+
+              </div>
+
+            </div>
+
+          ) : activeTab ===
+            "draft" ? (
+
+            <div className="flex min-h-[540px] flex-1 items-center justify-center px-6 py-16">
+
+              <div className="max-w-md text-center">
+
+                <h3 className="text-lg font-semibold text-slate-900">
+                  Draft workspace
+                </h3>
+
+                <p className="mt-2 text-sm leading-6 text-slate-500">
+                  Select a draft from the mailbox rail or create a new message.
+                </p>
+
+              </div>
+
+            </div>
+
+          ) : (
+
+            <div className="flex min-h-0 flex-1 flex-col">
+
+              {/* =============================================
+                  CONVERSATION HEADER
+              ============================================== */}
+
+              <div className="border-b border-slate-200 bg-white px-4 py-4 sm:px-5 lg:px-6">
+
+                <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+
+                  <div className="min-w-0">
+
+                    <div className="flex flex-wrap items-center gap-2">
+
+                      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.13em] text-slate-500">
+                        {messages[
+                          messages.length -
+                          1
+                        ]?.platform ||
+                          "mail"}
+                      </span>
+
+                      <span className="text-[10px] font-semibold uppercase tracking-[0.13em] text-slate-400">
+                        {messages.length} message
+                        {messages.length ===
+                        1
+                          ? ""
+                          : "s"}
+                      </span>
+
+                    </div>
+
+
+                    <h2 className="mt-2 max-w-4xl truncate text-lg font-semibold tracking-tight text-slate-950 sm:text-xl">
+                      {conversations.find(
+                        (conversation) =>
+                          conversation.conversation_id ===
+                          selectedId
+                      )?.subject ||
+                        messages[
+                          messages.length -
+                          1
+                        ]?.subject ||
+                        "Conversation"}
+                    </h2>
+
+                  </div>
+
+
+                  {messages.length >
+                    0 && (
+
+                    <div className="flex flex-wrap gap-1.5">
+
+                      <button
+                        type="button"
+                        onClick={() => {
+
+                          setError(
+                            ""
+                          );
+
+                          setReplyMode(
+                            "reply"
+                          );
+
+                          setShowReply(
+                            true
+                          );
+
+                        }}
+                        className="rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-slate-800"
+                      >
+                        Reply
+                      </button>
+
+
+                      <button
+                        type="button"
+                        onClick={() => {
+
+                          setError(
+                            ""
+                          );
+
+                          setReplyMode(
+                            "reply_all"
+                          );
+
+                          setShowReply(
+                            true
+                          );
+
+                        }}
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                      >
+                        Reply All
+                      </button>
+
+
+                      <button
+                        type="button"
+                        onClick={
+                          beginForward
+                        }
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                      >
+                        Forward
+                      </button>
+
+
+                      <button
+                        type="button"
+                        onClick={
+                          markConversationUnread
+                        }
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                      >
+                        Mark unread
+                      </button>
+
+
+                      <button
+                        type="button"
+                        onClick={
+                          toggleSelectedConversationStar
+                        }
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                      >
+                        {conversations.find(
+                          (conversation) =>
+                            conversation.conversation_id ===
+                            selectedId
+                        )?.is_starred
+                          ? "Unstar"
+                          : "Star"}
+                      </button>
+
+
+                      <button
+                        type="button"
+                        onClick={
+                          openSelectedMessageInProvider
+                        }
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                      >
+                        {messages[
+                          messages.length -
+                          1
+                        ]?.platform ===
+                        "gmail"
+                          ? "Open Gmail"
+                          : messages[
+                              messages.length -
+                              1
+                            ]?.platform ===
+                            "outlook"
+                          ? "Open Outlook"
+                          : "Open Provider"}
+                      </button>
+
+
+                      <button
+                        type="button"
+                        onClick={
+                          trashSelectedConversation
+                        }
+                        className="rounded-xl border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50"
+                      >
+                        Trash
+                      </button>
+
+                    </div>
+
+                  )}
+
+                </div>
+
+              </div>
+
+
+              <div className="grid min-h-0 flex-1 xl:grid-cols-[minmax(0,1fr)_320px]">
+
+                {/* ===========================================
+                    MESSAGE THREAD
+                ============================================ */}
+
+                <div className="min-h-0 overflow-y-auto px-4 py-5 sm:px-5 lg:px-6">
+
+                  {messages.length ===
+                  0 ? (
+
+                    <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-6 py-12 text-center text-sm text-slate-500">
+                      No messages found in this conversation.
+                    </div>
+
+                  ) : (
+
+                    <div className="space-y-4">
+
+                      {messages.map(
+                        (message) => {
+
+                          const outbound =
+                            message.direction ===
+                            "outbound";
+
+
+                          return (
+
+                            <article
+                              key={
+                                message.id
+                              }
+                              className={`overflow-hidden rounded-[24px] border shadow-sm ${
+                                outbound
+                                  ? "border-indigo-100 bg-indigo-50/35"
+                                  : "border-slate-200 bg-white"
+                              }`}
+                            >
+
+                              <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
+
+                                <div className="min-w-0">
+
+                                  <div className="flex flex-wrap items-center gap-2">
+
+                                    <p className="truncate text-sm font-semibold text-slate-900">
+
+                                      {outbound
+                                        ? (
+                                            "To: " +
+                                            (
+                                              message.recipients ||
+                                              "Unknown recipient"
+                                            )
+                                          )
+                                        : (
+                                            message.sender ||
+                                            "Unknown sender"
+                                          )}
+
+                                    </p>
+
+                                    <span
+                                      className={`rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${
+                                        outbound
+                                          ? "bg-indigo-100 text-indigo-700"
+                                          : "bg-slate-100 text-slate-600"
+                                      }`}
+                                    >
+                                      {outbound
+                                        ? "Sent"
+                                        : "Received"}
+                                    </span>
+
+                                  </div>
+
+                                  <p className="mt-1 text-xs text-slate-500">
+                                    {message.subject ||
+                                      "No Subject"}
+                                  </p>
+
+                                </div>
+
+
+                                <div className="flex shrink-0 items-center gap-2 text-[10px] font-medium text-slate-400">
+
+                                  <span className="uppercase">
+                                    {message.platform ||
+                                      "mail"}
+                                  </span>
+
+                                  {message.time && (
+
+                                    <span>
+                                      {new Date(
+                                        message.time
+                                      ).toLocaleString()}
+                                    </span>
+
+                                  )}
+
+                                </div>
+
+                              </div>
+
+
+                              <div className="whitespace-pre-wrap break-words px-5 py-5 text-sm leading-7 text-slate-700">
+                                {message.body ||
+                                  "(No content)"}
+                              </div>
+
+                            </article>
+
+                          );
+
+                        }
+                      )}
+
+                    </div>
+
+                  )}
+
+
+                  {/* =========================================
+                      ATTACHMENTS
+                  ========================================== */}
+
+                  {attachments.length >
+                    0 && (
+
+                    <section className="mt-6 rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+
+                      <div className="mb-3 flex items-center justify-between gap-3">
+
+                        <div>
+
+                          <p className="text-sm font-semibold text-slate-900">
+                            Attachments
+                          </p>
+
+                          <p className="mt-0.5 text-xs text-slate-400">
+                            {attachments.length} file
+                            {attachments.length ===
+                            1
+                              ? ""
+                              : "s"}{" "}
+                            available
+                          </p>
+
+                        </div>
+
+                      </div>
+
+
+                      <div className="grid gap-2 sm:grid-cols-2">
+
+                        {attachments.map(
+                          (
+                            attachment,
+                            index
+                          ) => (
+
+                            <div
+                              key={
+                                attachment.attachment_id ||
+                                index
+                              }
+                              className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-3"
+                            >
+
+                              <div className="min-w-0">
+
+                                <p className="truncate text-xs font-semibold text-slate-800">
+                                  {attachment.filename ||
+                                    "Attachment"}
+                                </p>
+
+                                <p className="mt-0.5 truncate text-[10px] text-slate-400">
+                                  {attachment.mime_type ||
+                                    "File attachment"}
+                                </p>
+
+                              </div>
+
+
+                              <button
+                                type="button"
+                                disabled={
+                                  attachment.downloadable ===
+                                  false
+                                }
+                                onClick={() =>
+                                  downloadFile(
+                                    attachment.message_id,
+                                    attachment.attachment_id,
+                                    attachment.filename
+                                  )
+                                }
+                                className="shrink-0 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {attachment.downloadable ===
+                                false
+                                  ? "Unavailable"
+                                  : "Download"}
+                              </button>
+
+                            </div>
+
+                          )
+                        )}
+
+                      </div>
+
+                    </section>
+
+                  )}
+
+                </div>
+
+
+                {/* ===========================================
+                    ACCOUNTABILITY TIMELINE
+                ============================================ */}
+
+                <aside className="min-h-0 border-t border-slate-200 bg-white xl:border-l xl:border-t-0">
+
+                  <ConversationTimeline
+                    conversationId={
+                      selectedId
+                    }
+                  />
+
+                </aside>
+
+              </div>
+
+            </div>
 
           )}
+
+        </section>
 
       </div>
 
@@ -2746,298 +2960,248 @@ export default function Inbox() {
 
       {showCompose && (
 
-        <div
-          style={{
-            position:
-              "fixed",
-            inset: 0,
-            background:
-              "rgba(0,0,0,0.4)",
-            display:
-              "flex",
-            justifyContent:
-              "center",
-            alignItems:
-              "center",
-            zIndex: 50,
-          }}
-        >
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-[2px]">
 
-          <div
-            style={{
-              background:
-                "white",
-              padding: 20,
-              width: 580,
-              maxWidth:
-                "92vw",
-              position:
-                "relative",
-              borderRadius:
-                16,
-              boxShadow:
-                "0 24px 70px rgba(15, 23, 42, 0.22)",
-            }}
-          >
+          <div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-[26px] border border-slate-200 bg-white shadow-2xl">
 
-            {/* CLOSE */}
+            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white px-5 py-4 sm:px-6">
 
-            <button
-              type="button"
-              onClick={
-                closeCompose
-              }
-              style={{
-                position:
-                  "absolute",
-                top: 5,
-                right: 5,
-              }}
-            >
-              X
-            </button>
+              <div>
+
+                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                  {forwardSourceId
+                    ? "Existing communication"
+                    : activeDraftId
+                    ? "Saved message"
+                    : "New communication"}
+                </p>
+
+                <h3 className="mt-1 text-lg font-semibold tracking-tight text-slate-950">
+                  {forwardSourceId
+                    ? "Forward Message"
+                    : activeDraftId
+                    ? "Edit Draft"
+                    : "Compose"}
+                </h3>
+
+              </div>
 
 
-            <div
-              style={{
-                fontWeight:
-                  600,
-                marginBottom:
-                  12,
-              }}
-            >
-
-              {forwardSourceId
-                ? "Forward Message"
-                : (
-                    activeDraftId
-                      ? "Edit Draft"
-                      : "Compose"
-                  )}
+              <button
+                type="button"
+                onClick={
+                  closeCompose
+                }
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50"
+              >
+                Close
+              </button>
 
             </div>
 
 
-            {forwardSourceId && (
-              <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            <div className="space-y-4 px-5 py-5 sm:px-6">
 
-                Forwarding keeps the original message content and mailbox.
+              {forwardSourceId && (
 
-                {
-                  attachments.some(
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-5 text-amber-800">
+
+                  Forwarding remains bound to the original mailbox.
+
+                  {attachments.some(
                     (attachment) =>
                       attachment.message_id ===
                       forwardSourceId
                   )
-                    ? (
-                        " Original attachments are not automatically forwarded; download them or use Open in Provider when attachment forwarding is required."
-                      )
-                    : ""
-                }
+                    ? " Original attachments are not automatically forwarded; download them or use Open in Provider when attachment forwarding is required."
+                    : ""}
+
+                </div>
+
+              )}
+
+
+              <div>
+
+                <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                  From
+                </label>
+
+                <select
+                  value={
+                    composeAccountId
+                  }
+                  disabled={
+                    Boolean(
+                      forwardSourceId
+                    )
+                  }
+                  onChange={(event) =>
+                    setComposeAccountId(
+                      event.target.value
+                    )
+                  }
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-100 disabled:bg-slate-50 disabled:text-slate-500"
+                >
+                  <option value="">
+                    Select sending account
+                  </option>
+
+                  {accounts.map(
+                    (account) => (
+
+                      <option
+                        key={
+                          account.id
+                        }
+                        value={
+                          account.id
+                        }
+                      >
+                        {account.email_address}
+                        {" ? "}
+                        {account.account_type
+                          ?.toUpperCase()}
+                      </option>
+
+                    )
+                  )}
+                </select>
 
               </div>
-            )}
 
-
-            {/* FROM */}
-
-            <select
-              value={composeAccountId}
-              disabled={
-                Boolean(
-                  forwardSourceId
-                )
-              }
-              onChange={(event) =>
-                setComposeAccountId(
-                  event.target.value
-                )
-              }
-              style={{
-                width: "100%",
-                marginBottom: 8,
-              }}
-            >
-              <option value="">
-                Select sending account
-              </option>
-
-              {accounts.map(
-                (account) => (
-                  <option
-                    key={account.id}
-                    value={account.id}
-                  >
-                    {account.email_address}
-                    {" ("}
-                    {account.account_type?.toUpperCase()}
-                    {")"}
-                  </option>
-                )
-              )}
-            </select>
-
-
-            {/* TO */}
-
-            <div
-              className="mb-3"
-            >
 
               <RecipientChipInput
                 label="To"
                 value={
                   composeData.to
                 }
-                onChange={(
-                  recipients
-                ) =>
-                  setComposeData(
-                    (
-                      current
-                    ) => ({
-                      ...current,
-                      to:
-                        recipients,
-                    })
-                  )
+                onChange={
+                  (recipients) =>
+                    setComposeData(
+                      (current) => ({
+                        ...current,
+                        to:
+                          recipients,
+                      })
+                    )
                 }
                 placeholder="Type a name or email"
               />
 
-              <div
-                className="
-                  mt-1.5
-                  px-1
-                  text-[11px]
-                  text-slate-400
-                "
-              >
-                Suggestions are ranked from your communication history.
+
+              <div className="grid gap-3 sm:grid-cols-2">
+
+                <RecipientChipInput
+                  label="Cc"
+                  value={
+                    composeData.cc
+                  }
+                  onChange={
+                    (recipients) =>
+                      setComposeData(
+                        (current) => ({
+                          ...current,
+                          cc:
+                            recipients,
+                        })
+                      )
+                  }
+                  placeholder="Add Cc recipients"
+                />
+
+
+                <RecipientChipInput
+                  label="Bcc"
+                  value={
+                    composeData.bcc
+                  }
+                  onChange={
+                    (recipients) =>
+                      setComposeData(
+                        (current) => ({
+                          ...current,
+                          bcc:
+                            recipients,
+                        })
+                      )
+                  }
+                  placeholder="Add Bcc recipients"
+                />
+
+              </div>
+
+
+              <p className="-mt-2 text-[10px] text-slate-400">
+                Recipient suggestions are ranked from communication history.
+              </p>
+
+
+              <div>
+
+                <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                  Subject
+                </label>
+
+                <input
+                  value={
+                    composeData.subject
+                  }
+                  onChange={(event) =>
+                    setComposeData({
+                      ...composeData,
+                      subject:
+                        event.target.value,
+                    })
+                  }
+                  placeholder="Message subject"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none placeholder:text-slate-400 focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
+                />
+
+              </div>
+
+
+              <div>
+
+                <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                  Message
+                </label>
+
+                <textarea
+                  rows={10}
+                  value={
+                    composeData.body
+                  }
+                  onChange={(event) =>
+                    setComposeData({
+                      ...composeData,
+                      body:
+                        event.target.value,
+                    })
+                  }
+                  placeholder="Write your message..."
+                  className="w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm leading-6 text-slate-800 outline-none placeholder:text-slate-400 focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
+                />
+
               </div>
 
             </div>
 
 
-            {/* CC / BCC */}
-
-            <div
-              className="
-                mb-3 space-y-2
-              "
-            >
-
-              <RecipientChipInput
-                label="Cc"
-                value={
-                  composeData.cc
-                }
-                onChange={(
-                  recipients
-                ) =>
-                  setComposeData(
-                    (
-                      current
-                    ) => ({
-                      ...current,
-                      cc:
-                        recipients,
-                    })
-                  )
-                }
-                placeholder="Add Cc recipients"
-              />
-
-
-              <RecipientChipInput
-                label="Bcc"
-                value={
-                  composeData.bcc
-                }
-                onChange={(
-                  recipients
-                ) =>
-                  setComposeData(
-                    (
-                      current
-                    ) => ({
-                      ...current,
-                      bcc:
-                        recipients,
-                    })
-                  )
-                }
-                placeholder="Add Bcc recipients"
-              />
-
-            </div>
-
-
-            {/* SUBJECT */}
-
-            <input
-              placeholder="Subject"
-              value={
-                composeData.subject
-              }
-              onChange={(event) =>
-                setComposeData({
-                  ...composeData,
-                  subject:
-                    event.target.value,
-                })
-              }
-              style={{
-                width:
-                  "100%",
-                marginBottom:
-                  8,
-              }}
-            />
-
-
-            {/* BODY */}
-
-            <textarea
-              rows={8}
-              value={
-                composeData.body
-              }
-              onChange={(event) =>
-                setComposeData({
-                  ...composeData,
-                  body:
-                    event.target.value,
-                })
-              }
-              style={{
-                width:
-                  "100%",
-              }}
-            />
-
-
-            {/* ACTIONS */}
-
-            <div
-              style={{
-                marginTop:
-                  10,
-                display:
-                  "flex",
-                gap: 8,
-              }}
-            >
+            <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 bg-slate-50/70 px-5 py-4 sm:px-6">
 
               {!forwardSourceId && (
+
                 <button
                   type="button"
                   onClick={
                     saveDraft
                   }
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
                 >
-                  Save Draft
+                  Save draft
                 </button>
+
               )}
 
 
@@ -3048,8 +3212,9 @@ export default function Inbox() {
                   onClick={
                     sendDraft
                   }
+                  className="rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-slate-800"
                 >
-                  Send Draft
+                  Send draft
                 </button>
 
               ) : (
@@ -3059,12 +3224,11 @@ export default function Inbox() {
                   onClick={
                     sendEmail
                   }
+                  className="rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-slate-800"
                 >
-                  {
-                    forwardSourceId
-                      ? "Forward"
-                      : "Send"
-                  }
+                  {forwardSourceId
+                    ? "Forward"
+                    : "Send message"}
                 </button>
 
               )}
@@ -3085,48 +3249,36 @@ export default function Inbox() {
       {showReply &&
         selectedId && (
 
-          <div
-            style={{
-              position:
-                "fixed",
-              inset: 0,
-              background:
-                "rgba(0,0,0,0.4)",
-              display:
-                "flex",
-              justifyContent:
-                "center",
-              alignItems:
-                "center",
-              zIndex:
-                60,
-            }}
-          >
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-[2px]">
 
-            <div
-              style={{
-                background:
-                  "white",
-                padding:
-                  20,
-                width:
-                  500,
-                maxWidth:
-                  "90vw",
-                position:
-                  "relative",
-              }}
-            >
+          <div className="w-full max-w-xl overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-2xl">
 
-              {/* CLOSE */}
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+
+              <div>
+
+                <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-400">
+                  Conversation response
+                </p>
+
+                <h3 className="mt-1 text-lg font-semibold tracking-tight text-slate-950">
+                  {replyMode ===
+                  "reply_all"
+                    ? "Reply All"
+                    : "Reply"}
+                </h3>
+
+              </div>
+
 
               <button
                 type="button"
+                disabled={
+                  replying
+                }
                 onClick={() => {
 
-                  if (
-                    !replying
-                  ) {
+                  if (!replying) {
 
                     setShowReply(
                       false
@@ -3139,42 +3291,22 @@ export default function Inbox() {
                   }
 
                 }}
-                disabled={
-                  replying
-                }
-                style={{
-                  position:
-                    "absolute",
-                  top: 8,
-                  right: 8,
-                }}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-50 disabled:opacity-50"
               >
-                X
+                Close
               </button>
 
+            </div>
 
-              <div
-                style={{
-                  fontWeight:
-                    600,
-                  marginBottom:
-                    12,
-                }}
-              >
-                {replyMode === "reply_all"
-                  ? "Reply All"
-                  : "Reply"}
-              </div>
 
+            <div className="px-5 py-5">
 
               <textarea
-                rows={8}
+                rows={9}
                 value={
                   replyBody
                 }
-                onChange={(
-                  event
-                ) =>
+                onChange={(event) =>
                   setReplyBody(
                     event.target.value
                   )
@@ -3183,80 +3315,62 @@ export default function Inbox() {
                 disabled={
                   replying
                 }
-                style={{
-                  width:
-                    "100%",
-                  padding:
-                    10,
-                  border:
-                    "1px solid #ddd",
-                  borderRadius:
-                    6,
-                }}
+                className="w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm leading-6 text-slate-800 outline-none placeholder:text-slate-400 focus:border-slate-400 focus:ring-2 focus:ring-slate-100 disabled:bg-slate-50"
               />
 
+            </div>
 
-              <div
-                style={{
-                  marginTop:
-                    12,
-                  display:
-                    "flex",
-                  justifyContent:
-                    "flex-end",
-                  gap: 8,
+
+            <div className="flex justify-end gap-2 border-t border-slate-100 bg-slate-50/70 px-5 py-4">
+
+              <button
+                type="button"
+                disabled={
+                  replying
+                }
+                onClick={() => {
+
+                  setShowReply(
+                    false
+                  );
+
+                  setReplyBody(
+                    ""
+                  );
+
                 }}
+                className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
               >
-
-                <button
-                  type="button"
-                  disabled={
-                    replying
-                  }
-                  onClick={() => {
-
-                    setShowReply(
-                      false
-                    );
-
-                    setReplyBody(
-                      ""
-                    );
-
-                  }}
-                >
-                  Cancel
-                </button>
+                Cancel
+              </button>
 
 
-                <button
-                  type="button"
-                  onClick={
-                    sendReply
-                  }
-                  disabled={
-                    replying ||
-                    !replyBody.trim()
-                  }
-                >
-
-                  {replying
-                    ? "Sending..."
-                    : (
-                        replyMode === "reply_all"
-                          ? "Send Reply All"
-                          : "Send Reply"
-                      )}
-
-                </button>
-
-              </div>
+              <button
+                type="button"
+                onClick={
+                  sendReply
+                }
+                disabled={
+                  replying ||
+                  !replyBody.trim()
+                }
+                className="rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {replying
+                  ? "Sending..."
+                  : replyMode ===
+                    "reply_all"
+                  ? "Send Reply All"
+                  : "Send Reply"}
+              </button>
 
             </div>
 
           </div>
 
-        )}
+        </div>
+
+      )}
 
     </div>
 

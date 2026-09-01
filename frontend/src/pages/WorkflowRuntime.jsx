@@ -202,7 +202,7 @@ export default function WorkflowRuntime() {
 
   if (loading) {
     return (
-      <div className="p-6">
+      <div className="min-h-full bg-slate-50/70 px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
         <div
           className="
             rounded-2xl
@@ -224,7 +224,7 @@ export default function WorkflowRuntime() {
 
   if (error) {
     return (
-      <div className="p-6 space-y-4">
+      <div className="min-h-full bg-slate-50/70 px-4 py-5 sm:px-6 lg:px-8 lg:py-7 space-y-4">
 
         <button
           type="button"
@@ -269,500 +269,374 @@ export default function WorkflowRuntime() {
 
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="min-h-full bg-slate-50/70 px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
 
-      {/* Header */}
-
-      <div
-        className="
-          flex
-          flex-col
-          gap-4
-          lg:flex-row
-          lg:items-start
-          lg:justify-between
-        "
-      >
-
-        <div>
-
-          <button
-            type="button"
-            onClick={() =>
-              navigate("/workflows")
-            }
-            className="
-              mb-4
-              flex
-              items-center
-              gap-2
-              text-sm
-              text-slate-500
-              hover:text-slate-900
-            "
-          >
-            <ArrowLeft size={16} />
-            Back to workflows
-          </button>
-
-          <h1
-            className="
-              text-2xl
-              font-semibold
-              text-slate-900
-            "
-          >
-            Workflow Runtime
-          </h1>
-
-          <p
-            className="
-              mt-1
-              text-sm
-              text-slate-500
-            "
-          >
-            Operational execution and
-            accountability for this workflow.
-          </p>
-
-        </div>
+      <div className="mx-auto max-w-[1540px] space-y-5">
 
 
-        <button
-          type="button"
-          onClick={handleRefresh}
-          disabled={refreshing}
-          className="
-            flex
-            items-center
-            gap-2
-            rounded-xl
-            border
-            border-slate-300
-            bg-white
-            px-4
-            py-2
-            text-sm
-            font-medium
-            text-slate-700
-            hover:bg-slate-50
-            disabled:opacity-50
-          "
-        >
-          <RefreshCw
-            size={16}
-            className={
-              refreshing
-                ? "animate-spin"
-                : ""
-            }
-          />
+        <section className="relative overflow-hidden rounded-[28px] border border-slate-800 bg-slate-950 text-white shadow-sm">
 
-          Refresh
-        </button>
+          <div className="absolute right-0 top-0 h-56 w-56 rounded-full bg-sky-500/10 blur-3xl" />
 
-      </div>
+          <div className="relative px-6 py-7 lg:px-8 lg:py-8">
 
+            <button
+              type="button"
+              onClick={() =>
+                navigate(
+                  "/workflows"
+                )
+              }
+              className="inline-flex items-center gap-2 text-xs font-semibold text-slate-400 hover:text-white"
+            >
 
-      {actionError && (
-        <div
-          className="
-            flex
-            items-center
-            gap-3
-            rounded-xl
-            border
-            border-red-200
-            bg-red-50
-            px-4
-            py-3
-            text-sm
-            text-red-700
-          "
-        >
-          <AlertCircle size={18} />
-          {actionError}
-        </div>
-      )}
-
-
-      {/* Runtime overview */}
-
-      <section
-        className="
-          grid
-          gap-4
-          md:grid-cols-4
-        "
-      >
-
-        <div
-          className="
-            rounded-2xl
-            border
-            border-slate-200
-            bg-white
-            p-5
-          "
-        >
-          <p className="text-xs text-slate-500">
-            Status
-          </p>
-
-          <div className="mt-2 flex items-center gap-2">
-
-            {terminal ? (
-              <CheckCircle2
-                size={17}
-                className="text-emerald-600"
+              <ArrowLeft
+                size={14}
               />
-            ) : (
-              <CircleDashed
-                size={17}
-                className="text-slate-500"
-              />
-            )}
 
-            <span className="font-medium">
-              {formatStatus(
-                runtime?.status
-              )}
-            </span>
+              Back to workflows
 
-          </div>
-        </div>
+            </button>
 
 
-        <div
-          className="
-            rounded-2xl
-            border
-            border-slate-200
-            bg-white
-            p-5
-          "
-        >
-          <p className="text-xs text-slate-500">
-            Workflow
-          </p>
+            <div className="mt-5 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
 
-          <p className="mt-2 font-medium break-all">
-            {runtime?.workflow || "—"}
-          </p>
-        </div>
+              <div>
 
+                <div className="inline-flex rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.17em] text-slate-300">
+                  Governed runtime
+                </div>
 
-        <div
-          className="
-            rounded-2xl
-            border
-            border-slate-200
-            bg-white
-            p-5
-          "
-        >
-          <p className="text-xs text-slate-500">
-            Started
-          </p>
+                <h1 className="mt-4 text-3xl font-semibold tracking-tight lg:text-4xl">
+                  Workflow Runtime
+                </h1>
 
-          <div className="mt-2 flex gap-2">
+                <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
+                  Inspect authoritative runtime state and immutable workflow execution events.
+                </p>
 
-            <Clock3
-              size={16}
-              className="text-slate-400"
-            />
-
-            <span className="text-sm">
-              {formatDate(
-                runtime?.started_at
-              )}
-            </span>
-
-          </div>
-        </div>
+              </div>
 
 
-        <div
-          className="
-            rounded-2xl
-            border
-            border-slate-200
-            bg-white
-            p-5
-          "
-        >
-          <p className="text-xs text-slate-500">
-            Completed
-          </p>
+              <div className="flex flex-wrap items-center gap-2">
 
-          <p className="mt-2 text-sm">
-            {formatDate(
-              runtime?.completed_at
-            )}
-          </p>
-        </div>
-
-      </section>
+                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-slate-200">
+                  {formatStatus(
+                    runtime?.status
+                  )}
+                </span>
 
 
-      {/* Runtime controls */}
+                <button
+                  type="button"
+                  onClick={
+                    handleRefresh
+                  }
+                  disabled={
+                    refreshing
+                  }
+                  className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-xs font-semibold text-slate-950 hover:bg-slate-100 disabled:opacity-50"
+                >
 
-      {!terminal && (
-        <section
-          className="
-            rounded-2xl
-            border
-            border-slate-200
-            bg-white
-            p-6
-          "
-        >
+                  <RefreshCw
+                    size={14}
+                    className={
+                      refreshing
+                        ? "animate-spin"
+                        : ""
+                    }
+                  />
 
-          <h2
-            className="
-              text-base
-              font-semibold
-              text-slate-900
-            "
-          >
-            Execution controls
-          </h2>
+                  Refresh
 
-          <p
-            className="
-              mt-1
-              text-sm
-              text-slate-500
-            "
-          >
-            Control the workflow runtime without
-            changing its published definition.
-          </p>
+                </button>
 
-          <div
-            className="
-              mt-5
-              flex
-              flex-wrap
-              gap-3
-            "
-          >
+              </div>
 
-
-            {canCancel && (
-              <button
-                type="button"
-                disabled={executing}
-                onClick={() =>
-                  executeAction("cancel")
-                }
-                className="
-                  flex
-                  items-center
-                  gap-2
-                  rounded-xl
-                  border
-                  border-red-300
-                  bg-white
-                  px-4
-                  py-2
-                  text-sm
-                  font-medium
-                  text-red-700
-                  hover:bg-red-50
-                  disabled:opacity-50
-                "
-              >
-                <Square size={15} />
-                Cancel
-              </button>
-            )}
+            </div>
 
           </div>
 
         </section>
-      )}
 
 
-      {/* Execution history */}
+        {actionError && (
 
-      <section
-        className="
-          rounded-2xl
-          border
-          border-slate-200
-          bg-white
-          p-6
-        "
-      >
+          <div className="flex items-start gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3.5 text-sm text-rose-700">
 
-        <div
-          className="
-            flex
-            items-center
-            justify-between
-            gap-4
-          "
-        >
+            <AlertCircle
+              size={17}
+              className="mt-0.5 shrink-0"
+            />
 
-          <div>
+            {actionError}
 
-            <h2
-              className="
-                text-base
-                font-semibold
-                text-slate-900
-              "
-            >
-              Execution history
-            </h2>
+          </div>
 
-            <p
-              className="
-                mt-1
-                text-sm
-                text-slate-500
-              "
-            >
-              Immutable runtime events recorded
-              by the workflow execution layer.
+        )}
+
+
+        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+
+            <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-400">
+              Status
+            </p>
+
+            <div className="mt-3 flex items-center gap-2">
+
+              {terminal ? (
+
+                <CheckCircle2
+                  size={17}
+                  className="text-emerald-600"
+                />
+
+              ) : (
+
+                <CircleDashed
+                  size={17}
+                  className="text-sky-600"
+                />
+
+              )}
+
+              <span className="text-sm font-semibold text-slate-800">
+                {formatStatus(
+                  runtime?.status
+                )}
+              </span>
+
+            </div>
+
+          </div>
+
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+
+            <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-400">
+              Workflow
+            </p>
+
+            <p className="mt-3 break-all text-sm font-semibold text-slate-800">
+              {runtime?.workflow ||
+                "?"}
             </p>
 
           </div>
 
-          <span
-            className="
-              rounded-full
-              bg-slate-100
-              px-3
-              py-1
-              text-xs
-              font-medium
-              text-slate-600
-            "
-          >
-            {history.length} events
-          </span>
 
-        </div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
 
+            <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-400">
+              Started
+            </p>
 
-        {history.length === 0 ? (
-          <div
-            className="
-              mt-6
-              rounded-xl
-              border
-              border-dashed
-              border-slate-300
-              p-8
-              text-center
-              text-sm
-              text-slate-500
-            "
-          >
-            No execution events recorded yet.
+            <div className="mt-3 flex items-start gap-2">
+
+              <Clock3
+                size={15}
+                className="mt-0.5 text-slate-400"
+              />
+
+              <span className="text-xs font-semibold leading-5 text-slate-700">
+                {formatDate(
+                  runtime?.started_at
+                )}
+              </span>
+
+            </div>
+
           </div>
-        ) : (
-          <div className="mt-6 space-y-3">
 
-            {history.map(
-              (event, index) => (
-                <div
-                  key={
-                    event.id ||
-                    `${event.event}-${index}`
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+
+            <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-400">
+              Completed
+            </p>
+
+            <p className="mt-3 text-xs font-semibold leading-5 text-slate-700">
+              {formatDate(
+                runtime?.completed_at
+              )}
+            </p>
+
+          </div>
+
+        </section>
+
+
+        {!terminal && (
+
+          <section className="rounded-[26px] border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-500">
+              Runtime control
+            </p>
+
+            <h2 className="mt-1 text-base font-semibold text-slate-950">
+              Execution controls
+            </h2>
+
+            <p className="mt-2 text-xs leading-5 text-slate-500">
+              Runtime actions change execution state without altering the published workflow definition.
+            </p>
+
+
+            <div className="mt-4 flex flex-wrap gap-2">
+
+              {canCancel && (
+
+                <button
+                  type="button"
+                  disabled={
+                    executing
                   }
-                  className="
-                    rounded-xl
-                    border
-                    border-slate-200
-                    bg-slate-50
-                    p-4
-                  "
+                  onClick={() =>
+                    executeAction(
+                      "cancel"
+                    )
+                  }
+                  className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-xs font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
                 >
 
-                  <div
-                    className="
-                      flex
-                      flex-col
-                      gap-3
-                      md:flex-row
-                      md:items-start
-                      md:justify-between
-                    "
+                  <Square
+                    size={14}
+                  />
+
+                  {executing
+                    ? "Processing..."
+                    : "Cancel runtime"}
+
+                </button>
+
+              )}
+
+            </div>
+
+          </section>
+
+        )}
+
+
+        <section
+          id="history"
+          className="overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-sm"
+        >
+
+          <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 sm:px-6">
+
+            <div>
+
+              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-sky-500">
+                Immutable audit trail
+              </p>
+
+              <h2 className="mt-1 text-base font-semibold text-slate-950">
+                Execution history
+              </h2>
+
+              <p className="mt-1 text-xs text-slate-500">
+                Events recorded by the workflow execution layer.
+              </p>
+
+            </div>
+
+
+            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-semibold text-slate-500">
+              {history.length} events
+            </span>
+
+          </div>
+
+
+          {history.length ===
+          0 ? (
+
+            <div className="px-6 py-14 text-center">
+
+              <p className="text-sm font-medium text-slate-600">
+                No execution events recorded yet
+              </p>
+
+            </div>
+
+          ) : (
+
+            <div className="divide-y divide-slate-100">
+
+              {history.map(
+                (
+                  event,
+                  index
+                ) => (
+
+                  <article
+                    key={
+                      event.id ||
+                      `${event.event}-${index}`
+                    }
+                    className="px-5 py-4 sm:px-6"
                   >
 
-                    <div>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
 
-                      <p
-                        className="
-                          font-medium
-                          text-slate-900
-                        "
-                      >
-                        {formatStatus(
-                          event.event
-                        )}
-                      </p>
+                      <div>
 
-                      {event.node && (
-                        <p
-                          className="
-                            mt-1
-                            text-xs
-                            text-slate-500
-                          "
-                        >
-                          Node: {event.node}
+                        <p className="text-sm font-semibold text-slate-900">
+                          {formatStatus(
+                            event.event
+                          )}
                         </p>
-                      )}
+
+
+                        {event.node && (
+
+                          <p className="mt-1 text-xs text-slate-500">
+                            Node: {event.node}
+                          </p>
+
+                        )}
+
+                      </div>
+
+
+                      <span className="text-xs text-slate-400">
+                        {formatDate(
+                          event.created_at ||
+                          event.timestamp
+                        )}
+                      </span>
 
                     </div>
 
-                    <span
-                      className="
-                        text-xs
-                        text-slate-500
-                      "
-                    >
-                      {formatDate(
-                        event.created_at ||
-                          event.timestamp
-                      )}
-                    </span>
 
-                  </div>
+                    {event.details && (
 
+                      <pre className="mt-3 overflow-x-auto rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs leading-5 text-slate-600">
+                        {formatDetails(
+                          event.details
+                        )}
+                      </pre>
 
-                  {event.details && (
-                    <pre
-                      className="
-                        mt-3
-                        overflow-x-auto
-                        rounded-lg
-                        bg-white
-                        p-3
-                        text-xs
-                        text-slate-600
-                      "
-                    >
-                      {formatDetails(
-                        event.details
-                      )}
-                    </pre>
-                  )}
+                    )}
 
-                </div>
-              )
-            )}
+                  </article>
 
-          </div>
-        )}
+                )
+              )}
 
-      </section>
+            </div>
+
+          )}
+
+        </section>
+
+      </div>
 
     </div>
   );
+
 }
