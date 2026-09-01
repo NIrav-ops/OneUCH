@@ -88,10 +88,10 @@ class ConversationBulkAPITests(APITestCase):
         )
 
     @patch(
-        "inbox.views.conversation_bulk.build"
+        "inbox.services.mail_mutations.build"
     )
     @patch(
-        "inbox.views.conversation_bulk."
+        "inbox.services.mail_mutations."
         "get_gmail_credentials"
     )
     def test_bulk_read_accepts_numeric_conversation_id(
@@ -142,10 +142,10 @@ class ConversationBulkAPITests(APITestCase):
         )
 
     @patch(
-        "inbox.views.conversation_bulk.build"
+        "inbox.services.mail_mutations.build"
     )
     @patch(
-        "inbox.views.conversation_bulk."
+        "inbox.services.mail_mutations."
         "get_gmail_credentials"
     )
     def test_bulk_star_accepts_numeric_conversation_id(

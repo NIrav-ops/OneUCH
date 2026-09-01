@@ -419,7 +419,274 @@ def periodic_sync_all_users():
 # TASK 2: SEND EMAIL (ASYNC)
 # ============================================
 
-@shared_task(bind=True, max_retries=3)
+
+def _structured_delivery_addresses(
+    inbox_message,
+    fallback_to,
+):
+    recipient_meta = (
+        inbox_message.recipient_meta
+        if isinstance(
+            inbox_message.recipient_meta,
+            dict,
+        )
+        else {}
+    )
+
+
+    to_addresses = [
+        str(
+            item.get(
+                "email",
+                "",
+            )
+        )
+        .strip()
+        .lower()
+
+        for item
+        in (
+            recipient_meta.get(
+                "to",
+                [],
+            )
+            or []
+        )
+
+        if (
+            isinstance(
+                item,
+                dict,
+            )
+            and
+            item.get(
+                "email"
+            )
+        )
+    ]
+
+
+    cc_addresses = [
+        str(
+            item.get(
+                "email",
+                "",
+            )
+        )
+        .strip()
+        .lower()
+
+        for item
+        in (
+            recipient_meta.get(
+                "cc",
+                [],
+            )
+            or []
+        )
+
+        if (
+            isinstance(
+                item,
+                dict,
+            )
+            and
+            item.get(
+                "email"
+            )
+        )
+    ]
+
+
+    to_value = (
+        ", ".join(
+            to_addresses
+        )
+        if to_addresses
+        else fallback_to
+    )
+
+
+    return (
+        to_value,
+        cc_addresses,
+    )
+
+
+def _deliver_reply_message(
+    *,
+    email_account,
+    inbox_message,
+    fallback_to,
+    subject,
+    body,
+    reply_mode="reply",
+):
+    (
+        to_value,
+        cc_addresses,
+    ) = (
+        _structured_delivery_addresses(
+            inbox_message,
+            fallback_to,
+        )
+    )
+
+
+    if email_account.account_type == "gmail":
+
+        return (
+            send_gmail_reply(
+                user=(
+                    email_account.user
+                ),
+                to_email=(
+                    to_value
+                ),
+                subject=subject,
+                body=body,
+                cc_emails=(
+                    cc_addresses
+                ),
+                thread_id=(
+                    inbox_message
+                    .external_conversation_id
+                ),
+                reply_to_message_id=(
+                    inbox_message
+                    .in_reply_to
+                ),
+            )
+        )
+
+
+    if email_account.account_type == "outlook":
+
+        return (
+            send_outlook_reply(
+                user=(
+                    email_account.user
+                ),
+                to_email=(
+                    to_value
+                ),
+                subject=subject,
+                body=body,
+                cc_emails=(
+                    cc_addresses
+                ),
+                reply_to_message_id=(
+                    inbox_message
+                    .in_reply_to
+                ),
+                reply_mode=(
+                    reply_mode
+                ),
+            )
+        )
+
+
+    if email_account.account_type == "imap":
+
+        smtp_to = (
+            to_value
+        )
+
+
+        if cc_addresses:
+
+            smtp_to = (
+                smtp_to
+                + ", "
+                + ", ".join(
+                    cc_addresses
+                )
+            )
+
+
+        return (
+            send_via_smtp(
+                email_account=(
+                    email_account
+                ),
+                to_email=smtp_to,
+                subject=subject,
+                body=body,
+                inbox_message=(
+                    inbox_message
+                ),
+                password=(
+                    email_account
+                    .smtp_password
+                ),
+            )
+        )
+
+
+    raise ValueError(
+        "Unsupported email account type: "
+        f"{email_account.account_type}"
+    )
+
+
+def _mark_delivery_success(
+    *,
+    inbox_message,
+    provider_result,
+):
+    provider_id = None
+
+
+    if isinstance(
+        provider_result,
+        dict,
+    ):
+
+        provider_id = (
+            provider_result.get(
+                "id"
+            )
+        )
+
+
+    inbox_message.status = (
+        "sent"
+    )
+
+    inbox_message.folder = (
+        "sent"
+    )
+
+    inbox_message.error_reason = (
+        ""
+    )
+
+    inbox_message.last_attempt_at = (
+        timezone.now()
+    )
+
+    inbox_message.external_message_id = (
+        provider_id
+        or
+        "sent"
+    )
+
+
+    inbox_message.save(
+        update_fields=[
+            "status",
+            "folder",
+            "error_reason",
+            "last_attempt_at",
+            "external_message_id",
+        ]
+    )
+
+
+@shared_task(
+    bind=True,
+    max_retries=3,
+)
 def send_email_task(
     self,
     email_account_id,
@@ -427,89 +694,99 @@ def send_email_task(
     subject,
     body,
     inbox_message_id,
+    reply_mode="reply",
 ):
-
     inbox_message = None
+
 
     try:
 
-        email_account = EmailAccount.objects.get(
-            id=email_account_id
+        email_account = (
+            EmailAccount.objects
+            .get(
+                id=email_account_id
+            )
         )
 
-        inbox_message = InboxMessage.objects.get(
-            id=inbox_message_id
+
+        inbox_message = (
+            InboxMessage.objects
+            .get(
+                id=inbox_message_id
+            )
         )
 
-        # -----------------------------
-        # Gmail
-        # -----------------------------
-        if email_account.account_type == "gmail":
 
-            send_gmail_reply(
-                user=email_account.user,
-                to_email=to_email,
-                subject=subject,
-                body=body,
-            )
-
-        # -----------------------------
-        # Outlook / Microsoft Graph
-        # -----------------------------
-        elif email_account.account_type == "outlook":
-
-            send_outlook_reply(
-                user=email_account.user,
-                to_email=to_email,
-                subject=subject,
-                body=body,
-            )
-
-        # -----------------------------
-        # IMAP / SMTP
-        # -----------------------------
-        elif email_account.account_type == "imap":
-
-            send_via_smtp(
-                email_account=email_account,
-                to_email=to_email,
-                subject=subject,
-                body=body,
-                inbox_message=inbox_message,
-                password=email_account.smtp_password,
-            )
-
-        else:
+        if (
+            inbox_message.user_id
+            !=
+            email_account.user_id
+        ):
 
             raise ValueError(
-                "Unsupported email account type: "
-                f"{email_account.account_type}"
+                "Reply mailbox ownership mismatch."
             )
 
-        inbox_message.status = "sent"
-        inbox_message.error_reason = ""
-        inbox_message.last_attempt_at = timezone.now()
 
-        inbox_message.save(
-            update_fields=[
-                "status",
-                "error_reason",
-                "last_attempt_at",
-            ]
+        provider_result = (
+            _deliver_reply_message(
+                email_account=(
+                    email_account
+                ),
+                inbox_message=(
+                    inbox_message
+                ),
+                fallback_to=(
+                    to_email
+                ),
+                subject=subject,
+                body=body,
+                reply_mode=(
+                    reply_mode
+                ),
+            )
         )
+
+
+        _mark_delivery_success(
+            inbox_message=(
+                inbox_message
+            ),
+            provider_result=(
+                provider_result
+            ),
+        )
+
 
     except Exception as exc:
 
         if inbox_message is None:
             raise
 
+
         inbox_message.retry_count += 1
-        inbox_message.error_reason = str(exc)
-        inbox_message.last_attempt_at = timezone.now()
 
-        if inbox_message.retry_count >= MAX_RETRIES:
+        inbox_message.error_reason = (
+            str(
+                exc
+            )
+        )
 
-            inbox_message.status = "failed"
+        inbox_message.last_attempt_at = (
+            timezone.now()
+        )
+
+
+        if (
+            inbox_message.retry_count
+            >=
+            MAX_RETRIES
+        ):
+
+            inbox_message.status = (
+                "failed"
+            )
+
 
             inbox_message.save(
                 update_fields=[
@@ -520,9 +797,14 @@ def send_email_task(
                 ]
             )
 
+
             return
 
-        inbox_message.status = "queued"
+
+        inbox_message.status = (
+            "queued"
+        )
+
 
         inbox_message.save(
             update_fields=[
@@ -532,6 +814,7 @@ def send_email_task(
                 "status",
             ]
         )
+
 
         raise self.retry(
             exc=exc,
@@ -543,83 +826,161 @@ def send_email_task(
 # TASK 3: RETRY FAILED MESSAGES
 # ============================================
 
+
 @shared_task
 def retry_failed_messages():
-
-    failed_messages = InboxMessage.objects.filter(
-        status="failed",
-        retry_count__lt=MAX_RETRIES
+    failed_messages = (
+        InboxMessage.objects
+        .filter(
+            status="failed",
+            retry_count__lt=(
+                MAX_RETRIES
+            ),
+        )
     )
 
-    for msg in failed_messages:
 
-        msg.status = "retrying"
-        msg.last_attempt_at = timezone.now()
-        msg.save()
+    for message in failed_messages:
+
+        message.status = (
+            "retrying"
+        )
+
+        message.last_attempt_at = (
+            timezone.now()
+        )
+
+        message.save(
+            update_fields=[
+                "status",
+                "last_attempt_at",
+            ]
+        )
+
 
         try:
 
-            email_account = msg.email_account
-
-            if not email_account:
-
-                email_account = (
-                    msg.user.email_accounts.filter(
-                        is_active=True
-                    ).first()
-                )
-
-            if not email_account:
-                continue
-
-            if email_account.account_type == "gmail":
-
-                send_gmail_reply(
-                    user=msg.user,
-                    to_email=msg.recipients,
-                    subject=msg.subject,
-                    body=msg.body,
-                )
-
-            elif email_account.account_type == "outlook":
-
-                send_outlook_reply(
-                    user=msg.user,
-                    to_email=msg.recipients,
-                    subject=msg.subject,
-                    body=msg.body,
-                )
-
-            elif email_account.account_type == "imap":
-
-                send_via_smtp(
-                    email_account=email_account,
-                    to_email=msg.recipients,
-                    subject=msg.subject,
-                    body=msg.body,
-                    inbox_message=msg,
-                    password=email_account.smtp_password,
-                )
-
-            else:
-
-                raise ValueError(
-                    "Unsupported email account type: "
-                    f"{email_account.account_type}"
-                )
-
-            create_notification(
-                user=msg.user,
-                type="send_retried",
-                title="Message sent after retry",
-                message=msg.subject
+            email_account = (
+                message.email_account
             )
 
-        except Exception:
+
+            if email_account is None:
+
+                email_account = (
+                    message.user
+                    .email_accounts
+                    .filter(
+                        is_active=True
+                    )
+                    .first()
+                )
+
+
+            if email_account is None:
+
+                raise ValueError(
+                    "No email account available for retry."
+                )
+
+
+            recipient_meta = (
+                message.recipient_meta
+                if isinstance(
+                    message.recipient_meta,
+                    dict,
+                )
+                else {}
+            )
+
+
+            reply_mode = (
+                "reply_all"
+                if recipient_meta.get(
+                    "cc"
+                )
+                else "reply"
+            )
+
+
+            provider_result = (
+                _deliver_reply_message(
+                    email_account=(
+                        email_account
+                    ),
+                    inbox_message=(
+                        message
+                    ),
+                    fallback_to=(
+                        message.recipients
+                    ),
+                    subject=(
+                        message.subject
+                    ),
+                    body=(
+                        message.body
+                    ),
+                    reply_mode=(
+                        reply_mode
+                    ),
+                )
+            )
+
+
+            _mark_delivery_success(
+                inbox_message=(
+                    message
+                ),
+                provider_result=(
+                    provider_result
+                ),
+            )
+
 
             create_notification(
-                user=msg.user,
+                user=message.user,
+                type="send_retried",
+                title=(
+                    "Message sent after retry"
+                ),
+                message=(
+                    message.subject
+                ),
+            )
+
+
+        except Exception as exc:
+
+            message.status = (
+                "failed"
+            )
+
+            message.error_reason = (
+                str(
+                    exc
+                )
+            )
+
+            message.last_attempt_at = (
+                timezone.now()
+            )
+
+            message.save(
+                update_fields=[
+                    "status",
+                    "error_reason",
+                    "last_attempt_at",
+                ]
+            )
+
+
+            create_notification(
+                user=message.user,
                 type="send_failed",
-                title="Message delivery failed",
-                message=msg.subject
+                title=(
+                    "Message delivery failed"
+                ),
+                message=(
+                    message.subject
+                ),
             )

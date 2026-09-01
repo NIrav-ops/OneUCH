@@ -40,6 +40,10 @@ from inbox.services.mail_sync_policy import (
     resolve_mail_sync_window,
 )
 
+from inbox.services.mail_mutations import (
+    refresh_conversation_local_state,
+)
+
 from knowledge.services.message_processor import (
     MessageProcessor,
 )
@@ -1248,6 +1252,62 @@ def fetch_outlook_emails(
                         and
                         not window.initial_history
                     ):
+
+                        existing.folder = (
+                            config[
+                                "local_folder"
+                            ]
+                        )
+
+                        existing.direction = (
+                            direction
+                        )
+
+                        existing.external_conversation_id = (
+                            thread_id
+                        )
+
+                        existing.is_read = (
+                            graph_message.get(
+                                "isRead",
+                                (
+                                    direction
+                                    ==
+                                    "outbound"
+                                ),
+                            )
+                        )
+
+                        existing.is_starred = (
+                            (
+                                graph_message.get(
+                                    "flag",
+                                    {},
+                                )
+                                or {}
+                            ).get(
+                                "flagStatus"
+                            )
+                            ==
+                            "flagged"
+                        )
+
+
+                        existing.save(
+                            update_fields=[
+                                "folder",
+                                "direction",
+                                "external_conversation_id",
+                                "is_read",
+                                "is_starred",
+                            ]
+                        )
+
+
+                        refresh_conversation_local_state(
+                            existing.conversation
+                        )
+
 
                         skipped_count += 1
 

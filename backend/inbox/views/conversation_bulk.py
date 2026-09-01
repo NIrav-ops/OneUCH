@@ -1,213 +1,360 @@
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
-from django.db import transaction
+from rest_framework.permissions import (
+    IsAuthenticated,
+)
 
-from inbox.models import Conversation
-from googleapiclient.discovery import build
+from rest_framework.response import (
+    Response,
+)
 
-from googleapis.utils import get_gmail_credentials
-from microsoftapis.utils import get_microsoft_access_token
+from rest_framework.views import (
+    APIView,
+)
 
-import requests
+from inbox.models import (
+    Conversation,
+)
+
+from inbox.services.mail_mutations import (
+    MailMutationError,
+    set_conversation_read,
+    set_conversation_star,
+)
 
 
-class BulkMarkConversationReadAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+def _conversation_ids(
+    request,
+):
+    value = (
+        request.data.get(
+            "conversation_ids",
+            [],
+        )
+    )
 
-    def post(self, request):
 
-        conversation_ids = request.data.get("conversation_ids", [])
+    if not isinstance(
+        value,
+        list,
+    ):
+        return None
+
+
+    try:
+
+        return [
+            int(
+                item
+            )
+            for item
+            in value
+        ]
+
+    except (
+        TypeError,
+        ValueError,
+    ):
+
+        return None
+
+
+class BulkMarkConversationReadAPIView(
+    APIView
+):
+    permission_classes = [
+        IsAuthenticated
+    ]
+
+
+    def post(
+        self,
+        request,
+    ):
+        conversation_ids = (
+            _conversation_ids(
+                request
+            )
+        )
+
 
         if not conversation_ids:
-            return Response({"error": "No conversation_ids provided"}, status=400)
 
-        conversations = Conversation.objects.filter(
-            id__in=conversation_ids,
-            user=request.user,
-        ).select_related("email_account")
+            return Response(
+                {
+                    "error":
+                        "No valid conversation_ids provided"
+                },
+                status=400,
+            )
+
+
+        is_read = (
+            request.data.get(
+                "is_read",
+                True,
+            )
+        )
+
+
+        if not isinstance(
+            is_read,
+            bool,
+        ):
+
+            return Response(
+                {
+                    "error":
+                        "is_read must be boolean"
+                },
+                status=400,
+            )
+
+
+        conversations = (
+            Conversation.objects
+            .filter(
+                id__in=(
+                    conversation_ids
+                ),
+                user=request.user,
+            )
+            .select_related(
+                "email_account"
+            )
+        )
+
 
         results = []
+
         errors = []
 
-        for conv in conversations:
+
+        for conversation in conversations:
+
             try:
 
-                account = conv.email_account
-                if not account:
-                    raise Exception("No email account")
-
-                account_type = account.account_type
-
-                # =========================
-                # 🔴 GMAIL
-                # =========================
-                if account_type == "gmail":
-
-                    if not conv.external_conversation_id:
-                        raise Exception("Missing Gmail threadId")
-
-                    creds = get_gmail_credentials(request.user)
-                    service = build("gmail", "v1", credentials=creds)
-
-                    service.users().threads().modify(
-                        userId="me",
-                        id=conv.external_conversation_id,
-                        body={"removeLabelIds": ["UNREAD"]}
-                    ).execute()
-
-                # =========================
-                # 🔵 OUTLOOK
-                # =========================
-                elif account_type == "outlook":
-
-                    token = get_microsoft_access_token(request.user)
-
-                    for msg in conv.messages.all():
-                        if not msg.external_message_id:
-                            continue
-
-                        requests.patch(
-                            f"https://graph.microsoft.com/v1.0/me/messages/{msg.external_message_id}",
-                            headers={
-                                "Authorization": f"Bearer {token}",
-                                "Content-Type": "application/json"
-                            },
-                            json={"isRead": True}
-                        )
-
-                # =========================
-                # 🧠 UPDATE DB
-                # =========================
-                conv.unread_count = 0
-                conv.save(update_fields=["unread_count"])
-
-                conv.messages.update(is_read=True)
-
-                results.append({
-                    "conversation_id": conv.id,
-                    "status": "read",
-                })
-
-            except Exception as e:
-                print("❌ BULK READ ERROR:", str(e))
-
-                errors.append({
-                    "conversation_id": conv.id,
-                    "error": str(e),
-                })
-
-        return Response({
-            "updated": results,
-            "errors": errors
-        })
+                result = (
+                    set_conversation_read(
+                        conversation=(
+                            conversation
+                        ),
+                        user=request.user,
+                        is_read=is_read,
+                    )
+                )
 
 
-# ==========================================================
-# ⭐ BULK STAR TOGGLE
-# ==========================================================
+                if result[
+                    "errors"
+                ]:
 
-class BulkToggleConversationStarAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+                    errors.append(
+                        {
+                            "conversation_id":
+                                conversation.id,
 
-    def post(self, request):
+                            "error":
+                                "One or more provider "
+                                "messages failed.",
+                        }
+                    )
 
-        conversation_ids = request.data.get("conversation_ids", [])
+
+                else:
+
+                    results.append(
+                        {
+                            "conversation_id":
+                                conversation.id,
+
+                            "status":
+                                (
+                                    "read"
+                                    if is_read
+                                    else "unread"
+                                ),
+                        }
+                    )
+
+
+            except MailMutationError as exc:
+
+                errors.append(
+                    {
+                        "conversation_id":
+                            conversation.id,
+
+                        "error":
+                            str(exc),
+                    }
+                )
+
+
+        return Response(
+            {
+                "updated":
+                    results,
+
+                "errors":
+                    errors,
+            }
+        )
+
+
+class BulkToggleConversationStarAPIView(
+    APIView
+):
+    permission_classes = [
+        IsAuthenticated
+    ]
+
+
+    def post(
+        self,
+        request,
+    ):
+        conversation_ids = (
+            _conversation_ids(
+                request
+            )
+        )
+
 
         if not conversation_ids:
-            return Response({"error": "No conversation_ids provided"}, status=400)
 
-        conversations = Conversation.objects.filter(
-            id__in=conversation_ids,
-            user=request.user,
-        ).select_related("email_account")
+            return Response(
+                {
+                    "error":
+                        "No valid conversation_ids provided"
+                },
+                status=400,
+            )
+
+
+        explicit_state = (
+            request.data.get(
+                "is_starred",
+                None,
+            )
+        )
+
+
+        if (
+            explicit_state is not None
+            and
+            not isinstance(
+                explicit_state,
+                bool,
+            )
+        ):
+
+            return Response(
+                {
+                    "error":
+                        "is_starred must be boolean"
+                },
+                status=400,
+            )
+
+
+        conversations = (
+            Conversation.objects
+            .filter(
+                id__in=(
+                    conversation_ids
+                ),
+                user=request.user,
+            )
+            .select_related(
+                "email_account"
+            )
+        )
+
 
         results = []
+
         errors = []
 
-        for conv in conversations:
+
+        for conversation in conversations:
+
+            target_state = (
+                explicit_state
+                if explicit_state is not None
+                else
+                not conversation.is_starred
+            )
+
+
             try:
 
-                new_state = not conv.is_starred
+                result = (
+                    set_conversation_star(
+                        conversation=(
+                            conversation
+                        ),
+                        user=request.user,
+                        is_starred=(
+                            target_state
+                        ),
+                    )
+                )
 
-                account = conv.email_account
-                if not account:
-                    raise Exception("No email account linked")
 
-                account_type = account.account_type
+                if result[
+                    "errors"
+                ]:
 
-                # =========================
-                # 🔴 GMAIL
-                # =========================
-                if account_type == "gmail":
+                    errors.append(
+                        {
+                            "conversation_id":
+                                conversation.id,
 
-                    if not conv.external_conversation_id:
-                        raise Exception("Missing Gmail threadId")
+                            "error":
+                                "One or more provider "
+                                "messages failed.",
+                        }
+                    )
 
-                    creds = get_gmail_credentials(request.user)
-                    service = build("gmail", "v1", credentials=creds)
 
-                    body = {}
+                else:
 
-                    if new_state:
-                        body["addLabelIds"] = ["STARRED"]
-                    else:
-                        body["removeLabelIds"] = ["STARRED"]
+                    results.append(
+                        {
+                            "conversation_id":
+                                conversation.id,
 
-                    service.users().threads().modify(
-                        userId="me",
-                        id=conv.external_conversation_id,
-                        body=body
-                    ).execute()
+                            "status":
+                                (
+                                    "starred"
+                                    if target_state
+                                    else "unstarred"
+                                ),
 
-                # =========================
-                # 🔵 OUTLOOK
-                # =========================
-                elif account_type == "outlook":
+                            "is_starred":
+                                target_state,
+                        }
+                    )
 
-                    token = get_microsoft_access_token(request.user)
 
-                    messages = conv.messages.all()
+            except MailMutationError as exc:
 
-                    for msg in messages:
-                        if not msg.external_message_id:
-                            continue
+                errors.append(
+                    {
+                        "conversation_id":
+                            conversation.id,
 
-                        requests.patch(
-                            f"https://graph.microsoft.com/v1.0/me/messages/{msg.external_message_id}",
-                            headers={
-                                "Authorization": f"Bearer {token}",
-                                "Content-Type": "application/json"
-                            },
-                            json={
-                                "flag": {
-                                    "flagStatus": "flagged" if new_state else "notFlagged"
-                                }
-                            }
-                        )
+                        "error":
+                            str(exc),
+                    }
+                )
 
-                # =========================
-                # 🧠 UPDATE DB
-                # =========================
-                conv.is_starred = new_state
-                conv.save(update_fields=["is_starred"])
 
-                conv.messages.update(is_starred=new_state)
+        return Response(
+            {
+                "updated":
+                    results,
 
-                results.append({
-                    "conversation_id": conv.id,
-                    "status": "read",
-                })
-
-            except Exception as e:
-                print("❌ BULK STAR ERROR:", str(e))
-
-                errors.append({
-                    "conversation_id": conv.id,
-                    "error": str(e),
-                })
-
-        return Response({
-            "updated": results,
-            "errors": errors
-        })
+                "errors":
+                    errors,
+            }
+        )

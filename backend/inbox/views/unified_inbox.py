@@ -96,7 +96,8 @@ class UnifiedConversationInboxAPIView(APIView):
 
             if folder == "sent":
                 conversations = conversations.filter(
-                    messages__direction="outbound"
+                    messages__folder="sent",
+                    messages__is_draft=False,
                 ).distinct()
 
             elif folder == "draft":
@@ -106,7 +107,8 @@ class UnifiedConversationInboxAPIView(APIView):
 
             else:
                 conversations = conversations.filter(
-                    messages__direction="inbound"
+                    messages__folder="inbox",
+                    messages__is_draft=False,
                 ).distinct()
 
             if search:

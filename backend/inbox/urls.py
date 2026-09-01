@@ -12,6 +12,7 @@ from inbox.views.message_status import (
 )
 from inbox.views.search import MessageSearchAPIView
 from inbox.views.star import ToggleStarAPIView
+from inbox.views.message_read import MessageReadStateAPIView
 from inbox.views.delete import DeleteMessageAPIView
 
 # ===============================
@@ -53,6 +54,8 @@ from inbox.views.unified_inbox import (
 from inbox.views.draft import DraftSaveAPIView, DraftListAPIView
 from inbox.views.send_draft import SendDraftAPIView
 from inbox.views.reply import ReplyConversationAPIView
+from inbox.views.forward import ForwardMessageAPIView
+from inbox.views.provider_open import ProviderOpenAPIView
 
 # ===============================
 # DASHBOARD / BILLING / META
@@ -75,7 +78,22 @@ urlpatterns = [
     path("messages/status/bulk/", BulkMessageStatusAPIView.as_view(), name="bulk-message-status"),
     path("messages/mark-all-read/", MarkAllReadAPIView.as_view()),
     path("message/<int:message_id>/toggle-star/", ToggleStarAPIView.as_view()),
+    path(
+        "message/<int:message_id>/read-state/",
+        MessageReadStateAPIView.as_view(),
+        name="message-read-state",
+    ),
     path("message/<int:message_id>/delete/", DeleteMessageAPIView.as_view()),
+    path(
+        "message/<int:message_id>/forward/",
+        ForwardMessageAPIView.as_view(),
+        name="message-forward",
+    ),
+    path(
+        "message/<int:message_id>/provider-open/",
+        ProviderOpenAPIView.as_view(),
+        name="message-provider-open",
+    ),
     
 
 

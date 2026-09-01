@@ -55,6 +55,10 @@ from inbox.services.mail_sync_policy import (
     resolve_mail_sync_window,
 )
 
+from inbox.services.mail_mutations import (
+    refresh_conversation_local_state,
+)
+
 from inbox.services.sync_status import (
     update_sync_status,
 )
@@ -1067,33 +1071,6 @@ def _fetch_gmail_emails_impl(
             )
 
 
-            if (
-                existing
-                and
-                not window.initial_history
-            ):
-
-                skipped_count += 1
-
-                log_event(
-                    logger,
-                    "debug",
-                    (
-                        "gmail.message."
-                        "skipped_existing"
-                    ),
-                    provider="gmail",
-                    account_id=(
-                        email_account.id
-                    ),
-                    message_id=(
-                        existing.id
-                    ),
-                )
-
-                continue
-
-
             message = (
                 service
                 .users()
@@ -1105,6 +1082,101 @@ def _fetch_gmail_emails_impl(
                 )
                 .execute()
             )
+
+
+            if (
+                existing
+                and
+                not window.initial_history
+            ):
+
+                label_ids = set(
+                    message.get(
+                        "labelIds",
+                        [],
+                    )
+                    or []
+                )
+
+
+                if "SENT" in label_ids:
+
+                    existing.direction = (
+                        "outbound"
+                    )
+
+                    existing.folder = (
+                        "sent"
+                    )
+
+
+                elif "INBOX" in label_ids:
+
+                    existing.direction = (
+                        "inbound"
+                    )
+
+                    existing.folder = (
+                        "inbox"
+                    )
+
+
+                existing.external_conversation_id = (
+                    message.get(
+                        "threadId"
+                    )
+                    or
+                    existing.external_conversation_id
+                )
+
+                existing.is_read = (
+                    "UNREAD"
+                    not in label_ids
+                )
+
+                existing.is_starred = (
+                    "STARRED"
+                    in label_ids
+                )
+
+
+                existing.save(
+                    update_fields=[
+                        "direction",
+                        "folder",
+                        "external_conversation_id",
+                        "is_read",
+                        "is_starred",
+                    ]
+                )
+
+
+                refresh_conversation_local_state(
+                    existing.conversation
+                )
+
+
+                skipped_count += 1
+
+
+                log_event(
+                    logger,
+                    "debug",
+                    (
+                        "gmail.message."
+                        "refreshed_mutable_state"
+                    ),
+                    provider="gmail",
+                    account_id=(
+                        email_account.id
+                    ),
+                    message_id=(
+                        existing.id
+                    ),
+                )
+
+
+                continue
 
 
             processed_count += 1

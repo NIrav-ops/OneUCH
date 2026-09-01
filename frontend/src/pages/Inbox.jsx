@@ -82,6 +82,11 @@ export default function Inbox() {
     body: "",
   });
 
+  const [
+    forwardSourceId,
+    setForwardSourceId,
+  ] = useState(null);
+
 
   // ==========================================================
   // REPLY STATE
@@ -90,6 +95,8 @@ export default function Inbox() {
   const [showReply, setShowReply] = useState(false);
 
   const [replyBody, setReplyBody] = useState("");
+
+  const [replyMode, setReplyMode] = useState("reply");
 
   const [replying, setReplying] = useState(false);
 
@@ -702,8 +709,14 @@ export default function Inbox() {
       setError("");
 
 
+      const sendEndpoint =
+        forwardSourceId
+          ? `/api/inbox/message/${forwardSourceId}/forward/`
+          : "/api/inbox/send/";
+
+
       await axios.post(
-        "/api/inbox/send/",
+        sendEndpoint,
         {
           to:
             composeData.to,
@@ -727,6 +740,8 @@ export default function Inbox() {
       setShowCompose(false);
 
       setActiveDraftId(null);
+
+      setForwardSourceId(null);
 
       setComposeData({
         to: [],
@@ -797,6 +812,9 @@ export default function Inbox() {
         {
           body:
             replyBody.trim(),
+
+          mode:
+            replyMode,
 
         }
       );
@@ -1341,12 +1359,295 @@ export default function Inbox() {
 
 
   // ==========================================================
+  // CONVERSATION MAIL OPERATIONS
+  // ==========================================================
+
+  const markConversationUnread =
+    async () => {
+
+      if (!selectedId) {
+        return;
+      }
+
+
+      try {
+
+        setError("");
+
+
+        await axios.post(
+          `/api/inbox/conversation/${selectedId}/mark-read/`,
+          {
+            is_read:
+              false,
+          }
+        );
+
+
+        await loadConversations();
+
+      } catch (err) {
+
+        console.error(
+          "Mark unread error:",
+          err
+        );
+
+
+        setError(
+          err.response?.data?.error ||
+            "Unable to mark conversation unread."
+        );
+
+      }
+
+    };
+
+
+  const toggleSelectedConversationStar =
+    async () => {
+
+      if (!selectedId) {
+        return;
+      }
+
+
+      try {
+
+        setError("");
+
+
+        await axios.post(
+          `/api/inbox/conversation/${selectedId}/toggle-star/`
+        );
+
+
+        await loadConversations();
+
+      } catch (err) {
+
+        console.error(
+          "Toggle star error:",
+          err
+        );
+
+
+        setError(
+          err.response?.data?.error ||
+            "Unable to update conversation star."
+        );
+
+      }
+
+    };
+
+
+  const trashSelectedConversation =
+    async () => {
+
+      if (!selectedId) {
+        return;
+      }
+
+
+      const confirmed =
+        window.confirm(
+          "Move this conversation to Trash?"
+        );
+
+
+      if (!confirmed) {
+        return;
+      }
+
+
+      try {
+
+        setError("");
+
+
+        await axios.post(
+          `/api/inbox/conversation/${selectedId}/delete/`
+        );
+
+
+        setSelectedId(null);
+
+        setMessages([]);
+
+        setAttachments([]);
+
+        await loadConversations();
+
+      } catch (err) {
+
+        console.error(
+          "Trash conversation error:",
+          err
+        );
+
+
+        setError(
+          err.response?.data?.error ||
+            "Unable to move conversation to Trash."
+        );
+
+      }
+
+    };
+
+
+  const openSelectedMessageInProvider =
+    async () => {
+
+      const latestMessage =
+        messages.length > 0
+          ? messages[
+              messages.length - 1
+            ]
+          : null;
+
+
+      if (!latestMessage) {
+
+        setError(
+          "No provider message is available."
+        );
+
+        return;
+
+      }
+
+
+      try {
+
+        setError("");
+
+
+        const response =
+          await axios.get(
+            `/api/inbox/message/${latestMessage.id}/provider-open/`
+          );
+
+
+        const providerUrl =
+          response.data?.url;
+
+
+        if (!providerUrl) {
+
+          throw new Error(
+            "Provider URL missing"
+          );
+
+        }
+
+
+        window.open(
+          providerUrl,
+          "_blank",
+          "noopener,noreferrer"
+        );
+
+      } catch (err) {
+
+        console.error(
+          "Open provider error:",
+          err
+        );
+
+
+        setError(
+          err.response?.data?.error ||
+            "Provider message is not available yet."
+        );
+
+      }
+
+    };
+
+
+  const beginForward = () => {
+
+    const latestMessage =
+      messages.length > 0
+        ? messages[
+            messages.length - 1
+          ]
+        : null;
+
+
+    if (!latestMessage) {
+
+      setError(
+        "No message is available to forward."
+      );
+
+      return;
+
+    }
+
+
+    setError("");
+
+    setActiveDraftId(null);
+
+    setForwardSourceId(
+      latestMessage.id
+    );
+
+
+    setComposeAccountId(
+      latestMessage.email_account_id
+        ? String(
+            latestMessage.email_account_id
+          )
+        : ""
+    );
+
+
+    const currentSubject =
+      latestMessage.subject ||
+      "No Subject";
+
+
+    const forwardSubject =
+      currentSubject
+        .toLowerCase()
+        .startsWith(
+          "fwd:"
+        )
+          ? currentSubject
+          : `Fwd: ${currentSubject}`;
+
+
+    setComposeData({
+      to: [],
+      cc: [],
+      bcc: [],
+      subject:
+        forwardSubject,
+      body:
+        "",
+    });
+
+
+    setShowCompose(
+      true
+    );
+
+  };
+
+
+  // ==========================================================
   // OPEN DRAFT
   // ==========================================================
 
   const openDraft = (draft) => {
 
     setError("");
+
+    setForwardSourceId(null);
 
     setActiveDraftId(
       draft.id
@@ -1428,6 +1729,8 @@ export default function Inbox() {
     setShowCompose(false);
 
     setActiveDraftId(null);
+
+    setForwardSourceId(null);
 
 
     if (activeTab === "draft") {
@@ -1605,6 +1908,10 @@ export default function Inbox() {
             onClick={() => {
 
               setActiveDraftId(
+                null
+              );
+
+              setForwardSourceId(
                 null
               );
 
@@ -2149,13 +2456,17 @@ export default function Inbox() {
             activeTab !== "draft" &&
             messages.length > 0 && (
 
-              <div className="mb-4 flex gap-2">
+              <div className="mb-4 flex flex-wrap gap-2">
 
                 <button
                   type="button"
                   onClick={() => {
 
                     setError("");
+
+                    setReplyMode(
+                      "reply"
+                    );
 
                     setShowReply(
                       true
@@ -2165,6 +2476,102 @@ export default function Inbox() {
                   className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white"
                 >
                   Reply
+                </button>
+
+
+                <button
+                  type="button"
+                  onClick={() => {
+
+                    setError("");
+
+                    setReplyMode(
+                      "reply_all"
+                    );
+
+                    setShowReply(
+                      true
+                    );
+
+                  }}
+                  className="rounded border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700"
+                >
+                  Reply All
+                </button>
+
+
+                <button
+                  type="button"
+                  onClick={
+                    beginForward
+                  }
+                  className="rounded border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700"
+                >
+                  Forward
+                </button>
+
+
+                <button
+                  type="button"
+                  onClick={
+                    markConversationUnread
+                  }
+                  className="rounded border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700"
+                >
+                  Mark unread
+                </button>
+
+
+                <button
+                  type="button"
+                  onClick={
+                    toggleSelectedConversationStar
+                  }
+                  className="rounded border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700"
+                >
+                  {
+                    conversations.find(
+                      (conversation) =>
+                        conversation.conversation_id ===
+                        selectedId
+                    )?.is_starred
+                      ? "Unstar"
+                      : "Star"
+                  }
+                </button>
+
+
+                <button
+                  type="button"
+                  onClick={
+                    openSelectedMessageInProvider
+                  }
+                  className="rounded border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700"
+                >
+                  {
+                    messages[
+                      messages.length - 1
+                    ]?.platform === "gmail"
+                      ? "Open in Gmail"
+                      : (
+                          messages[
+                            messages.length - 1
+                          ]?.platform === "outlook"
+                            ? "Open in Outlook"
+                            : "Open in Provider"
+                        )
+                  }
+                </button>
+
+
+                <button
+                  type="button"
+                  onClick={
+                    trashSelectedConversation
+                  }
+                  className="rounded border border-red-200 bg-white px-4 py-2 text-sm font-medium text-red-700"
+                >
+                  Trash
                 </button>
 
               </div>
@@ -2272,9 +2679,20 @@ export default function Inbox() {
                         attachment.filename
                       }
 
+                      <span className="ml-2 text-xs text-slate-400">
+                        {
+                          attachment.mime_type ||
+                          "File attachment"
+                        }
+                      </span>
+
 
                       <button
                         type="button"
+                        disabled={
+                          attachment.downloadable ===
+                          false
+                        }
                         onClick={() =>
                           downloadFile(
                             attachment.message_id,
@@ -2282,8 +2700,14 @@ export default function Inbox() {
                             attachment.filename
                           )
                         }
+                        className="ml-3 rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        Download
+                        {
+                          attachment.downloadable ===
+                          false
+                            ? "Unavailable"
+                            : "Download"
+                        }
                       </button>
 
                     </div>
@@ -2383,17 +2807,47 @@ export default function Inbox() {
               }}
             >
 
-              {activeDraftId
-                ? "Edit Draft"
-                : "Compose"}
+              {forwardSourceId
+                ? "Forward Message"
+                : (
+                    activeDraftId
+                      ? "Edit Draft"
+                      : "Compose"
+                  )}
 
             </div>
+
+
+            {forwardSourceId && (
+              <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+
+                Forwarding keeps the original message content and mailbox.
+
+                {
+                  attachments.some(
+                    (attachment) =>
+                      attachment.message_id ===
+                      forwardSourceId
+                  )
+                    ? (
+                        " Original attachments are not automatically forwarded; download them or use Open in Provider when attachment forwarding is required."
+                      )
+                    : ""
+                }
+
+              </div>
+            )}
 
 
             {/* FROM */}
 
             <select
               value={composeAccountId}
+              disabled={
+                Boolean(
+                  forwardSourceId
+                )
+              }
               onChange={(event) =>
                 setComposeAccountId(
                   event.target.value
@@ -2575,14 +3029,16 @@ export default function Inbox() {
               }}
             >
 
-              <button
-                type="button"
-                onClick={
-                  saveDraft
-                }
-              >
-                Save Draft
-              </button>
+              {!forwardSourceId && (
+                <button
+                  type="button"
+                  onClick={
+                    saveDraft
+                  }
+                >
+                  Save Draft
+                </button>
+              )}
 
 
               {activeDraftId ? (
@@ -2604,7 +3060,11 @@ export default function Inbox() {
                     sendEmail
                   }
                 >
-                  Send
+                  {
+                    forwardSourceId
+                      ? "Forward"
+                      : "Send"
+                  }
                 </button>
 
               )}
@@ -2701,7 +3161,9 @@ export default function Inbox() {
                     12,
                 }}
               >
-                Reply
+                {replyMode === "reply_all"
+                  ? "Reply All"
+                  : "Reply"}
               </div>
 
 
@@ -2780,7 +3242,11 @@ export default function Inbox() {
 
                   {replying
                     ? "Sending..."
-                    : "Send Reply"}
+                    : (
+                        replyMode === "reply_all"
+                          ? "Send Reply All"
+                          : "Send Reply"
+                      )}
 
                 </button>
 
