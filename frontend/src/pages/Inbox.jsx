@@ -87,6 +87,11 @@ export default function Inbox() {
     setForwardSourceId,
   ] = useState(null);
 
+  const [
+    composeFiles,
+    setComposeFiles,
+  ] = useState([]);
+
 
   // ==========================================================
   // REPLY STATE
@@ -121,6 +126,25 @@ export default function Inbox() {
 
   const [error, setError] = useState("");
 
+  const [
+    conversationMeta,
+    setConversationMeta,
+  ] = useState({
+    count: 0,
+    currentPage: 1,
+    totalPages: 1,
+  });
+
+  const [
+    loadingMore,
+    setLoadingMore,
+  ] = useState(false);
+
+  const [
+    syncNotice,
+    setSyncNotice,
+  ] = useState("");
+
   const location = useLocation();
 
 
@@ -140,19 +164,24 @@ export default function Inbox() {
 
       setAccounts(data);
 
-      if (data.length > 0) {
+      setSelectedAccountId((currentId) => {
 
-        setSelectedAccountId((currentId) => {
+        if (!currentId) {
+          return "";
+        }
 
-          if (currentId) {
-            return currentId;
-          }
+        const stillConnected =
+          data.some(
+            (account) =>
+              String(account.id) ===
+              String(currentId)
+          );
 
-          return String(data[0].id);
+        return stillConnected
+          ? currentId
+          : "";
 
-        });
-
-      }
+      });
 
     } catch (err) {
 
@@ -174,13 +203,19 @@ export default function Inbox() {
 
     try {
 
-      const response = await axios.get(
-        "/api/inbox/sync-status/"
-      );
+      const response =
+        await axios.get(
+          "/api/inbox/sync-status/"
+        );
+
+      const data =
+        response.data || [];
 
       setSyncStatuses(
-        response.data || []
+        data
       );
+
+      return data;
 
     } catch (err) {
 
@@ -188,6 +223,8 @@ export default function Inbox() {
         "Sync status error:",
         err
       );
+
+      return [];
 
     }
 
@@ -269,25 +306,49 @@ export default function Inbox() {
 
   const formatSyncStatus = (platform) => {
 
-    const item = getSyncStatus(platform);
+    const item =
+      getSyncStatus(
+        platform
+      );
 
     if (!item) {
       return "Not synced";
     }
 
-    const progress =
-      item.status === "syncing"
-        ? ` (${item.progress || 0}%)`
-        : "";
+    if (
+      item.status ===
+      "syncing"
+    ) {
 
-    const lastSynced =
+      return (
+        `Syncing ${item.progress || 0}%`
+      );
+
+    }
+
+    if (
+      item.status ===
+      "failed"
+    ) {
+      return "Sync failed";
+    }
+
+    if (
       item.last_synced_at
-        ? ` | Last: ${new Date(
-            item.last_synced_at
-          ).toLocaleString()}`
-        : "";
+    ) {
 
-    return `${item.status}${progress}${lastSynced}`;
+      return (
+        `Synced ${new Date(
+          item.last_synced_at
+        ).toLocaleString()}`
+      );
+
+    }
+
+    return (
+      item.status ||
+      "Not synced"
+    );
 
   };
 
@@ -297,29 +358,77 @@ export default function Inbox() {
   // ==========================================================
 
   const loadConversations =
-    useCallback(async () => {
+    useCallback(async (
+      options = {}
+    ) => {
 
-      if (activeTab === "draft") {
+      const requestedPage =
+        Number(
+          options.page || 1
+        );
+
+      const append =
+        Boolean(
+          options.append
+        );
+
+
+      if (
+        activeTab ===
+        "draft"
+      ) {
 
         setConversations([]);
+
+        setConversationMeta({
+          count: 0,
+          currentPage: 1,
+          totalPages: 1,
+        });
+
         setLoading(false);
 
         return;
-
       }
+
 
       try {
 
         setError("");
-        setLoading(true);
+
+        if (append) {
+
+          setLoadingMore(
+            true
+          );
+
+        } else {
+
+          setLoading(
+            true
+          );
+
+        }
+
 
         const queryParams =
           new URLSearchParams({
-            folder: activeTab,
+            folder:
+              activeTab,
+
+            page:
+              String(
+                requestedPage
+              ),
+
+            page_size:
+              "30",
           });
 
 
-        if (search.trim()) {
+        if (
+          search.trim()
+        ) {
 
           queryParams.set(
             "search",
@@ -329,7 +438,9 @@ export default function Inbox() {
         }
 
 
-        if (selectedAccountId) {
+        if (
+          selectedAccountId
+        ) {
 
           queryParams.set(
             "account_id",
@@ -339,16 +450,99 @@ export default function Inbox() {
         }
 
 
-        const response = await axios.get(
-          `/api/inbox/unified-conversations/?${queryParams.toString()}`
-        );
+        const response =
+          await axios.get(
+            `/api/inbox/unified-conversations/?${queryParams.toString()}`
+          );
 
 
         const data =
-          response.data?.results || [];
+          response.data?.results ||
+          [];
 
 
-        setConversations(data);
+        setConversationMeta({
+          count:
+            Number(
+              response.data?.count ||
+              0
+            ),
+
+          currentPage:
+            Number(
+              response.data?.current_page ||
+              requestedPage
+            ),
+
+          totalPages:
+            Number(
+              response.data?.total_pages ||
+              1
+            ),
+        });
+
+
+        if (append) {
+
+          setConversations(
+            (current) => {
+
+              const seen =
+                new Set(
+                  current.map(
+                    (conversation) =>
+                      conversation
+                        .conversation_id
+                  )
+                );
+
+
+              const next = [
+                ...current,
+              ];
+
+
+              for (
+                const conversation
+                of data
+              ) {
+
+                if (
+                  seen.has(
+                    conversation
+                      .conversation_id
+                  )
+                ) {
+                  continue;
+                }
+
+
+                seen.add(
+                  conversation
+                    .conversation_id
+                );
+
+
+                next.push(
+                  conversation
+                );
+
+              }
+
+
+              return next;
+
+            }
+          );
+
+
+          return;
+        }
+
+
+        setConversations(
+          data
+        );
 
 
         const urlParams =
@@ -363,34 +557,49 @@ export default function Inbox() {
           );
 
 
-        if (data.length === 0) {
+        if (
+          data.length ===
+          0
+        ) {
 
-          setSelectedId(null);
-          setMessages([]);
-          setAttachments([]);
+          setSelectedId(
+            null
+          );
+
+          setMessages(
+            []
+          );
+
+          setAttachments(
+            []
+          );
 
           return;
-
         }
 
 
-        if (conversationFromUrl) {
+        if (
+          conversationFromUrl
+        ) {
 
-          const match = data.find(
-            (conversation) =>
-              String(
-                conversation.conversation_id
-              ) ===
-              String(
-                conversationFromUrl
-              )
-          );
+          const match =
+            data.find(
+              (conversation) =>
+                String(
+                  conversation
+                    .conversation_id
+                ) ===
+                String(
+                  conversationFromUrl
+                )
+            );
 
 
           if (match) {
 
             setSelectedId(
-              match.conversation_id
+              match
+                .conversation_id
             );
 
             return;
@@ -400,22 +609,32 @@ export default function Inbox() {
         }
 
 
-        setSelectedId((currentId) => {
+        setSelectedId(
+          (currentId) => {
 
-          const stillExists =
-            data.some(
-              (conversation) =>
-                conversation.conversation_id ===
-                currentId
+            const stillExists =
+              data.some(
+                (conversation) =>
+                  conversation
+                    .conversation_id ===
+                  currentId
+              );
+
+
+            if (
+              stillExists
+            ) {
+              return currentId;
+            }
+
+
+            return (
+              data[0]
+                .conversation_id
             );
 
-          if (stillExists) {
-            return currentId;
           }
-
-          return data[0].conversation_id;
-
-        });
+        );
 
       } catch (err) {
 
@@ -424,13 +643,26 @@ export default function Inbox() {
           err
         );
 
+
         setError(
           "Unable to load conversations."
         );
 
       } finally {
 
-        setLoading(false);
+        if (append) {
+
+          setLoadingMore(
+            false
+          );
+
+        } else {
+
+          setLoading(
+            false
+          );
+
+        }
 
       }
 
@@ -440,6 +672,33 @@ export default function Inbox() {
       search,
       selectedAccountId,
     ]);
+
+
+  const loadMoreConversations =
+    async () => {
+
+      if (
+        loadingMore ||
+        conversationMeta
+          .currentPage >=
+        conversationMeta
+          .totalPages
+      ) {
+        return;
+      }
+
+
+      await loadConversations({
+        page:
+          conversationMeta
+            .currentPage +
+          1,
+
+        append:
+          true,
+      });
+
+    };
 
 
   // ==========================================================
@@ -686,6 +945,165 @@ export default function Inbox() {
 
 
   // ==========================================================
+  // OUTBOUND ATTACHMENT HELPERS
+  // ==========================================================
+
+  const formatComposeFileSize =
+    (size) => {
+
+      if (
+        size >=
+        1024 * 1024
+      ) {
+
+        return `${(
+          size /
+          (1024 * 1024)
+        ).toFixed(1)} MB`;
+
+      }
+
+
+      return `${Math.max(
+        1,
+        Math.ceil(
+          size / 1024
+        )
+      )} KB`;
+
+    };
+
+
+  const selectedComposeAccount =
+    accounts.find(
+      (account) =>
+        String(
+          account.id
+        ) ===
+        String(
+          composeAccountId
+        )
+    );
+
+
+  const composeAttachmentLimitBytes =
+    selectedComposeAccount
+      ?.account_type ===
+      "outlook"
+        ? 3 * 1024 * 1024
+        : 18 * 1024 * 1024;
+
+
+  const handleComposeFiles =
+    (event) => {
+
+      const selected =
+        Array.from(
+          event.target.files ||
+          []
+        );
+
+
+      event.target.value =
+        "";
+
+
+      if (!composeAccountId) {
+
+        setError(
+          "Select the sending mailbox before adding attachments."
+        );
+
+        return;
+
+      }
+
+
+      const next = [
+        ...composeFiles,
+        ...selected,
+      ];
+
+
+      if (
+        next.length >
+        10
+      ) {
+
+        setError(
+          "A maximum of 10 attachments can be sent at once."
+        );
+
+        return;
+
+      }
+
+
+      const total =
+        next.reduce(
+          (
+            current,
+            file
+          ) =>
+            current +
+            Number(
+              file.size ||
+              0
+            ),
+          0
+        );
+
+
+      if (
+        total >
+        composeAttachmentLimitBytes
+      ) {
+
+        const limitMb =
+          selectedComposeAccount
+            ?.account_type ===
+            "outlook"
+              ? 3
+              : 18;
+
+
+        setError(
+          `Attachments exceed the ${limitMb} MB outbound limit for this mailbox.`
+        );
+
+        return;
+
+      }
+
+
+      setError("");
+
+      setComposeFiles(
+        next
+      );
+
+    };
+
+
+  const removeComposeFile =
+    (index) => {
+
+      setComposeFiles(
+        (current) =>
+          current.filter(
+            (
+              _file,
+              fileIndex
+            ) =>
+              fileIndex !==
+              index
+          )
+      );
+
+    };
+
+
+  // ==========================================================
   // SEND EMAIL
   // ==========================================================
 
@@ -700,7 +1118,16 @@ export default function Inbox() {
       );
 
       return;
+    }
 
+
+    if (!composeAccountId) {
+
+      setError(
+        "Select the sending mailbox."
+      );
+
+      return;
     }
 
 
@@ -715,26 +1142,97 @@ export default function Inbox() {
           : "/api/inbox/send/";
 
 
-      await axios.post(
-        sendEndpoint,
-        {
-          to:
-            composeData.to,
+      if (
+        composeFiles.length >
+        0
+      ) {
 
-          cc:
-            composeData.cc,
+        const formData =
+          new FormData();
 
-          bcc:
-            composeData.bcc,
 
-          subject:
-            composeData.subject,
-          body:
-            composeData.body,
-          account_id:
-            composeAccountId,
+        formData.append(
+          "to",
+          serializeRecipients(
+            composeData.to
+          )
+        );
+
+        formData.append(
+          "cc",
+          serializeRecipients(
+            composeData.cc
+          )
+        );
+
+        formData.append(
+          "bcc",
+          serializeRecipients(
+            composeData.bcc
+          )
+        );
+
+        formData.append(
+          "subject",
+          composeData.subject
+        );
+
+        formData.append(
+          "body",
+          composeData.body
+        );
+
+        formData.append(
+          "account_id",
+          composeAccountId
+        );
+
+
+        for (
+          const file
+          of composeFiles
+        ) {
+
+          formData.append(
+            "attachments",
+            file,
+            file.name
+          );
+
         }
-      );
+
+
+        await axios.post(
+          sendEndpoint,
+          formData
+        );
+
+      } else {
+
+        await axios.post(
+          sendEndpoint,
+          {
+            to:
+              composeData.to,
+
+            cc:
+              composeData.cc,
+
+            bcc:
+              composeData.bcc,
+
+            subject:
+              composeData.subject,
+
+            body:
+              composeData.body,
+
+            account_id:
+              composeAccountId,
+          }
+        );
+
+      }
 
 
       setShowCompose(false);
@@ -743,13 +1241,17 @@ export default function Inbox() {
 
       setForwardSourceId(null);
 
+      setComposeFiles([]);
+
+
       setComposeData({
         to: [],
-    cc: [],
-    bcc: [],
+        cc: [],
+        bcc: [],
         subject: "",
         body: "",
       });
+
 
       setSelectedId(null);
 
@@ -761,6 +1263,7 @@ export default function Inbox() {
         "Send email error:",
         err
       );
+
 
       setError(
         err.response?.data?.error ||
@@ -870,6 +1373,19 @@ export default function Inbox() {
   // ==========================================================
 
   const saveDraft = async () => {
+
+    if (
+      composeFiles.length >
+      0
+    ) {
+
+      setError(
+        "Draft attachments are not persisted yet. Send now or remove the files before saving this draft."
+      );
+
+      return;
+    }
+
 
     try {
 
@@ -1078,26 +1594,172 @@ export default function Inbox() {
     async (provider) => {
 
       const endpoint =
-        provider === "gmail"
+        provider ===
+        "gmail"
           ? "/api/google/oauth/sync/"
           : "/api/microsoft/oauth/sync/";
+
+
+      const providerLabel =
+        provider ===
+        "gmail"
+          ? "Gmail"
+          : "Microsoft 365";
+
+
+      const previous =
+        getSyncStatus(
+          provider
+        );
+
+
+      const previousLastSync =
+        previous
+          ?.last_synced_at ||
+        "";
 
 
       try {
 
         setError("");
 
-        setSyncing(provider);
+        setSyncing(
+          provider
+        );
 
-
-        await axios.post(
-          endpoint
+        setSyncNotice(
+          `${providerLabel} sync queued...`
         );
 
 
-        await loadSyncStatus();
+        const queued =
+          await axios.post(
+            endpoint
+          );
 
-        await loadConversations();
+
+        if (
+          queued.status !==
+          202
+        ) {
+
+          throw new Error(
+            "Mailbox synchronization was not queued."
+          );
+
+        }
+
+
+        let completed =
+          false;
+
+
+        for (
+          let attempt = 0;
+          attempt < 60;
+          attempt += 1
+        ) {
+
+          await new Promise(
+            (resolve) =>
+              window.setTimeout(
+                resolve,
+                1000
+              )
+          );
+
+
+          const statuses =
+            await loadSyncStatus();
+
+
+          const current =
+            statuses.find(
+              (item) =>
+                item.platform ===
+                provider
+            );
+
+
+          if (!current) {
+            continue;
+          }
+
+
+          if (
+            current.status ===
+            "failed"
+          ) {
+
+            throw new Error(
+              current.error_message ||
+              `${providerLabel} synchronization failed.`
+            );
+
+          }
+
+
+          if (
+            current.status ===
+            "syncing"
+          ) {
+
+            setSyncNotice(
+              `${providerLabel} syncing ${current.progress || 0}%...`
+            );
+
+            continue;
+
+          }
+
+
+          const completedAt =
+            current
+              .last_synced_at;
+
+
+          if (
+            current.status ===
+              "success" &&
+            completedAt &&
+            (
+              !previousLastSync ||
+              completedAt !==
+                previousLastSync
+            )
+          ) {
+
+            completed =
+              true;
+
+
+            setSyncNotice(
+              `${providerLabel} synced ${new Date(
+                completedAt
+              ).toLocaleString()}`
+            );
+
+
+            await loadConversations({
+              page: 1,
+              append: false,
+            });
+
+
+            break;
+
+          }
+
+        }
+
+
+        if (!completed) {
+
+          setSyncNotice(
+            `${providerLabel} sync is still running. Refresh will occur when a completion event is received.`
+          );
+
+        }
 
       } catch (err) {
 
@@ -1108,7 +1770,14 @@ export default function Inbox() {
 
 
         setError(
-          `Unable to sync ${provider}.`
+          err.response?.data?.error ||
+          err.message ||
+          `Unable to sync ${providerLabel}.`
+        );
+
+
+        setSyncNotice(
+          `${providerLabel} sync did not complete successfully.`
         );
 
 
@@ -1116,7 +1785,9 @@ export default function Inbox() {
 
       } finally {
 
-        setSyncing("");
+        setSyncing(
+          ""
+        );
 
       }
 
@@ -1592,6 +2263,8 @@ export default function Inbox() {
 
     setActiveDraftId(null);
 
+    setComposeFiles([]);
+
     setForwardSourceId(
       latestMessage.id
     );
@@ -1646,6 +2319,8 @@ export default function Inbox() {
   const openDraft = (draft) => {
 
     setError("");
+
+    setComposeFiles([]);
 
     setForwardSourceId(null);
 
@@ -1731,6 +2406,8 @@ export default function Inbox() {
     setActiveDraftId(null);
 
     setForwardSourceId(null);
+
+    setComposeFiles([]);
 
 
     if (activeTab === "draft") {
@@ -1843,76 +2520,73 @@ export default function Inbox() {
 
 
             {/* =============================================
-                PROVIDER HEALTH
+                COMPACT PROVIDER HEALTH
             ============================================== */}
 
-            <div className="mt-4 grid grid-cols-2 gap-2">
+            <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2.5">
 
-              {[
-                {
-                  provider:
-                    "gmail",
-                  label:
-                    "Gmail",
-                },
-                {
-                  provider:
-                    "outlook",
-                  label:
-                    "Microsoft 365",
-                },
-              ].map(
-                (provider) => {
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
 
-                  const connected =
-                    accounts.some(
-                      (account) =>
-                        account.account_type ===
-                        provider.provider
-                    );
+                {[
+                  {
+                    provider:
+                      "gmail",
+                    label:
+                      "Gmail",
+                  },
+                  {
+                    provider:
+                      "outlook",
+                    label:
+                      "Microsoft 365",
+                  },
+                ].map(
+                  (provider) => {
 
-
-                  const busy =
-                    syncing ===
-                    provider.provider;
+                    const connected =
+                      accounts.some(
+                        (account) =>
+                          account.account_type ===
+                          provider.provider
+                      );
 
 
-                  return (
+                    const busy =
+                      syncing ===
+                      provider.provider;
 
-                    <div
-                      key={
-                        provider.provider
-                      }
-                      className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3"
-                    >
 
-                      <div className="flex items-center justify-between gap-2">
+                    return (
 
-                        <span className="text-xs font-semibold text-slate-800">
-                          {provider.label}
-                        </span>
+                      <div
+                        key={
+                          provider.provider
+                        }
+                        className="flex min-w-0 items-center gap-2"
+                      >
 
                         <span
-                          className={`h-2 w-2 rounded-full ${
+                          className={`h-2 w-2 shrink-0 rounded-full ${
                             connected
                               ? "bg-emerald-500"
                               : "bg-slate-300"
                           }`}
                         />
 
-                      </div>
+
+                        <span className="text-[11px] font-semibold text-slate-700">
+                          {provider.label}
+                        </span>
 
 
-                      <p className="mt-1 line-clamp-2 min-h-[32px] text-[10px] leading-4 text-slate-500">
-                        {formatSyncStatus(
-                          provider.provider
-                        )}
-                      </p>
+                        <span className="max-w-[180px] truncate text-[10px] text-slate-400">
+                          {formatSyncStatus(
+                            provider.provider
+                          )}
+                        </span>
 
 
-                      <div className="mt-2 flex gap-1.5">
-
-                        {!connected && (
+                        {!connected ? (
 
                           <button
                             type="button"
@@ -1921,15 +2595,12 @@ export default function Inbox() {
                                 provider.provider
                               )
                             }
-                            className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-50"
+                            className="text-[10px] font-semibold text-slate-600 hover:text-slate-950"
                           >
                             Connect
                           </button>
 
-                        )}
-
-
-                        {connected && (
+                        ) : (
 
                           <button
                             type="button"
@@ -1941,7 +2612,7 @@ export default function Inbox() {
                                 provider.provider
                               )
                             }
-                            className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-wait disabled:opacity-50"
+                            className="text-[10px] font-semibold text-slate-600 hover:text-slate-950 disabled:cursor-wait disabled:opacity-50"
                           >
                             {busy
                               ? "Syncing..."
@@ -1952,11 +2623,20 @@ export default function Inbox() {
 
                       </div>
 
-                    </div>
+                    );
 
-                  );
+                  }
+                )}
 
-                }
+              </div>
+
+
+              {syncNotice && (
+
+                <p className="mt-2 border-t border-slate-200 pt-2 text-[10px] leading-4 text-slate-500">
+                  {syncNotice}
+                </p>
+
               )}
 
             </div>
@@ -1969,7 +2649,7 @@ export default function Inbox() {
             <div className="mt-3">
 
               <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-400">
-                Mailbox
+                View mailbox
               </label>
 
               <select
@@ -2111,7 +2791,11 @@ export default function Inbox() {
                       event.target.value
                     )
                   }
-                  placeholder="Search this mailbox..."
+                  placeholder={
+                    selectedAccountId
+                      ? "Search this mailbox..."
+                      : "Search all connected mailboxes..."
+                  }
                   className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-100"
                 />
 
@@ -2134,6 +2818,10 @@ export default function Inbox() {
               <div className="border-b border-slate-100 px-4 py-2.5">
 
                 <div className="flex flex-wrap items-center gap-2">
+
+                  <span className="mr-auto text-[10px] font-medium text-slate-400">
+                    Showing {conversations.length} of {conversationMeta.count}
+                  </span>
 
                   <button
                     type="button"
@@ -2465,6 +3153,36 @@ export default function Inbox() {
                     );
 
                   }
+                )}
+
+
+                {conversationMeta.currentPage <
+                  conversationMeta.totalPages && (
+
+                  <div className="bg-white px-4 py-4 text-center">
+
+                    <button
+                      type="button"
+                      disabled={
+                        loadingMore
+                      }
+                      onClick={
+                        loadMoreConversations
+                      }
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-wait disabled:opacity-50"
+                    >
+                      {loadingMore
+                        ? "Loading older conversations..."
+                        : "Load older conversations"}
+                    </button>
+
+
+                    <p className="mt-2 text-[10px] text-slate-400">
+                      {conversations.length} of {conversationMeta.count} loaded
+                    </p>
+
+                  </div>
+
                 )}
 
               </div>
@@ -3184,6 +3902,118 @@ export default function Inbox() {
                 />
 
               </div>
+
+
+              <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+
+                  <div>
+
+                    <p className="text-sm font-semibold text-slate-800">
+                      Attach files
+                    </p>
+
+                    <p className="mt-1 text-[11px] leading-5 text-slate-500">
+                      Up to 10 files. Gmail: 18 MB total. Microsoft 365: 3 MB total.
+                    </p>
+
+                  </div>
+
+
+                  {!activeDraftId && (
+
+                    <label className="inline-flex cursor-pointer items-center justify-center rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50">
+
+                      Add files
+
+                      <input
+                        type="file"
+                        multiple
+                        onChange={
+                          handleComposeFiles
+                        }
+                        className="hidden"
+                      />
+
+                    </label>
+
+                  )}
+
+                </div>
+
+
+                {activeDraftId && (
+
+                  <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[11px] leading-5 text-amber-800">
+                    Persistent attachments in saved drafts are not available yet. Existing drafts can still be sent normally.
+                  </p>
+
+                )}
+
+
+                {forwardSourceId && (
+
+                  <p className="mt-3 text-[11px] leading-5 text-slate-500">
+                    Files added here will be sent. Original attachments from the forwarded message are not copied automatically.
+                  </p>
+
+                )}
+
+
+                {composeFiles.length > 0 && (
+
+                  <div className="mt-3 space-y-2">
+
+                    {composeFiles.map(
+                      (
+                        file,
+                        index
+                      ) => (
+
+                        <div
+                          key={`${file.name}-${file.size}-${index}`}
+                          className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5"
+                        >
+
+                          <div className="min-w-0">
+
+                            <p className="truncate text-xs font-semibold text-slate-700">
+                              {file.name}
+                            </p>
+
+                            <p className="mt-0.5 text-[10px] text-slate-400">
+                              {formatComposeFileSize(
+                                file.size
+                              )}
+                            </p>
+
+                          </div>
+
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              removeComposeFile(
+                                index
+                              )
+                            }
+                            className="shrink-0 rounded-lg px-2 py-1 text-[10px] font-semibold text-rose-600 hover:bg-rose-50"
+                          >
+                            Remove
+                          </button>
+
+                        </div>
+
+                      )
+                    )}
+
+                  </div>
+
+                )}
+
+              </div>
+
 
             </div>
 

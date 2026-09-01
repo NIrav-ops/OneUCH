@@ -211,6 +211,29 @@ class MailAdoptionService:
                     and account.is_active
                 ),
 
+            "signature_enabled":
+                bool(
+                    account
+                    and account.signature_enabled
+                ),
+
+            "signature_text":
+                (
+                    account.signature_text
+                    if account
+                    else ""
+                ),
+
+            "signature_configured":
+                bool(
+                    account
+                    and account.signature_enabled
+                    and (
+                        account.signature_text
+                        or ""
+                    ).strip()
+                ),
+
             "oauth_present":
                 token is not None,
 

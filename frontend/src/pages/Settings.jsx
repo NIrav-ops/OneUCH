@@ -273,6 +273,11 @@ export default function Settings() {
     setActiveAction,
   ] = useState("");
 
+  const [
+    signatureDrafts,
+    setSignatureDrafts,
+  ] = useState({});
+
 
   const applyPayload =
     useCallback(
@@ -357,6 +362,77 @@ export default function Settings() {
   useEffect(() => {
     loadStatus();
   }, [loadStatus]);
+
+
+  useEffect(
+    () => {
+
+      setSignatureDrafts(
+        (current) => {
+
+          const next = {
+            ...current,
+          };
+
+
+          for (
+            const provider
+            of providers
+          ) {
+
+            if (
+              !provider.account_id
+            ) {
+              continue;
+            }
+
+
+            const key =
+              String(
+                provider.account_id
+              );
+
+
+            if (
+              Object.prototype
+                .hasOwnProperty
+                .call(
+                  current,
+                  key
+                )
+            ) {
+              continue;
+            }
+
+
+            next[
+              key
+            ] = {
+              enabled:
+                Boolean(
+                  provider
+                    .signature_enabled
+                ),
+
+              text:
+                provider
+                  .signature_text ||
+                "",
+            };
+
+          }
+
+
+          return next;
+
+        }
+      );
+
+    },
+    [
+      providers,
+    ]
+  );
 
 
   const connectMailbox =
@@ -719,6 +795,133 @@ export default function Settings() {
       } finally {
         setActiveAction("");
       }
+    };
+
+
+  const saveMailboxSignature =
+    async (
+      provider
+    ) => {
+
+      if (
+        !provider.account_id
+      ) {
+        return;
+      }
+
+
+      const key =
+        String(
+          provider.account_id
+        );
+
+
+      const draft =
+        signatureDrafts[
+          key
+        ] || {
+          enabled:
+            Boolean(
+              provider
+                .signature_enabled
+            ),
+
+          text:
+            provider
+              .signature_text ||
+            "",
+        };
+
+
+      const actionKey =
+        `signature:${provider.account_id}`;
+
+
+      try {
+
+        setError("");
+        setNotice("");
+
+        setActiveAction(
+          actionKey
+        );
+
+
+        const response =
+          await axios.patch(
+            (
+              "/api/email/"
+              +
+              "mailbox-signature/"
+              +
+              provider.account_id
+              +
+              "/"
+            ),
+            {
+              signature_enabled:
+                Boolean(
+                  draft.enabled
+                ),
+
+              signature_text:
+                draft.text || "",
+            }
+          );
+
+
+        setSignatureDrafts(
+          (current) => ({
+            ...current,
+
+            [key]: {
+              enabled:
+                Boolean(
+                  response.data
+                    ?.signature_enabled
+                ),
+
+              text:
+                response.data
+                  ?.signature_text ||
+                "",
+            },
+          })
+        );
+
+
+        setNotice(
+          `${provider.label} outgoing signature saved.`
+        );
+
+
+        await loadStatus({
+          background:
+            true,
+        });
+
+      } catch (err) {
+
+        console.error(
+          "Mailbox signature error:",
+          err
+        );
+
+
+        setError(
+          err.response?.data
+            ?.detail ||
+          "Unable to save the mailbox signature."
+        );
+
+      } finally {
+
+        setActiveAction(
+          ""
+        );
+
+      }
+
     };
 
 
@@ -1194,6 +1397,170 @@ export default function Settings() {
                           </p>
 
                         </div>
+                      )}
+
+
+                      {provider.connected &&
+                        provider.account_id && (
+
+                        <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+
+                            <div>
+
+                              <p className="text-sm font-semibold text-slate-900">
+                                One UCH outgoing signature
+                              </p>
+
+                              <p className="mt-1 max-w-xl text-xs leading-5 text-slate-500">
+                                This signature is controlled by One UCH and is appended deterministically when mail is sent from this mailbox.
+                              </p>
+
+                            </div>
+
+
+                            <label className="flex shrink-0 items-center gap-2 text-xs font-semibold text-slate-700">
+
+                              <input
+                                type="checkbox"
+                                checked={
+                                  Boolean(
+                                    (
+                                      signatureDrafts[
+                                        String(
+                                          provider.account_id
+                                        )
+                                      ]
+                                      ?.enabled
+                                    )
+                                    ??
+                                    provider.signature_enabled
+                                  )
+                                }
+                                onChange={
+                                  (event) => {
+
+                                    const key =
+                                      String(
+                                        provider.account_id
+                                      );
+
+
+                                    setSignatureDrafts(
+                                      (current) => ({
+                                        ...current,
+
+                                        [key]: {
+                                          enabled:
+                                            event.target.checked,
+
+                                          text:
+                                            current[
+                                              key
+                                            ]?.text
+                                            ??
+                                            provider.signature_text
+                                            ??
+                                            "",
+                                        },
+                                      })
+                                    );
+
+                                  }
+                                }
+                                className="h-4 w-4 rounded border-slate-300"
+                              />
+
+                              Use signature
+
+                            </label>
+
+                          </div>
+
+
+                          <textarea
+                            rows={5}
+                            value={
+                              signatureDrafts[
+                                String(
+                                  provider.account_id
+                                )
+                              ]?.text
+                              ??
+                              provider.signature_text
+                              ??
+                              ""
+                            }
+                            onChange={
+                              (event) => {
+
+                                const key =
+                                  String(
+                                    provider.account_id
+                                  );
+
+
+                                setSignatureDrafts(
+                                  (current) => ({
+                                    ...current,
+
+                                    [key]: {
+                                      enabled:
+                                        current[
+                                          key
+                                        ]?.enabled
+                                        ??
+                                        Boolean(
+                                          provider.signature_enabled
+                                        ),
+
+                                      text:
+                                        event.target.value,
+                                    },
+                                  })
+                                );
+
+                              }
+                            }
+                            placeholder="Kind regards, Name, Company, Contact details"
+                            className="mt-4 w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm leading-6 text-slate-700 outline-none placeholder:text-slate-400 focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
+                          />
+
+
+                          <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+
+                            <p className="text-[11px] leading-5 text-slate-500">
+                              Applies to New, Reply, Reply All, Forward and Draft ? Send. Native Gmail/Outlook client signatures are not assumed by the API send path.
+                            </p>
+
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                saveMailboxSignature(
+                                  provider
+                                )
+                              }
+                              disabled={
+                                Boolean(
+                                  activeAction
+                                )
+                              }
+                              className="shrink-0 rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {
+                                activeAction ===
+                                `signature:${provider.account_id}`
+                                  ? "Saving..."
+                                  : "Save signature"
+                              }
+                            </button>
+
+                          </div>
+
+                        </div>
+
                       )}
 
 

@@ -32,6 +32,33 @@ class DraftSaveAPIView(
         request,
     ):
 
+        if (
+            getattr(
+                request,
+                "FILES",
+                None,
+            )
+            and
+            request.FILES.getlist(
+                "attachments"
+            )
+        ):
+
+            return Response(
+                {
+                    "error": (
+                        "Draft attachment persistence "
+                        "is not available yet. "
+                        "Remove attachments before saving "
+                        "this draft."
+                    )
+                },
+                status=(
+                    status.HTTP_400_BAD_REQUEST
+                ),
+            )
+
+
         conversation_id = (
             request.data.get(
                 "conversation_id"

@@ -80,6 +80,19 @@ class EmailAccount(models.Model):
         blank=True,
     )
 
+    # One UCH-managed deterministic outbound signature.
+    #
+    # Provider-native Gmail / Outlook client signatures are
+    # intentionally not assumed by the API send path.
+    signature_enabled = models.BooleanField(
+        default=False,
+    )
+
+    signature_text = models.TextField(
+        blank=True,
+        default="",
+    )
+
     is_active = models.BooleanField(
         default=True
     )

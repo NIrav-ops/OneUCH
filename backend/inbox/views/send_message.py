@@ -12,6 +12,18 @@ from googleapiclient.discovery import build
 
 from email.mime.text import MIMEText
 
+from email.mime.multipart import (
+    MIMEMultipart,
+)
+
+from email.mime.base import (
+    MIMEBase,
+)
+
+from email import (
+    encoders,
+)
+
 import base64
 import requests
 
@@ -24,6 +36,15 @@ from inbox.services.recipient_payload import (
     graph_recipient_payload,
     mime_recipient_header,
     normalize_recipient_buckets,
+)
+
+from email_accounts.services.signatures import (
+    apply_account_signature,
+)
+
+from inbox.services.outbound_attachments import (
+    attachment_metadata,
+    prepare_outbound_attachments,
 )
 
 from googleapis.utils import (
@@ -62,6 +83,7 @@ class UnifiedSendMessageAPIView(
         *,
         request,
         data,
+        signature_already_applied=False,
     ):
 
         try:
@@ -189,6 +211,33 @@ class UnifiedSendMessageAPIView(
             )
 
 
+            try:
+
+                outbound_attachments = (
+                    prepare_outbound_attachments(
+                        request=request,
+                        account=account,
+                    )
+                )
+
+            except ValueError as exc:
+
+                return Response(
+                    {
+                        "error":
+                            str(exc)
+                    },
+                    status=400,
+                )
+
+
+            outbound_attachment_meta = (
+                attachment_metadata(
+                    outbound_attachments
+                )
+            )
+
+
             sender_email = (
                 str(
                     account.email_address
@@ -205,6 +254,16 @@ class UnifiedSendMessageAPIView(
                 "email":
                     sender_email,
             }
+
+
+            if not signature_already_applied:
+
+                body = (
+                    apply_account_signature(
+                        account=account,
+                        body=body,
+                    )
+                )
 
 
             # =========================
@@ -304,9 +363,84 @@ class UnifiedSendMessageAPIView(
                 )
 
 
-                message = MIMEText(
-                    body
-                )
+                if outbound_attachments:
+
+                    message = (
+                        MIMEMultipart()
+                    )
+
+                    message.attach(
+                        MIMEText(
+                            body
+                        )
+                    )
+
+
+                    for item in (
+                        outbound_attachments
+                    ):
+
+                        content_type = (
+                            item[
+                                "content_type"
+                            ]
+                        )
+
+
+                        if "/" in content_type:
+
+                            main_type, sub_type = (
+                                content_type.split(
+                                    "/",
+                                    1,
+                                )
+                            )
+
+                        else:
+
+                            main_type = (
+                                "application"
+                            )
+
+                            sub_type = (
+                                "octet-stream"
+                            )
+
+
+                        part = MIMEBase(
+                            main_type,
+                            sub_type,
+                        )
+
+                        part.set_payload(
+                            item[
+                                "content"
+                            ]
+                        )
+
+                        encoders.encode_base64(
+                            part
+                        )
+
+                        part.add_header(
+                            "Content-Disposition",
+                            "attachment",
+                            filename=(
+                                item[
+                                    "filename"
+                                ]
+                            ),
+                        )
+
+                        message.attach(
+                            part
+                        )
+
+                else:
+
+                    message = MIMEText(
+                        body
+                    )
 
 
                 message[
@@ -386,6 +520,40 @@ class UnifiedSendMessageAPIView(
                 )
 
 
+                graph_attachments = [
+                    {
+                        "@odata.type":
+                            "#microsoft.graph.fileAttachment",
+
+                        "name":
+                            item[
+                                "filename"
+                            ],
+
+                        "contentType":
+                            item[
+                                "content_type"
+                            ],
+
+                        "contentBytes":
+                            (
+                                base64
+                                .b64encode(
+                                    item[
+                                        "content"
+                                    ]
+                                )
+                                .decode(
+                                    "ascii"
+                                )
+                            ),
+                    }
+
+                    for item
+                    in outbound_attachments
+                ]
+
+
                 graph_message = {
                     "subject":
                         subject,
@@ -413,6 +581,15 @@ class UnifiedSendMessageAPIView(
                             bcc_recipients
                         ),
                 }
+
+
+                if graph_attachments:
+
+                    graph_message[
+                        "attachments"
+                    ] = (
+                        graph_attachments
+                    )
 
 
                 response = requests.post(
@@ -522,6 +699,9 @@ class UnifiedSendMessageAPIView(
                         "No Subject"
                     ),
                     body=body,
+                    attachment_meta=(
+                        outbound_attachment_meta
+                    ),
                     is_read=True,
                     email_account=(
                         account
@@ -593,6 +773,11 @@ class UnifiedSendMessageAPIView(
 
                     "message_id":
                         message_obj.id,
+
+                    "attachment_count":
+                        len(
+                            outbound_attachments
+                        ),
                 }
             )
 

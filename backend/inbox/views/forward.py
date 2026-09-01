@@ -18,6 +18,10 @@ from inbox.views.send_message import (
     UnifiedSendMessageAPIView,
 )
 
+from email_accounts.services.signatures import (
+    apply_account_signature,
+)
+
 
 def _forward_subject(
     source_subject,
@@ -265,6 +269,19 @@ class ForwardMessageAPIView(
         )
 
 
+        signed_note = (
+            apply_account_signature(
+                account=account,
+                body=(
+                    request.data.get(
+                        "body",
+                        "",
+                    )
+                ),
+            )
+        )
+
+
         payload = {
             "to":
                 request.data.get(
@@ -289,12 +306,7 @@ class ForwardMessageAPIView(
             "body":
                 _forwarded_body(
                     source=source,
-                    note=(
-                        request.data.get(
-                            "body",
-                            "",
-                        )
-                    ),
+                    note=signed_note,
                 ),
 
             # A forward must use the mailbox that owns
@@ -309,6 +321,7 @@ class ForwardMessageAPIView(
             .send_with_data(
                 request=request,
                 data=payload,
+                signature_already_applied=True,
             )
         )
 

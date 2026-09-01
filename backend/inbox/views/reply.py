@@ -22,6 +22,10 @@ from email_accounts.models import (
     EmailAccount,
 )
 
+from email_accounts.services.signatures import (
+    apply_account_signature,
+)
+
 from inbox.models import (
     Conversation,
     InboxMessage,
@@ -262,6 +266,14 @@ class ReplyConversationAPIView(
                 },
                 status=400,
             )
+
+
+        body = (
+            apply_account_signature(
+                account=email_account,
+                body=body,
+            )
+        )
 
 
         subject = (
