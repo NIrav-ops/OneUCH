@@ -6,30 +6,37 @@ Purpose
 Build KnowledgeEvidence and KnowledgeFacts for
 historical InboxMessage records.
 
-This service is reusable from:
+This service NEVER downloads email again.
 
-- Django Management Commands
-- Celery
-- REST APIs
-- Admin Actions
-- Tenant onboarding
-- Disaster recovery
-
-It NEVER downloads emails again.
-
-It processes existing InboxMessage records.
+It processes existing governed InboxMessage records.
 """
 
-from unittest import result, runner
+import logging
 
-from backend import settings
-from inbox.models import InboxMessage
+from django.conf import (
+    settings,
+)
 
-from knowledge.models import KnowledgeEvidence
-from knowledge.services.message_processor import MessageProcessor
-from knowledge.services.job_runner import JobRunner
-from knowledge.models import KnowledgeJob
-from django.utils import timezone
+from django.utils import (
+    timezone,
+)
+
+from inbox.models import (
+    InboxMessage,
+)
+
+from knowledge.models import (
+    KnowledgeEvidence,
+    KnowledgeJob,
+)
+
+from knowledge.services.message_processor import (
+    MessageProcessor,
+)
+
+from knowledge.services.job_runner import (
+    JobRunner,
+)
 
 from knowledge.services.logger import (
     log_info,
@@ -39,9 +46,213 @@ from knowledge.services.logger import (
 
 class KnowledgeBackfillService:
 
-    def __init__(self):
+    def __init__(
+        self,
+    ):
 
-        self.processor = MessageProcessor()
+        self.processor = (
+            MessageProcessor()
+        )
+
+
+    @staticmethod
+    def _coverage_rate(
+        *,
+        matched,
+        unmatched,
+    ):
+
+        total = (
+            matched
+            +
+            unmatched
+        )
+
+        if total == 0:
+            return 100.0
+
+        return round(
+            (
+                matched
+                /
+                total
+            )
+            *
+            100,
+            2,
+        )
+
+
+    @staticmethod
+    def _queryset(
+        *,
+        organization=None,
+        user=None,
+        limit=None,
+    ):
+
+        queryset = (
+            InboxMessage.objects
+            .select_related(
+                "conversation",
+                "organization",
+                "user",
+            )
+            .filter(
+                is_draft=False
+            )
+        )
+
+        if organization:
+
+            queryset = (
+                queryset.filter(
+                    organization=(
+                        organization
+                    )
+                )
+            )
+
+        if user:
+
+            queryset = (
+                queryset.filter(
+                    user=user
+                )
+            )
+
+        queryset = (
+            queryset.order_by(
+                "received_at",
+                "id",
+            )
+        )
+
+        if limit:
+
+            queryset = (
+                queryset[
+                    :limit
+                ]
+            )
+
+        return queryset
+
+
+    def preview(
+        self,
+        *,
+        organization=None,
+        user=None,
+        limit=None,
+    ):
+        """
+        Read-only resolution preview.
+
+        Creates no KnowledgeJob, KnowledgeEvidence,
+        KnowledgeFact or relationship rows.
+        """
+
+        queryset = (
+            self._queryset(
+                organization=organization,
+                user=user,
+                limit=limit,
+            )
+        )
+
+        matched = 0
+
+        unmatched = 0
+
+        ambiguous = 0
+
+
+        knowledge_logger = (
+            logging.getLogger(
+                "knowledge"
+            )
+        )
+
+        previous_level = (
+            knowledge_logger.level
+        )
+
+        knowledge_logger.setLevel(
+            logging.WARNING
+        )
+
+
+        try:
+
+            for message in (
+                queryset.iterator()
+            ):
+
+                resolution = (
+                    self.processor
+                    .resolve_message(
+                        organization=(
+                            message.organization
+                        ),
+                        message=message,
+                        sender=(
+                            message.sender
+                        ),
+                        subject=(
+                            message.subject
+                        ),
+                        body=(
+                            message.body
+                        ),
+                    )
+                )
+
+                if resolution[
+                    "matched"
+                ]:
+
+                    matched += 1
+
+                else:
+
+                    unmatched += 1
+
+                    if resolution.get(
+                        "ambiguous",
+                        False,
+                    ):
+
+                        ambiguous += 1
+
+
+        finally:
+
+            knowledge_logger.setLevel(
+                previous_level
+            )
+
+
+        return {
+            "total":
+                queryset.count(),
+
+            "matched":
+                matched,
+
+            "unmatched":
+                unmatched,
+
+            "ambiguous":
+                ambiguous,
+
+            "coverage_rate":
+                self._coverage_rate(
+                    matched=matched,
+                    unmatched=unmatched,
+                ),
+        }
+
 
     def process(
         self,
@@ -52,72 +263,98 @@ class KnowledgeBackfillService:
         force=False,
     ):
 
-        queryset = InboxMessage.objects.select_related(
-            "conversation",
-            "organization",
-            "user",
+        queryset = (
+            self._queryset(
+                organization=organization,
+                user=user,
+                limit=limit,
+            )
         )
 
-        if organization:
 
-            queryset = queryset.filter(
-                organization=organization
+        runner = JobRunner(
+            queryset.count(),
+            checkpoint_interval=(
+                getattr(
+                    settings,
+                    "KNOWLEDGE_JOB_CHECKPOINT_INTERVAL",
+                    25,
+                )
+            ),
+        )
+
+
+        job = (
+            KnowledgeJob.objects.create(
+                organization=organization,
+                user=user,
+                job_type="BACKFILL",
+                status="RUNNING",
+            )
+        )
+
+
+        matched = 0
+
+        unmatched = 0
+
+        ambiguous = 0
+
+
+        def coverage_rate():
+            return (
+                self._coverage_rate(
+                    matched=matched,
+                    unmatched=unmatched,
+                )
             )
 
-        if user:
 
-            queryset = queryset.filter(
-                user=user
+        def save_checkpoint():
+
+            job.processed = (
+                runner.processed
             )
 
-        queryset = queryset.order_by("received_at")
+            job.skipped = (
+                runner.skipped
+            )
 
-        if limit:
+            job.failed = (
+                runner.failed
+            )
 
-            queryset = queryset[:limit]
+            job.metadata = {
+                "matched":
+                    matched,
 
-        runner = JobRunner(
-            queryset.count(),
-            checkpoint_interval=getattr(
-                settings,
-                "KNOWLEDGE_JOB_CHECKPOINT_INTERVAL",
-                25,
-            ),
-        )
+                "unmatched":
+                    unmatched,
 
-        runner = JobRunner(
-            queryset.count(),
-            checkpoint_interval=getattr(
-                settings,
-                "KNOWLEDGE_JOB_CHECKPOINT_INTERVAL",
-                25,
-            ),
-        )
+                "ambiguous":
+                    ambiguous,
 
-        runner = JobRunner(
-            queryset.count(),
-            checkpoint_interval=getattr(
-                settings,
-                "KNOWLEDGE_JOB_CHECKPOINT_INTERVAL",
-                25,
-            ),
-        )
+                "coverage_rate":
+                    coverage_rate(),
+            }
 
-        # ----------------------------------------
-        # Create Enterprise Job
-        # ----------------------------------------
+            job.save(
+                update_fields=[
+                    "processed",
+                    "skipped",
+                    "failed",
+                    "metadata",
+                ]
+            )
 
-        job = KnowledgeJob.objects.create(
-            organization=organization,
-            user=user,
-            job_type="BACKFILL",
-            status="RUNNING",
-        )
+            runner.checkpoint()
+
 
         log_info(
             "Knowledge backfill started",
             total=queryset.count(),
-        )    
+        )
+
 
         for message in queryset:
 
@@ -125,104 +362,174 @@ class KnowledgeBackfillService:
 
                 if not force:
 
-                    exists = KnowledgeEvidence.objects.filter(
-                        message=message
-                    ).exists()
+                    exists = (
+                        KnowledgeEvidence.objects
+                        .filter(
+                            message=message
+                        )
+                        .exists()
+                    )
 
                     if exists:
 
                         runner.skip()
-                        if runner.should_checkpoint:
 
-                            job.processed = runner.processed
-                            job.skipped = runner.skipped
-                            job.failed = runner.failed
+                        if (
+                            runner.should_checkpoint
+                        ):
 
-                            job.save(
-                                update_fields=[
-                                    "processed",
-                                    "skipped",
-                                    "failed",
-                                ]
-                            )
-
-                            runner.checkpoint()
+                            save_checkpoint()
 
                         continue
 
-                self.processor.process_message(
-                    organization=message.organization,
-                    message=message,
-                    sender=message.sender,
-                    subject=message.subject,
-                    body=message.body,
-                    source_channel=message.platform,
+
+                result = (
+                    self.processor
+                    .process_message(
+                        organization=(
+                            message.organization
+                        ),
+                        message=message,
+                        sender=(
+                            message.sender
+                        ),
+                        subject=(
+                            message.subject
+                        ),
+                        body=(
+                            message.body
+                        ),
+                        source_channel=(
+                            message.platform
+                        ),
+                    )
                 )
+
+
+                if result[
+                    "matched"
+                ]:
+
+                    matched += 1
+
+                else:
+
+                    unmatched += 1
+
+                    if result.get(
+                        "ambiguous",
+                        False,
+                    ):
+
+                        ambiguous += 1
+
 
                 runner.success()
 
-                if runner.should_checkpoint:
 
-                    job.processed = runner.processed
-                    job.skipped = runner.skipped
-                    job.failed = runner.failed
+                if (
+                    runner.should_checkpoint
+                ):
 
-                    job.save(
-                        update_fields=[
-                            "processed",
-                            "skipped",
-                            "failed",
-                        ]
-                    )
+                    save_checkpoint()
 
-                    runner.checkpoint()
 
             except Exception as exc:
 
                 log_error(
                     "Knowledge backfill failed",
-                    message_id=message.id,
-                    exception=str(exc),
+                    message_id=(
+                        message.id
+                    ),
+                    exception=(
+                        str(
+                            exc
+                        )
+                    ),
                 )
 
                 runner.failure()
-                if runner.should_checkpoint:
 
-                    job.processed = runner.processed
-                    job.skipped = runner.skipped
-                    job.failed = runner.failed
+                if (
+                    runner.should_checkpoint
+                ):
 
-                    job.save(
-                        update_fields=[
-                            "processed",
-                            "skipped",
-                            "failed",
-                        ]
-                    )
+                    save_checkpoint()
 
-                    runner.checkpoint()
 
-        result, metrics = runner.finish()
+        result, metrics = (
+            runner.finish()
+        )
+
+
+        final_coverage = (
+            coverage_rate()
+        )
+
 
         log_info(
             "Knowledge backfill completed",
-            processed=result.processed,
-            skipped=result.skipped,
-            failed=result.failed,
-            duration=result.elapsed_seconds,
+            processed=(
+                result.processed
+            ),
+            matched=matched,
+            unmatched=unmatched,
+            ambiguous=ambiguous,
+            skipped=(
+                result.skipped
+            ),
+            failed=(
+                result.failed
+            ),
+            coverage_rate=(
+                final_coverage
+            ),
+            duration=(
+                result.elapsed_seconds
+            ),
         )
 
-        job.status = "COMPLETED"
 
-        job.duration_seconds = result.elapsed_seconds
+        job.status = (
+            "FAILED"
+            if result.failed
+            else "COMPLETED"
+        )
 
-        job.completed_at = timezone.now()
+        job.duration_seconds = (
+            result.elapsed_seconds
+        )
 
-        job.processed = result.processed
+        job.completed_at = (
+            timezone.now()
+        )
 
-        job.skipped = result.skipped
+        job.processed = (
+            result.processed
+        )
 
-        job.failed = result.failed
+        job.skipped = (
+            result.skipped
+        )
+
+        job.failed = (
+            result.failed
+        )
+
+        job.metadata = {
+            "matched":
+                matched,
+
+            "unmatched":
+                unmatched,
+
+            "ambiguous":
+                ambiguous,
+
+            "coverage_rate":
+                final_coverage,
+        }
+
 
         job.save(
             update_fields=[
@@ -232,15 +539,45 @@ class KnowledgeBackfillService:
                 "processed",
                 "skipped",
                 "failed",
+                "metadata",
             ]
         )
 
+
         return {
-            "processed": result.processed,
-            "skipped": result.skipped,
-            "failed": result.failed,
-            "total": result.total,
-            "elapsed": result.elapsed_seconds,
-            "success_rate": metrics.success_rate,
-            "throughput": metrics.throughput,
+            "processed":
+                result.processed,
+
+            "matched":
+                matched,
+
+            "unmatched":
+                unmatched,
+
+            "ambiguous":
+                ambiguous,
+
+            "skipped":
+                result.skipped,
+
+            "failed":
+                result.failed,
+
+            "total":
+                result.total,
+
+            "elapsed":
+                result.elapsed_seconds,
+
+            "success_rate":
+                metrics.success_rate,
+
+            "throughput":
+                metrics.throughput,
+
+            "coverage_rate":
+                final_coverage,
+
+            "job_status":
+                job.status,
         }

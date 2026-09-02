@@ -160,13 +160,29 @@ class BusinessObjectResolver:
                 candidates.append(
                     {
                         "business_object": obj,
-                        "confidence": confidence,
+
+                        # Keep the unbounded scoring value only
+                        # for deterministic candidate ranking.
+                        "resolution_score": confidence,
+
+                        # Public/persisted confidence is always
+                        # bounded to the Knowledge contract.
+                        "confidence": min(
+                            confidence,
+                            100,
+                        ),
+
                         "reasons": reasons,
                     }
                 )
 
         candidates.sort(
-            key=lambda x: x["confidence"],
+            key=lambda x: (
+                x.get(
+                    "resolution_score",
+                    x["confidence"],
+                )
+            ),
             reverse=True,
         )
 
@@ -176,10 +192,6 @@ class BusinessObjectResolver:
                 "BusinessObject resolved",
                 business_object=candidates[0]["business_object"].id,
                 confidence=candidates[0]["confidence"],
-            )
-
-            log_info(
-                "BusinessObject resolution failed"
             )
 
             best_match = candidates[0]
@@ -195,6 +207,10 @@ class BusinessObjectResolver:
                 "candidates": candidates,
                 "related_objects": related_objects,
             }
+
+        log_info(
+            "BusinessObject resolution failed"
+        )
 
         return {
             "matched": False,
