@@ -4,6 +4,8 @@ import axios from "../axiosConfig";
 export default function ApprovalCenter() {
   const [approvals, setApprovals] = useState([]);
   const [teamMembers, setTeamMembers] = useState([]);
+  const [aiApprovalCandidates, setAiApprovalCandidates] = useState([]);
+  const [candidateBusyId, setCandidateBusyId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
@@ -17,16 +19,21 @@ export default function ApprovalCenter() {
       setError("");
       setRefreshing(true);
 
-      const [approvalsRes, teamMembersRes] = await Promise.all([
+      const [approvalsRes, teamMembersRes, candidatesRes] = await Promise.all([
         axios.get("/api/approvals/"),
         axios.get("/api/approvals/team-members/"),
+        axios.get("/api/approvals/ai-candidates/"),
       ]);
 
       const approvalData = Array.isArray(approvalsRes.data) ? approvalsRes.data : [];
       const membersData = Array.isArray(teamMembersRes.data) ? teamMembersRes.data : [];
+      const candidateData = Array.isArray(candidatesRes.data)
+        ? candidatesRes.data
+        : [];
 
       setApprovals(approvalData);
       setTeamMembers(membersData);
+      setAiApprovalCandidates(candidateData);
 
       const initialNotes = {};
       const initialAssigned = {};
@@ -117,6 +124,27 @@ export default function ApprovalCenter() {
     }
   };
 
+
+  const reviewAICandidate = async (candidateId, decision) => {
+    try {
+      setCandidateBusyId(candidateId);
+
+      await axios.post(
+        `/api/approvals/ai-candidates/${candidateId}/${decision}/`
+      );
+
+      await fetchData();
+    } catch (err) {
+      console.error("AI Approval review failed:", err);
+      alert(
+        err.response?.data?.error ||
+          "Could not review the AI Approval suggestion."
+      );
+    } finally {
+      setCandidateBusyId(null);
+    }
+  };
+
   return (
     <div className="min-h-full bg-slate-50/70 px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
 
@@ -190,6 +218,149 @@ export default function ApprovalCenter() {
 
         )}
 
+
+
+        {/* ===================================================
+            AI HUMAN REVIEW QUEUE
+        ==================================================== */}
+
+        <section className="mt-5 overflow-hidden rounded-[26px] border border-violet-200 bg-white shadow-sm">
+          <div className="flex flex-col gap-3 border-b border-violet-100 bg-violet-50/60 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-violet-600">
+                  Human review gate
+                </p>
+                <span className="rounded-full border border-violet-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-violet-700">
+                  AI does not authorize
+                </span>
+              </div>
+              <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-950">
+                AI Approval suggestions
+              </h2>
+              <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-500">
+                AI suggestions remain outside the Approval queue until a human explicitly promotes or rejects them.
+              </p>
+            </div>
+            <span className="w-fit rounded-full bg-violet-100 px-3 py-1 text-xs font-semibold text-violet-700">
+              {aiApprovalCandidates.length} awaiting review
+            </span>
+          </div>
+
+          {aiApprovalCandidates.length === 0 ? (
+            <div className="px-6 py-8 text-center">
+              <p className="text-sm font-semibold text-slate-700">
+                No AI Approval suggestions awaiting review
+              </p>
+              <p className="mt-1 text-xs text-slate-400">
+                Suggestions will appear here only after governed AI calibration is enabled.
+              </p>
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {aiApprovalCandidates.map((candidate) => {
+                const busy = candidateBusyId === candidate.id;
+
+                return (
+                  <article key={candidate.id} className="px-5 py-5 sm:px-6">
+                    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-violet-700">
+                            Needs AI review
+                          </span>
+                          <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold text-slate-500">
+                            Confidence {candidate.confidence_score ?? 0}%
+                          </span>
+                        </div>
+
+                        <p className="mt-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                          Source message
+                        </p>
+                        <p className="mt-1 text-xs font-semibold text-slate-600">
+                          {candidate.subject || "No Subject"}
+                        </p>
+
+                        <h3 className="mt-3 text-base font-semibold tracking-tight text-slate-950">
+                          {candidate.title || "Untitled AI Approval suggestion"}
+                        </h3>
+
+                        {candidate.description && (
+                          <p className="mt-2 text-sm leading-6 text-slate-600">
+                            {candidate.description}
+                          </p>
+                        )}
+
+                        {candidate.evidence && (
+                          <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                              Communication evidence
+                            </p>
+                            <p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-slate-600">
+                              {candidate.evidence}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+
+                      <aside className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                          Why One UCH suggested this
+                        </p>
+                        <p className="mt-2 text-xs leading-5 text-slate-600">
+                          {candidate.reason || "No additional AI rationale supplied."}
+                        </p>
+
+                        {candidate.approver_reference && (
+                          <div className="mt-4 rounded-xl border border-slate-200 bg-white p-3">
+                            <p className="text-[10px] font-semibold uppercase tracking-[0.13em] text-slate-400">
+                              Suggested approver reference
+                            </p>
+                            <p className="mt-1 text-xs font-semibold text-slate-700">
+                              {candidate.approver_reference}
+                            </p>
+                            <p className="mt-1 text-[10px] leading-4 text-slate-400">
+                              Not auto-assigned. Reviewer ownership remains explicit after promotion.
+                            </p>
+                          </div>
+                        )}
+
+                        <div className="mt-4 flex flex-col gap-2">
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => reviewAICandidate(candidate.id, "promote")}
+                            className="rounded-xl bg-slate-950 px-3.5 py-2.5 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {busy ? "Processing..." : "Add to Approval Queue"}
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => reviewAICandidate(candidate.id, "reject")}
+                            className="rounded-xl border border-rose-200 bg-white px-3.5 py-2.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Reject suggestion
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => window.location.assign(candidate.open_url || "/inbox")}
+                            className="rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Open source communication
+                          </button>
+                        </div>
+                      </aside>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
 
         {/* ===================================================
             DECISION KPI CARDS
