@@ -45,6 +45,17 @@ from inbox.services.persistent_outbound_attachments import (
     persist_outbound_attachments,
 )
 
+from inbox.services.outbound_idempotency import (
+    OutboundIdempotencyConflict,
+    OutboundIdempotencyUnavailable,
+    abandon_outbound_intent,
+    bind_outbound_message,
+    build_outbound_fingerprint,
+    claim_outbound_intent,
+    replay_outbound_intent,
+    resolve_outbound_idempotency_key,
+)
+
 from inbox.tasks import (
     send_email_task,
 )
@@ -343,6 +354,135 @@ class ReplyConversationAPIView(
         }
 
 
+        try:
+
+            outbound_idempotency_key = (
+                resolve_outbound_idempotency_key(
+                    request=request
+                )
+            )
+
+        except OutboundIdempotencyConflict as exc:
+
+            return Response(
+                {
+                    "error":
+                        str(exc)
+                },
+                status=409,
+            )
+
+
+        if outbound_idempotency_key:
+
+            fingerprint = (
+                build_outbound_fingerprint(
+                    operation=(
+                        "reply_all"
+                        if mode
+                        ==
+                        "reply_all"
+                        else
+                        "reply"
+                    ),
+                    payload={
+                        # Semantic idempotency must describe the
+                        # user's request, not mutable conversation
+                        # state. The first queued Reply itself
+                        # becomes the newest conversation message,
+                        # so latest_message / derived recipient /
+                        # provider identity cannot participate in
+                        # the duplicate-send fingerprint.
+                        "account_id":
+                            email_account.id,
+
+                        "conversation_id":
+                            conversation.id,
+
+                        "mode":
+                            mode,
+
+                        "body":
+                            str(
+                                request.data.get(
+                                    "body"
+                                )
+                                or ""
+                            ),
+                    },
+                    attachments=(
+                        outbound_attachments
+                    ),
+                )
+            )
+
+
+            try:
+
+                (
+                    intent,
+                    intent_created,
+                ) = (
+                    claim_outbound_intent(
+                        user_id=(
+                            request.user.id
+                        ),
+                        idempotency_key=(
+                            outbound_idempotency_key
+                        ),
+                        operation=(
+                            "reply_all"
+                            if mode
+                            ==
+                            "reply_all"
+                            else
+                            "reply"
+                        ),
+                        fingerprint=(
+                            fingerprint
+                        ),
+                    )
+                )
+
+            except OutboundIdempotencyConflict as exc:
+
+                return Response(
+                    {
+                        "error":
+                            str(exc)
+                    },
+                    status=409,
+                )
+
+            except OutboundIdempotencyUnavailable as exc:
+
+                return Response(
+                    {
+                        "error":
+                            str(exc)
+                    },
+                    status=503,
+                )
+
+
+            if not intent_created:
+
+                (
+                    replay_payload,
+                    replay_status,
+                ) = (
+                    replay_outbound_intent(
+                        intent
+                    )
+                )
+
+
+                return Response(
+                    replay_payload,
+                    status=replay_status,
+                )
+
+
         reply_message = (
             InboxMessage.objects
             .create(
@@ -407,6 +547,56 @@ class ReplyConversationAPIView(
         )
 
 
+        queued_payload = {
+            "status":
+                "Reply queued successfully",
+
+            "mode":
+                mode,
+
+            "attachment_count":
+                len(
+                    outbound_attachments
+                ),
+
+            "message_id":
+                reply_message.id,
+        }
+
+
+        if outbound_idempotency_key:
+
+            try:
+
+                bind_outbound_message(
+                    user_id=(
+                        request.user.id
+                    ),
+                    idempotency_key=(
+                        outbound_idempotency_key
+                    ),
+                    message_id=(
+                        reply_message.id
+                    ),
+                    response_data=(
+                        queued_payload
+                    ),
+                    http_status=202,
+                )
+
+            except OutboundIdempotencyUnavailable as exc:
+
+                reply_message.delete()
+
+                return Response(
+                    {
+                        "error":
+                            str(exc)
+                    },
+                    status=503,
+                )
+
+
         try:
 
             persist_outbound_attachments(
@@ -415,6 +605,21 @@ class ReplyConversationAPIView(
             )
 
         except Exception:
+
+            if outbound_idempotency_key:
+
+                abandon_outbound_intent(
+                    user_id=(
+                        request.user.id
+                    ),
+                    idempotency_key=(
+                        outbound_idempotency_key
+                    ),
+                    message_id=(
+                        reply_message.id
+                    ),
+                )
+
 
             reply_message.delete()
 
@@ -464,21 +669,7 @@ class ReplyConversationAPIView(
 
 
         return Response(
-            {
-                "status":
-                    "Reply queued successfully",
-
-                "mode":
-                    mode,
-
-                "attachment_count":
-                    len(
-                        outbound_attachments
-                    ),
-
-                "message_id":
-                    reply_message.id,
-            },
+            queued_payload,
             status=(
                 status
                 .HTTP_202_ACCEPTED

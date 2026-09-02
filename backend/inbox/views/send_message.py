@@ -47,6 +47,17 @@ from inbox.services.outbound_attachments import (
     prepare_outbound_attachments,
 )
 
+from inbox.services.outbound_idempotency import (
+    OutboundIdempotencyConflict,
+    OutboundIdempotencyUnavailable,
+    build_outbound_fingerprint,
+    claim_outbound_intent,
+    complete_outbound_intent,
+    get_outbound_intent,
+    replay_outbound_intent,
+    resolve_outbound_idempotency_key,
+)
+
 from googleapis.utils import (
     get_gmail_credentials,
 )
@@ -85,6 +96,8 @@ class UnifiedSendMessageAPIView(
         data,
         signature_already_applied=False,
         prepared_attachments=None,
+        idempotency_key=None,
+        idempotency_operation="send",
     ):
 
         try:
@@ -276,10 +289,118 @@ class UnifiedSendMessageAPIView(
 
 
             # =========================
+            # IDEMPOTENCY PRE-RESOLUTION
+            # =========================
+            #
+            # Resolve an existing semantic send BEFORE local
+            # conversation lookup. Provider synchronization is
+            # allowed to upgrade conversation_key to a native
+            # Gmail/Graph thread identity; that must not cause
+            # a same-key retry to generate a new conversation.
+
+            try:
+
+                outbound_idempotency_key = (
+                    resolve_outbound_idempotency_key(
+                        request=request,
+                        explicit=(
+                            idempotency_key
+                        ),
+                    )
+                )
+
+            except OutboundIdempotencyConflict as exc:
+
+                return Response(
+                    {
+                        "error":
+                            str(exc)
+                    },
+                    status=409,
+                )
+
+
+            existing_outbound_intent = None
+
+
+            if outbound_idempotency_key:
+
+                try:
+
+                    existing_outbound_intent = (
+                        get_outbound_intent(
+                            user_id=user.id,
+                            idempotency_key=(
+                                outbound_idempotency_key
+                            ),
+                        )
+                    )
+
+                except OutboundIdempotencyUnavailable as exc:
+
+                    return Response(
+                        {
+                            "error":
+                                str(exc)
+                        },
+                        status=503,
+                    )
+
+
+            # =========================
             # CONVERSATION
             # =========================
 
             conversation = None
+
+
+            # New Compose has no explicit conversation_id.
+            #
+            # If this is a replay, the original idempotency
+            # record already points at the local Sent message.
+            # Reuse that message's exact conversation instead of
+            # regenerating a local conversation key that provider
+            # reconciliation may already have upgraded.
+            if (
+                conversation_id is None
+                and
+                existing_outbound_intent
+                and
+                existing_outbound_intent.get(
+                    "message_id"
+                )
+                is not None
+            ):
+
+                original_intent_message = (
+                    InboxMessage.objects
+                    .filter(
+                        id=(
+                            existing_outbound_intent[
+                                "message_id"
+                            ]
+                        ),
+                        user=user,
+                        email_account=account,
+                    )
+                    .select_related(
+                        "conversation"
+                    )
+                    .first()
+                )
+
+
+                if (
+                    original_intent_message
+                    and
+                    original_intent_message
+                    .conversation_id
+                ):
+
+                    conversation = (
+                        original_intent_message
+                        .conversation
+                    )
 
 
             if conversation_id:
@@ -345,6 +466,99 @@ class UnifiedSendMessageAPIView(
                         },
                     )
                 )
+
+
+            # =========================
+            # IDEMPOTENCY RESERVATION
+            # =========================
+
+            if outbound_idempotency_key:
+
+                fingerprint = (
+                    build_outbound_fingerprint(
+                        operation=(
+                            idempotency_operation
+                        ),
+                        payload={
+                            "account_id":
+                                account.id,
+
+                            "conversation_id":
+                                conversation.id,
+
+                            "recipient_meta":
+                                recipient_meta,
+
+                            "subject":
+                                subject,
+
+                            "body":
+                                body,
+                        },
+                        attachments=(
+                            outbound_attachments
+                        ),
+                    )
+                )
+
+
+                try:
+
+                    (
+                        intent,
+                        intent_created,
+                    ) = (
+                        claim_outbound_intent(
+                            user_id=user.id,
+                            idempotency_key=(
+                                outbound_idempotency_key
+                            ),
+                            operation=(
+                                idempotency_operation
+                            ),
+                            fingerprint=(
+                                fingerprint
+                            ),
+                        )
+                    )
+
+                except OutboundIdempotencyConflict as exc:
+
+                    return Response(
+                        {
+                            "error":
+                                str(exc)
+                        },
+                        status=409,
+                    )
+
+                except OutboundIdempotencyUnavailable as exc:
+
+                    return Response(
+                        {
+                            "error":
+                                str(exc)
+                        },
+                        status=503,
+                    )
+
+
+                if not intent_created:
+
+                    (
+                        replay_payload,
+                        replay_status,
+                    ) = (
+                        replay_outbound_intent(
+                            intent
+                        )
+                    )
+
+
+                    return Response(
+                        replay_payload,
+                        status=replay_status,
+                    )
 
 
             # =========================
@@ -747,6 +961,71 @@ class UnifiedSendMessageAPIView(
             conversation.save()
 
 
+            response_payload = {
+                "status":
+                    "sent",
+
+                "conversation_id":
+                    conversation.id,
+
+                "message_id":
+                    message_obj.id,
+
+                "attachment_count":
+                    len(
+                        outbound_attachments
+                    ),
+            }
+
+
+            # Complete the semantic send intent before optional
+            # realtime notification work. If websocket delivery
+            # fails after the provider accepted the mail, a client
+            # retry with the same key returns this prior result
+            # instead of contacting the provider again.
+            if outbound_idempotency_key:
+
+                try:
+
+                    complete_outbound_intent(
+                        user_id=user.id,
+                        idempotency_key=(
+                            outbound_idempotency_key
+                        ),
+                        message_id=(
+                            message_obj.id
+                        ),
+                        provider_message_id=(
+                            provider_message_id
+                        ),
+                        response_data=(
+                            response_payload
+                        ),
+                        http_status=200,
+                    )
+
+                except OutboundIdempotencyUnavailable as exc:
+
+                    # The provider has already accepted the mail
+                    # and the local Sent row exists. Fail closed:
+                    # the original processing reservation remains
+                    # and prevents an automatic duplicate send.
+                    return Response(
+                        {
+                            **response_payload,
+
+                            "warning": (
+                                "Message was sent, but delivery "
+                                "safety state could not be finalized."
+                            ),
+
+                            "idempotency_error":
+                                str(exc),
+                        },
+                        status=200,
+                    )
+
+
             # =========================
             # REALTIME UPDATE
             # =========================
@@ -773,21 +1052,7 @@ class UnifiedSendMessageAPIView(
 
 
             return Response(
-                {
-                    "status":
-                        "sent",
-
-                    "conversation_id":
-                        conversation.id,
-
-                    "message_id":
-                        message_obj.id,
-
-                    "attachment_count":
-                        len(
-                            outbound_attachments
-                        ),
-                }
+                response_payload
             )
 
 

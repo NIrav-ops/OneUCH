@@ -23,6 +23,15 @@ from inbox.services.persistent_outbound_attachments import (
     load_persisted_outbound_attachments,
 )
 
+from inbox.services.outbound_idempotency import (
+    OutboundIdempotencyUnavailable,
+    acquire_outbound_delivery_lock,
+    complete_outbound_intent,
+    get_outbound_intent_for_message,
+    mark_outbound_intent_uncertain,
+    release_outbound_delivery_lock,
+)
+
 from googleapis.services.gmail_sync import fetch_gmail_emails
 from microsoftapis.services.outlook_sync import fetch_outlook_emails
 
@@ -756,6 +765,12 @@ def send_email_task(
 ):
     inbox_message = None
 
+    intent = None
+
+    delivery_lock_acquired = False
+
+    provider_attempt_started = False
+
 
     try:
 
@@ -786,6 +801,149 @@ def send_email_task(
             )
 
 
+        # A completed local delivery is authoritative. A Celery
+        # replay of the same task must never call the provider
+        # again.
+        if (
+            inbox_message.status
+            ==
+            "sent"
+        ):
+
+            return {
+                "status":
+                    "already_sent",
+
+                "message_id":
+                    inbox_message.id,
+
+                "provider_message_id":
+                    inbox_message.external_message_id,
+            }
+
+
+        try:
+
+            intent = (
+                get_outbound_intent_for_message(
+                    user_id=(
+                        inbox_message.user_id
+                    ),
+                    message_id=(
+                        inbox_message.id
+                    ),
+                )
+            )
+
+        except OutboundIdempotencyUnavailable:
+
+            # Legacy replies created without an Idempotency-Key
+            # remain compatible with the prior task behavior.
+            intent = None
+
+
+        # If the provider was already accepted and the Redis
+        # intent reached completed state, recover local state
+        # without ever calling the provider a second time.
+        if (
+            intent
+            and
+            intent.get(
+                "state"
+            )
+            ==
+            "completed"
+        ):
+
+            provider_id = (
+                intent.get(
+                    "provider_message_id"
+                )
+            )
+
+
+            _mark_delivery_success(
+                inbox_message=(
+                    inbox_message
+                ),
+                provider_result=(
+                    {
+                        "id":
+                            provider_id
+                    }
+                    if provider_id
+                    else
+                    {}
+                ),
+            )
+
+
+            return {
+                "status":
+                    "already_provider_accepted",
+
+                "message_id":
+                    inbox_message.id,
+
+                "provider_message_id":
+                    provider_id,
+            }
+
+
+        if (
+            intent
+            and
+            intent.get(
+                "state"
+            )
+            ==
+            "delivery_uncertain"
+        ):
+
+            return {
+                "status":
+                    "delivery_uncertain",
+
+                "message_id":
+                    inbox_message.id,
+
+                "error": (
+                    "Provider delivery outcome is uncertain. "
+                    "Automatic resend is blocked."
+                ),
+            }
+
+
+        if intent:
+
+            delivery_lock_acquired = (
+                acquire_outbound_delivery_lock(
+                    user_id=(
+                        inbox_message.user_id
+                    ),
+                    idempotency_key=(
+                        intent[
+                            "idempotency_key"
+                        ]
+                    ),
+                )
+            )
+
+
+            if not delivery_lock_acquired:
+
+                return {
+                    "status":
+                        "duplicate_delivery_in_progress",
+
+                    "message_id":
+                        inbox_message.id,
+                }
+
+
+        provider_attempt_started = True
+
+
         provider_result = (
             _deliver_reply_message(
                 email_account=(
@@ -806,6 +964,79 @@ def send_email_task(
         )
 
 
+        # Provider acceptance is recorded in the semantic intent
+        # before local state finalization. If the DB save below
+        # fails and Celery retries, the retry repairs the local
+        # row from this completed intent rather than resending.
+        if intent:
+
+            try:
+
+                intent = (
+                    complete_outbound_intent(
+                        user_id=(
+                            inbox_message.user_id
+                        ),
+                        idempotency_key=(
+                            intent[
+                                "idempotency_key"
+                            ]
+                        ),
+                        message_id=(
+                            inbox_message.id
+                        ),
+                        provider_message_id=(
+                            provider_result.get(
+                                "id"
+                            )
+                            if isinstance(
+                                provider_result,
+                                dict,
+                            )
+                            else None
+                        ),
+                    )
+                )
+
+            except OutboundIdempotencyUnavailable as exc:
+
+                # The provider call returned successfully, which is
+                # sufficient evidence that delivery was accepted.
+                # Never schedule another provider call merely because
+                # the safety record could not be finalized.
+                _mark_delivery_success(
+                    inbox_message=(
+                        inbox_message
+                    ),
+                    provider_result=(
+                        provider_result
+                    ),
+                )
+
+
+                return {
+                    "status":
+                        "sent_idempotency_finalize_degraded",
+
+                    "message_id":
+                        inbox_message.id,
+
+                    "provider_message_id":
+                        inbox_message.external_message_id,
+
+                    "warning": (
+                        "Provider accepted the message, but "
+                        "idempotency state finalization was unavailable. "
+                        "Automatic resend was suppressed."
+                    ),
+
+                    "idempotency_error":
+                        str(
+                            exc
+                        ),
+                }
+
+
         _mark_delivery_success(
             inbox_message=(
                 inbox_message
@@ -816,10 +1047,111 @@ def send_email_task(
         )
 
 
+        return {
+            "status":
+                "sent",
+
+            "message_id":
+                inbox_message.id,
+
+            "provider_message_id":
+                inbox_message.external_message_id,
+        }
+
+
     except Exception as exc:
 
         if inbox_message is None:
             raise
+
+
+        # Once provider delivery has been attempted under a
+        # semantic idempotency intent, a transport exception can
+        # mean either "not delivered" OR "provider accepted but the
+        # response was lost". Automatically retrying that ambiguous
+        # state can create a duplicate real email.
+        #
+        # Fail closed instead. A repeated API request with the same
+        # key receives delivery_uncertain and cannot resend.
+        if (
+            intent
+            and
+            provider_attempt_started
+            and
+            intent.get(
+                "state"
+            )
+            !=
+            "completed"
+        ):
+
+            try:
+
+                intent = (
+                    mark_outbound_intent_uncertain(
+                        user_id=(
+                            inbox_message.user_id
+                        ),
+                        idempotency_key=(
+                            intent[
+                                "idempotency_key"
+                            ]
+                        ),
+                        message_id=(
+                            inbox_message.id
+                        ),
+                        error=exc,
+                    )
+                )
+
+            except OutboundIdempotencyUnavailable:
+
+                # Even if Redis is unavailable now, suppressing the
+                # Celery retry is safer than risking a second provider
+                # send after an ambiguous first attempt.
+                pass
+
+
+            inbox_message.retry_count += 1
+
+            inbox_message.error_reason = (
+                "Delivery outcome uncertain; automatic resend "
+                "suppressed: "
+                +
+                str(
+                    exc
+                )
+            )
+
+            inbox_message.last_attempt_at = (
+                timezone.now()
+            )
+
+            inbox_message.status = (
+                "failed"
+            )
+
+
+            inbox_message.save(
+                update_fields=[
+                    "retry_count",
+                    "error_reason",
+                    "last_attempt_at",
+                    "status",
+                ]
+            )
+
+
+            return {
+                "status":
+                    "delivery_uncertain",
+
+                "message_id":
+                    inbox_message.id,
+
+                "error":
+                    inbox_message.error_reason,
+            }
 
 
         inbox_message.retry_count += 1
@@ -878,6 +1210,26 @@ def send_email_task(
             exc=exc,
             countdown=30,
         )
+
+
+    finally:
+
+        if (
+            delivery_lock_acquired
+            and
+            intent
+        ):
+
+            release_outbound_delivery_lock(
+                user_id=(
+                    inbox_message.user_id
+                ),
+                idempotency_key=(
+                    intent[
+                        "idempotency_key"
+                    ]
+                ),
+            )
 
 
 # ============================================

@@ -25,6 +25,33 @@ import {
 } from "../websocketAuth";
 
 
+const createOutboundIdempotencyKey = () => {
+
+  if (
+    globalThis.crypto
+      ?.randomUUID
+  ) {
+
+    return (
+      "mail-" +
+      globalThis.crypto.randomUUID()
+    );
+
+  }
+
+
+  return (
+    "mail-" +
+    Date.now() +
+    "-" +
+    Math.random()
+      .toString(16)
+      .slice(2)
+  );
+
+};
+
+
 export default function Inbox() {
 
   // ==========================================================
@@ -97,6 +124,17 @@ export default function Inbox() {
     setComposeFiles,
   ] = useState([]);
 
+  const [
+    composeSending,
+    setComposeSending,
+  ] = useState(false);
+
+  const composeSendLockRef =
+    useRef(false);
+
+  const composeIdempotencyKeyRef =
+    useRef("");
+
 
   // ==========================================================
   // REPLY STATE
@@ -109,6 +147,12 @@ export default function Inbox() {
   const [replyMode, setReplyMode] = useState("reply");
 
   const [replying, setReplying] = useState(false);
+
+  const replySendLockRef =
+    useRef(false);
+
+  const replyIdempotencyKeyRef =
+    useRef("");
 
   const [
     replyFiles,
@@ -1349,6 +1393,13 @@ export default function Inbox() {
   const sendEmail = async () => {
 
     if (
+      composeSendLockRef.current
+    ) {
+      return;
+    }
+
+
+    if (
       composeData.to.length === 0
     ) {
 
@@ -1370,6 +1421,29 @@ export default function Inbox() {
     }
 
 
+    composeSendLockRef.current =
+      true;
+
+    setComposeSending(
+      true
+    );
+
+
+    if (
+      !composeIdempotencyKeyRef
+        .current
+    ) {
+
+      composeIdempotencyKeyRef.current =
+        createOutboundIdempotencyKey();
+
+    }
+
+
+    const idempotencyKey =
+      composeIdempotencyKeyRef.current;
+
+
     try {
 
       setError("");
@@ -1381,9 +1455,14 @@ export default function Inbox() {
           : "/api/inbox/send/";
 
 
-      // Forward always uses multipart, even when the user added
-      // no new files, because it must explicitly transmit the
-      // set of inherited originals that remain selected.
+      const requestConfig = {
+        headers: {
+          "Idempotency-Key":
+            idempotencyKey,
+        },
+      };
+
+
       if (
         composeFiles.length >
         0
@@ -1465,7 +1544,8 @@ export default function Inbox() {
 
         await axios.post(
           sendEndpoint,
-          formData
+          formData,
+          requestConfig
         );
 
 
@@ -1491,10 +1571,15 @@ export default function Inbox() {
 
             account_id:
               composeAccountId,
-          }
+          },
+          requestConfig
         );
 
       }
+
+
+      composeIdempotencyKeyRef.current =
+        "";
 
 
       setShowCompose(false);
@@ -1532,9 +1617,22 @@ export default function Inbox() {
       );
 
 
+      // Keep the same key after a network/provider uncertainty.
+      // A manual retry therefore asks the backend for the same
+      // semantic send rather than creating another message.
       setError(
         err.response?.data?.error ||
           "Unable to send email."
+      );
+
+
+    } finally {
+
+      composeSendLockRef.current =
+        false;
+
+      setComposeSending(
+        false
       );
 
     }
@@ -1547,6 +1645,13 @@ export default function Inbox() {
   // ==========================================================
 
   const sendReply = async () => {
+
+    if (
+      replySendLockRef.current
+    ) {
+      return;
+    }
+
 
     if (!selectedId) {
 
@@ -1568,6 +1673,25 @@ export default function Inbox() {
     }
 
 
+    replySendLockRef.current =
+      true;
+
+
+    if (
+      !replyIdempotencyKeyRef
+        .current
+    ) {
+
+      replyIdempotencyKeyRef.current =
+        createOutboundIdempotencyKey();
+
+    }
+
+
+    const idempotencyKey =
+      replyIdempotencyKeyRef.current;
+
+
     try {
 
       setError("");
@@ -1577,6 +1701,14 @@ export default function Inbox() {
 
       const endpoint =
         `/api/inbox/conversations/${selectedId}/reply/`;
+
+
+      const requestConfig = {
+        headers: {
+          "Idempotency-Key":
+            idempotencyKey,
+        },
+      };
 
 
       if (
@@ -1615,7 +1747,8 @@ export default function Inbox() {
 
         await axios.post(
           endpoint,
-          formData
+          formData,
+          requestConfig
         );
 
       } else {
@@ -1628,10 +1761,15 @@ export default function Inbox() {
 
             mode:
               replyMode,
-          }
+          },
+          requestConfig
         );
 
       }
+
+
+      replyIdempotencyKeyRef.current =
+        "";
 
 
       setReplyBody("");
@@ -1675,6 +1813,9 @@ export default function Inbox() {
 
 
     } finally {
+
+      replySendLockRef.current =
+        false;
 
       setReplying(false);
 
@@ -1863,6 +2004,13 @@ export default function Inbox() {
 
   const sendDraft = async () => {
 
+    if (
+      composeSendLockRef.current
+    ) {
+      return;
+    }
+
+
     if (!activeDraftId) {
 
       setError(
@@ -1870,8 +2018,15 @@ export default function Inbox() {
       );
 
       return;
-
     }
+
+
+    composeSendLockRef.current =
+      true;
+
+    setComposeSending(
+      true
+    );
 
 
     try {
@@ -1891,6 +2046,10 @@ export default function Inbox() {
       await axios.post(
         `/api/inbox/draft/send/${savedDraftId}/`
       );
+
+
+      composeIdempotencyKeyRef.current =
+        "";
 
 
       setShowCompose(false);
@@ -1930,6 +2089,16 @@ export default function Inbox() {
         err.response?.data?.error ||
           err.message ||
           "Unable to send draft."
+      );
+
+
+    } finally {
+
+      composeSendLockRef.current =
+        false;
+
+      setComposeSending(
+        false
       );
 
     }
@@ -2673,6 +2842,9 @@ export default function Inbox() {
 
       setError("");
 
+      composeIdempotencyKeyRef.current =
+        "";
+
       setActiveDraftId(null);
 
       setComposeFiles([]);
@@ -2775,6 +2947,9 @@ export default function Inbox() {
 
     setError("");
 
+    composeIdempotencyKeyRef.current =
+      "";
+
     setComposeFiles([]);
 
     setComposePersistedAttachments(
@@ -2865,6 +3040,9 @@ export default function Inbox() {
   // ==========================================================
 
   const closeCompose = () => {
+
+    composeIdempotencyKeyRef.current =
+      "";
 
     setShowCompose(false);
 
@@ -2969,6 +3147,9 @@ export default function Inbox() {
                     body:
                       "",
                   });
+
+                  composeIdempotencyKeyRef.current =
+                    "";
 
                   setComposeAccountId(
                     selectedAccountId ||
@@ -3784,6 +3965,9 @@ export default function Inbox() {
                             ""
                           );
 
+                          replyIdempotencyKeyRef.current =
+                            "";
+
                           setReplyMode(
                             "reply"
                           );
@@ -3808,6 +3992,9 @@ export default function Inbox() {
                           setError(
                             ""
                           );
+
+                          replyIdempotencyKeyRef.current =
+                            "";
 
                           setReplyMode(
                             "reply_all"
@@ -4613,7 +4800,10 @@ export default function Inbox() {
                   onClick={
                     saveDraft
                   }
-                  className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                  disabled={
+                    composeSending
+                  }
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Save draft
                 </button>
@@ -4628,9 +4818,14 @@ export default function Inbox() {
                   onClick={
                     sendDraft
                   }
-                  className="rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-slate-800"
+                  disabled={
+                    composeSending
+                  }
+                  className="rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Send draft
+                  {composeSending
+                    ? "Sending..."
+                    : "Send draft"}
                 </button>
 
               ) : (
@@ -4640,9 +4835,14 @@ export default function Inbox() {
                   onClick={
                     sendEmail
                   }
-                  className="rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-slate-800"
+                  disabled={
+                    composeSending
+                  }
+                  className="rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {forwardSourceId
+                  {composeSending
+                    ? "Sending..."
+                    : forwardSourceId
                     ? "Forward"
                     : "Send message"}
                 </button>
@@ -4695,6 +4895,9 @@ export default function Inbox() {
                 onClick={() => {
 
                   if (!replying) {
+
+                    replyIdempotencyKeyRef.current =
+                      "";
 
                     setShowReply(
                       false

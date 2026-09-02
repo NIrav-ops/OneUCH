@@ -183,6 +183,22 @@ class SendDraftAPIView(
                 prepared_attachments=(
                     prepared_attachments
                 ),
+                idempotency_key=(
+                    "draft-send:"
+                    +
+                    str(
+                        request.user.id
+                    )
+                    +
+                    ":"
+                    +
+                    str(
+                        draft.id
+                    )
+                ),
+                idempotency_operation=(
+                    "draft_send"
+                ),
             )
         )
 
@@ -195,6 +211,41 @@ class SendDraftAPIView(
             300
         ):
             return response
+
+
+        if (
+            response.status_code
+            ==
+            202
+            and
+            isinstance(
+                getattr(
+                    response,
+                    "data",
+                    None,
+                ),
+                dict,
+            )
+            and
+            response.data.get(
+                "idempotent_replay"
+            )
+            and
+            not response.data.get(
+                "message_id"
+            )
+        ):
+
+            return Response(
+                {
+                    "status":
+                        "draft_send_in_progress",
+
+                    "idempotent_replay":
+                        True,
+                },
+                status=202,
+            )
 
 
         sent_message_id = (

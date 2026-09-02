@@ -517,6 +517,9 @@ class ForwardMessageAPIView(
                         "attachments"
                     ]
                 ),
+                idempotency_operation=(
+                    "forward"
+                ),
             )
         )
 
