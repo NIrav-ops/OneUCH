@@ -11,6 +11,12 @@ from .views import (
     ReopenApprovalAPIView,
 )
 
+from .review_views import (
+    AIApprovalCandidateListAPIView,
+    PromoteAIApprovalCandidateAPIView,
+    RejectAIApprovalCandidateAPIView,
+)
+
 urlpatterns = [
     path("", ApprovalListAPIView.as_view(), name="approval-list"),
     path("pending/", PendingApprovalListAPIView.as_view(), name="pending-approval-list"),
@@ -21,4 +27,19 @@ urlpatterns = [
     path("<int:approval_id>/needs-info/", NeedsInfoItemAPIView.as_view(), name="needs-info-item"),
     path("<int:approval_id>/ignore/", IgnoreApprovalAPIView.as_view(), name="ignore-approval-item"),
     path("<int:approval_id>/reopen/", ReopenApprovalAPIView.as_view(), name="reopen-approval-item"),
+    path(
+        "ai-candidates/",
+        AIApprovalCandidateListAPIView.as_view(),
+        name="ai-approval-candidate-list",
+    ),
+    path(
+        "ai-candidates/<int:candidate_id>/promote/",
+        PromoteAIApprovalCandidateAPIView.as_view(),
+        name="ai-approval-candidate-promote",
+    ),
+    path(
+        "ai-candidates/<int:candidate_id>/reject/",
+        RejectAIApprovalCandidateAPIView.as_view(),
+        name="ai-approval-candidate-reject",
+    ),
 ]

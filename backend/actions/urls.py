@@ -13,6 +13,12 @@ from .views import (
     AssignActionAPIView,
 )
 
+from .review_views import (
+    AIActionCandidateListAPIView,
+    PromoteAIActionCandidateAPIView,
+    RejectAIActionCandidateAPIView,
+)
+
 urlpatterns = [
     path("", ActionListAPIView.as_view(), name="action-list"),
     path("followups/", FollowUpListAPIView.as_view(), name="followup-list"),
@@ -25,4 +31,19 @@ urlpatterns = [
     path("<int:action_id>/start/",StartActionAPIView.as_view(),name="start-action",),
     path("<int:action_id>/status/",UpdateActionStatusAPIView.as_view(),name="action-status",),
     path("<int:action_id>/assign/",AssignActionAPIView.as_view(),name="assign-action",),
+    path(
+        "ai-candidates/",
+        AIActionCandidateListAPIView.as_view(),
+        name="ai-action-candidate-list",
+    ),
+    path(
+        "ai-candidates/<int:candidate_id>/promote/",
+        PromoteAIActionCandidateAPIView.as_view(),
+        name="ai-action-candidate-promote",
+    ),
+    path(
+        "ai-candidates/<int:candidate_id>/reject/",
+        RejectAIActionCandidateAPIView.as_view(),
+        name="ai-action-candidate-reject",
+    ),
 ]
