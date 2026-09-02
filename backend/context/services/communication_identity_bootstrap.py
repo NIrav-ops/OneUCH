@@ -132,6 +132,20 @@ def _domain_qualification(stats):
         and stats["messages"] >= 5
     )
 
+    # Final MVP evidence-volume rule.
+    #
+    # A single human-like external contact is sufficient
+    # only after at least five governed communication events.
+    #
+    # This deliberately excludes:
+    # - consumer domains
+    # - machine-only domains
+    # - one-off / low-volume domains
+    rule_c = (
+        stats["human_contacts"] >= 1
+        and stats["messages"] >= 5
+    )
+
     rules = []
 
     if rule_a:
@@ -139,6 +153,9 @@ def _domain_qualification(stats):
 
     if rule_b:
         rules.append("B_MULTI_HUMAN_AND_VOLUME")
+
+    if rule_c:
+        rules.append("C_HUMAN_AND_VOLUME")
 
     return bool(rules), rules
 
@@ -164,6 +181,16 @@ def build_communication_identity_plan(*, user):
         Rule B:
             human contacts >= 2
             AND total messages >= 5
+
+        OR
+
+        Rule C:
+            human contacts >= 1
+            AND total messages >= 5
+
+        Rule C is the final MVP evidence-volume policy.
+        It improves useful communication coverage without
+        admitting machine-only or low-volume domains.
 
     All generated business identities remain DISCOVERED.
     """

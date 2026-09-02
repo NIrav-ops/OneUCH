@@ -176,12 +176,12 @@ class CommunicationIdentityBootstrapTests(
             ],
         )
 
-    def test_single_inbound_sender_does_not_create_company_plan(self):
+    def test_single_human_domain_below_volume_does_not_qualify(self):
         self.contact(
             "person@newsletter.example",
-            message_count=30,
+            message_count=4,
             sent_count=0,
-            received_count=30,
+            received_count=4,
         )
 
         plan = (
@@ -193,6 +193,35 @@ class CommunicationIdentityBootstrapTests(
         self.assertNotIn(
             "newsletter.example",
             plan["qualified_domains"],
+        )
+
+
+    def test_rule_c_qualifies_single_human_high_volume_domain(self):
+        self.contact(
+            "person@customer.example",
+            message_count=5,
+            sent_count=0,
+            received_count=5,
+        )
+
+        plan = (
+            build_communication_identity_plan(
+                user=self.user
+            )
+        )
+
+        self.assertIn(
+            "customer.example",
+            plan["qualified_domains"],
+        )
+
+        self.assertIn(
+            "C_HUMAN_AND_VOLUME",
+            plan[
+                "qualification_rules"
+            ][
+                "customer.example"
+            ],
         )
 
     def test_consumer_domain_never_qualifies_as_company(self):
@@ -251,8 +280,8 @@ class CommunicationIdentityBootstrapTests(
         self.contact(
             "solo@solo.example",
             name="Solo Contact",
-            message_count=20,
-            received_count=20,
+            message_count=4,
+            received_count=4,
         )
 
         first = (
