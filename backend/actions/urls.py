@@ -32,6 +32,23 @@ urlpatterns = [
     path("<int:action_id>/status/",UpdateActionStatusAPIView.as_view(),name="action-status",),
     path("<int:action_id>/assign/",AssignActionAPIView.as_view(),name="assign-action",),
     path(
+        "review-candidates/",
+        AIActionCandidateListAPIView.as_view(),
+        name="action-review-candidate-list",
+    ),
+    path(
+        "review-candidates/<int:candidate_id>/promote/",
+        PromoteAIActionCandidateAPIView.as_view(),
+        name="action-review-candidate-promote",
+    ),
+    path(
+        "review-candidates/<int:candidate_id>/reject/",
+        RejectAIActionCandidateAPIView.as_view(),
+        name="action-review-candidate-reject",
+    ),
+
+    # Backwards-compatible PR3B AI aliases.
+    path(
         "ai-candidates/",
         AIActionCandidateListAPIView.as_view(),
         name="ai-action-candidate-list",

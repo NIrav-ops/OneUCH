@@ -8,7 +8,7 @@ export default function ActionCenter() {
   const [actions, setActions] = useState([]);
   const [followups, setFollowups] = useState([]);
   const [teamMembers, setTeamMembers] = useState([]);
-  const [aiActionCandidates, setAiActionCandidates] = useState([]);
+  const [reviewCandidates, setReviewCandidates] = useState([]);
   const [candidateBusyId, setCandidateBusyId] = useState(null);
   
   const [loading, setLoading] = useState(true);
@@ -30,7 +30,7 @@ export default function ActionCenter() {
         axios.get("/api/actions/"),
         axios.get("/api/actions/followups/"),
         axios.get("/api/actions/team-members/"),
-        axios.get("/api/actions/ai-candidates/"),
+        axios.get("/api/actions/review-candidates/"),
       ]);
 
       const actionData = Array.isArray(actionsRes.data) ? actionsRes.data : [];
@@ -43,7 +43,7 @@ export default function ActionCenter() {
       setActions(actionData);
       setFollowups(followupData);
       setTeamMembers(teamData);
-      setAiActionCandidates(candidateData);
+      setReviewCandidates(candidateData);
 
       const initialAssigned = {};
       const initialDueDates = {};
@@ -173,20 +173,20 @@ export default function ActionCenter() {
   };
 
 
-  const reviewAICandidate = async (candidateId, decision) => {
+  const reviewCandidate = async (candidateId, decision) => {
     try {
       setCandidateBusyId(candidateId);
 
       await axios.post(
-        `/api/actions/ai-candidates/${candidateId}/${decision}/`
+        `/api/actions/review-candidates/${candidateId}/${decision}/`
       );
 
       await fetchData();
     } catch (err) {
-      console.error("AI Action review failed:", err);
+      console.error("Action review failed:", err);
       alert(
         err.response?.data?.error ||
-          "Could not review the AI Action suggestion."
+          "Could not review the Action suggestion."
       );
     } finally {
       setCandidateBusyId(null);
@@ -270,7 +270,7 @@ export default function ActionCenter() {
 
 
         {/* ===================================================
-            AI HUMAN REVIEW QUEUE
+            HUMAN REVIEW QUEUE
         ==================================================== */}
 
         <section className="mt-5 overflow-hidden rounded-[26px] border border-indigo-200 bg-white shadow-sm">
@@ -281,33 +281,33 @@ export default function ActionCenter() {
                   Human review gate
                 </p>
                 <span className="rounded-full border border-indigo-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-indigo-700">
-                  AI does not auto-decide
+                  No automatic creation
                 </span>
               </div>
               <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-950">
-                AI Action suggestions
+                Action suggestions
               </h2>
               <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-500">
-                AI suggestions remain outside the Action queue until you explicitly promote or reject them.
+                Deterministic and governed AI suggestions remain outside the Action queue until you explicitly promote or reject them.
               </p>
             </div>
             <span className="w-fit rounded-full bg-indigo-100 px-3 py-1 text-xs font-semibold text-indigo-700">
-              {aiActionCandidates.length} awaiting review
+              {reviewCandidates.length} awaiting review
             </span>
           </div>
 
-          {aiActionCandidates.length === 0 ? (
+          {reviewCandidates.length === 0 ? (
             <div className="px-6 py-8 text-center">
               <p className="text-sm font-semibold text-slate-700">
-                No AI Action suggestions awaiting review
+                No Action suggestions awaiting review
               </p>
               <p className="mt-1 text-xs text-slate-400">
-                Suggestions will appear here only after governed AI calibration is enabled.
+                Governed extraction suggestions will appear here when review routing is enabled.
               </p>
             </div>
           ) : (
             <div className="divide-y divide-slate-100">
-              {aiActionCandidates.map((candidate) => {
+              {reviewCandidates.map((candidate) => {
                 const busy = candidateBusyId === candidate.id;
 
                 return (
@@ -316,11 +316,29 @@ export default function ActionCenter() {
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-indigo-700">
-                            Needs AI review
+                            {candidate.extraction_method === "deterministic" ? "Deterministic review" : "AI review"}
                           </span>
                           <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold text-slate-500">
                             Confidence {candidate.confidence_score ?? 0}%
                           </span>
+
+                          <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold text-slate-600">
+                            {candidate.extraction_method === "deterministic"
+                              ? "Deterministic"
+                              : "AI"}
+                          </span>
+
+                          {candidate.source_domain && (
+                            <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold text-slate-500">
+                              {candidate.source_domain}
+                            </span>
+                          )}
+
+                          {(candidate.occurrence_count ?? 1) > 1 && (
+                            <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[10px] font-semibold text-amber-700">
+                              {candidate.occurrence_count} occurrences
+                            </span>
+                          )}
                         </div>
 
                         <p className="mt-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
@@ -331,7 +349,7 @@ export default function ActionCenter() {
                         </p>
 
                         <h3 className="mt-3 text-base font-semibold tracking-tight text-slate-950">
-                          {candidate.title || "Untitled AI Action suggestion"}
+                          {candidate.title || "Untitled Action suggestion"}
                         </h3>
 
                         {candidate.description && (
@@ -357,7 +375,7 @@ export default function ActionCenter() {
                           Why One UCH suggested this
                         </p>
                         <p className="mt-2 text-xs leading-5 text-slate-600">
-                          {candidate.reason || "No additional AI rationale supplied."}
+                          {candidate.reason || "No additional extraction rationale supplied."}
                         </p>
 
                         {candidate.owner_reference && (
@@ -378,7 +396,7 @@ export default function ActionCenter() {
                           <button
                             type="button"
                             disabled={busy}
-                            onClick={() => reviewAICandidate(candidate.id, "promote")}
+                            onClick={() => reviewCandidate(candidate.id, "promote")}
                             className="rounded-xl bg-slate-950 px-3.5 py-2.5 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {busy ? "Processing..." : "Promote to Action"}
@@ -387,7 +405,7 @@ export default function ActionCenter() {
                           <button
                             type="button"
                             disabled={busy}
-                            onClick={() => reviewAICandidate(candidate.id, "reject")}
+                            onClick={() => reviewCandidate(candidate.id, "reject")}
                             className="rounded-xl border border-rose-200 bg-white px-3.5 py-2.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             Reject suggestion

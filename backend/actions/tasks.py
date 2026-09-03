@@ -1,6 +1,7 @@
 from workflow.services.ai.governance.execution_policy import AIExecutionPolicy
 from celery import shared_task
 from django.conf import settings
+from django.db.models import F
 from django.utils import timezone
 
 from inbox.models import InboxMessage
@@ -9,6 +10,7 @@ from actions.models import (
     ActionItem,
     AIActionCandidate,
     AIActionAnalysisState,
+    ActionReviewCandidateOccurrence,
 )
 
 from actions.services.extractor import (
@@ -40,6 +42,13 @@ from knowledge.services.intelligence_evidence_persistence import (
     persist_intelligence_evidence,
 )
 
+from workflow.services.review_candidate_identity import (
+    build_candidate_fingerprint,
+    is_shared_mail_domain,
+    normalize_sender_email,
+    normalize_source_domain,
+)
+
 def _create_action(
     *,
     msg,
@@ -49,8 +58,8 @@ def _create_action(
     """
     Persist one confirmed Action.
 
-    Deterministic and high-confidence AI Actions both use
-    the same ActionItem persistence path.
+    Confirmed Actions use the same ActionItem persistence
+    path after governed promotion.
     """
 
     action_obj, created = (
@@ -135,67 +144,242 @@ def _create_action(
     return action_obj, created
 
 
+def _create_review_candidate(
+    *,
+    msg,
+    item,
+    extraction_method,
+):
+    """
+    Create or observe one governed Action review candidate.
+
+    Dedupe is deliberately scoped to:
+        user
+        organization
+        extraction method
+        normalized sender domain
+        conservative evidence fingerprint
+
+    The same request from another domain remains independent.
+    """
+
+    title = item["title"]
+
+    evidence = item.get(
+        "evidence",
+        "",
+    )
+
+    source_domain = (
+        normalize_source_domain(
+            msg.sender
+        )
+    )
+
+    sender_identity = (
+        normalize_sender_email(
+            msg.sender
+        )
+    )
+
+    fingerprint_identity = (
+        sender_identity
+        if is_shared_mail_domain(
+            source_domain
+        )
+        else ""
+    )
+
+    fingerprint = (
+        build_candidate_fingerprint(
+            title=title,
+            evidence=evidence,
+            source_identity=(
+                fingerprint_identity
+            ),
+        )
+    )
+
+    defaults = {
+        "message": msg,
+        "title": title,
+        "description": item.get(
+            "description",
+            "",
+        ),
+        "owner_reference": (
+            item.get(
+                "owner_reference"
+            )
+            or ""
+        ),
+        "due_date": item.get(
+            "due_date"
+        ),
+        "priority": item.get(
+            "priority",
+            0,
+        ),
+        "confidence_score": item.get(
+            "confidence_score",
+            0,
+        ),
+        "evidence": evidence,
+        "reason": item.get(
+            "reason",
+            "",
+        ),
+        "provider": (
+            item.get(
+                "provider"
+            )
+            or ""
+        ),
+        "model": (
+            item.get(
+                "model"
+            )
+            or ""
+        ),
+        "extraction_method":
+            extraction_method,
+        "source_domain":
+            source_domain,
+        "candidate_fingerprint":
+            fingerprint,
+        "occurrence_count":
+            1,
+        "last_seen_at":
+            msg.received_at,
+    }
+
+    if (
+        source_domain
+        and fingerprint
+    ):
+        candidate, created = (
+            AIActionCandidate.objects
+            .get_or_create(
+                user=msg.user,
+                organization=(
+                    msg.organization
+                ),
+                source_domain=(
+                    source_domain
+                ),
+                candidate_fingerprint=(
+                    fingerprint
+                ),
+                defaults=defaults,
+            )
+        )
+    else:
+        candidate, created = (
+            AIActionCandidate.objects
+            .get_or_create(
+                message=msg,
+                title=title,
+                defaults={
+                    key: value
+                    for key, value
+                    in defaults.items()
+                    if key not in {
+                        "message",
+                        "title",
+                    }
+                },
+            )
+        )
+
+    occurrence, occurrence_created = (
+        ActionReviewCandidateOccurrence
+        .objects
+        .get_or_create(
+            candidate=candidate,
+            message=msg,
+            defaults={
+                "extraction_method":
+                    extraction_method,
+                "source_domain":
+                    source_domain,
+                "observed_at":
+                    msg.received_at,
+            },
+        )
+    )
+
+    if (
+        occurrence_created
+        and not created
+    ):
+        prior_occurrence_exists = (
+            candidate
+            .occurrences
+            .exclude(
+                pk=occurrence.pk
+            )
+            .exists()
+        )
+
+        if prior_occurrence_exists:
+            (
+                AIActionCandidate.objects
+                .filter(
+                    pk=candidate.pk
+                )
+                .update(
+                    occurrence_count=(
+                        F(
+                            "occurrence_count"
+                        )
+                        + 1
+                    )
+                )
+            )
+
+    if (
+        candidate.last_seen_at is None
+        or
+        msg.received_at
+        > candidate.last_seen_at
+    ):
+        (
+            AIActionCandidate.objects
+            .filter(
+                pk=candidate.pk
+            )
+            .update(
+                last_seen_at=(
+                    msg.received_at
+                )
+            )
+        )
+
+    candidate.refresh_from_db()
+
+    return (
+        candidate,
+        created,
+    )
+
+
 def _create_ai_review_candidate(
     *,
     msg,
     item,
 ):
     """
-    Persist a moderate-confidence AI suggestion.
+    Backwards-compatible AI wrapper.
 
-    This deliberately does NOT create an ActionItem.
+    AI remains one provenance type inside the governed
+    review-candidate architecture.
     """
 
-    return AIActionCandidate.objects.get_or_create(
-        message=msg,
-        title=item["title"],
-        defaults={
-            "user": msg.user,
-            "organization": msg.organization,
-            "description": item.get(
-                "description",
-                "",
-            ),
-            "owner_reference": (
-                item.get(
-                    "owner_reference"
-                )
-                or ""
-            ),
-            "due_date": item.get(
-                "due_date"
-            ),
-            "priority": item.get(
-                "priority",
-                0,
-            ),
-            "confidence_score": item.get(
-                "confidence_score",
-                0,
-            ),
-            "evidence": item.get(
-                "evidence",
-                "",
-            ),
-            "reason": item.get(
-                "reason",
-                "",
-            ),
-            "provider": (
-                item.get(
-                    "provider"
-                )
-                or ""
-            ),
-            "model": (
-                item.get(
-                    "model"
-                )
-                or ""
-            ),
-        },
+    return _create_review_candidate(
+        msg=msg,
+        item=item,
+        extraction_method="ai",
     )
-
 
 @shared_task
 def analyze_new_messages(

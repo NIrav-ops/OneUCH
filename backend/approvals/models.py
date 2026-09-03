@@ -135,6 +135,17 @@ class ApprovalItem(models.Model):
         return self.title
 
 class AIApprovalCandidate(models.Model):
+    EXTRACTION_METHOD_CHOICES = (
+        (
+            "ai",
+            "AI",
+        ),
+        (
+            "deterministic",
+            "Deterministic",
+        ),
+    )
+
     STATUS_CHOICES = (
         (
             "pending_review",
@@ -224,6 +235,37 @@ class AIApprovalCandidate(models.Model):
         blank=True,
     )
 
+    extraction_method = models.CharField(
+        max_length=30,
+        choices=EXTRACTION_METHOD_CHOICES,
+        default="ai",
+        db_index=True,
+    )
+
+    source_domain = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        db_index=True,
+    )
+
+    candidate_fingerprint = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        db_index=True,
+    )
+
+    occurrence_count = models.PositiveIntegerField(
+        default=1,
+    )
+
+    last_seen_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        db_index=True,
+    )
+
     status = models.CharField(
         max_length=30,
         choices=STATUS_CHOICES,
@@ -251,10 +293,105 @@ class AIApprovalCandidate(models.Model):
                     "message_title"
                 ),
             ),
+            models.UniqueConstraint(
+                fields=[
+                    "user",
+                    "organization",
+                    "source_domain",
+                    "candidate_fingerprint",
+                ],
+                condition=(
+                    ~models.Q(
+                        source_domain=""
+                    )
+                    &
+                    ~models.Q(
+                        candidate_fingerprint=""
+                    )
+                ),
+                name=(
+                    "uniq_approval_review_scope_fp"
+                ),
+            ),
         ]
 
     def __str__(self):
         return self.title
+
+
+class ApprovalReviewCandidateOccurrence(
+    models.Model
+):
+    candidate = models.ForeignKey(
+        AIApprovalCandidate,
+        on_delete=models.CASCADE,
+        related_name="occurrences",
+    )
+
+    message = models.ForeignKey(
+        "inbox.InboxMessage",
+        on_delete=models.CASCADE,
+        related_name=(
+            "approval_review_candidate_occurrences"
+        ),
+    )
+
+    extraction_method = models.CharField(
+        max_length=30,
+        choices=(
+            (
+                "ai",
+                "AI",
+            ),
+            (
+                "deterministic",
+                "Deterministic",
+            ),
+        ),
+    )
+
+    source_domain = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        db_index=True,
+    )
+
+    observed_at = models.DateTimeField(
+        db_index=True,
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    class Meta:
+        ordering = [
+            "-observed_at",
+            "-id",
+        ]
+
+        constraints = [
+            models.UniqueConstraint(
+                fields=[
+                    "candidate",
+                    "message",
+                ],
+                name=(
+                    "uniq_approval_review_"
+                    "candidate_message"
+                ),
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f"Approval candidate "
+            f"{self.candidate_id} "
+            f"observed in message "
+            f"{self.message_id}"
+        )
+
 
 class AIApprovalAnalysisState(models.Model):
     STATUS_CHOICES = (

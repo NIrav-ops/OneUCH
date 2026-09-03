@@ -1,0 +1,444 @@
+from datetime import (
+    datetime,
+    timezone as dt_timezone,
+)
+
+from django.contrib.auth import (
+    get_user_model,
+)
+from django.test import TestCase
+from rest_framework.test import APIClient
+
+from actions.models import (
+    ActionItem,
+    AIActionCandidate,
+    ActionReviewCandidateOccurrence,
+)
+from actions.tasks import (
+    _create_review_candidate,
+)
+from inbox.models import (
+    InboxMessage,
+    Organization,
+    OrganizationUser,
+)
+from knowledge.models import (
+    KnowledgeEvidence,
+)
+
+
+User = get_user_model()
+
+
+class ActionReviewCandidateProvenanceTests(
+    TestCase
+):
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="action-review-foundation@test.com",
+            password="pass123",
+        )
+
+        self.organization = (
+            Organization.objects.create(
+                name="Action Review Foundation",
+                slug="action-review-foundation",
+            )
+        )
+
+        OrganizationUser.objects.create(
+            user=self.user,
+            organization=self.organization,
+            role="owner",
+        )
+
+        self.client = APIClient()
+
+        self.client.force_authenticate(
+            user=self.user
+        )
+
+        self.item = {
+            "title":
+                "Renew annual license",
+            "description":
+                "Renew the annual license.",
+            "priority":
+                80,
+            "confidence_score":
+                99,
+            "evidence":
+                "Please renew the annual license.",
+            "reason":
+                "Explicit work request.",
+        }
+
+    def create_message(
+        self,
+        *,
+        external_id,
+        sender,
+        minute,
+    ):
+        return InboxMessage.objects.create(
+            user=self.user,
+            organization=self.organization,
+            platform="gmail",
+            direction="inbound",
+            external_message_id=external_id,
+            sender=sender,
+            recipients=self.user.email,
+            subject="License renewal",
+            body=(
+                "Please renew the annual license."
+            ),
+            received_at=datetime(
+                2026,
+                9,
+                3,
+                10,
+                minute,
+                tzinfo=dt_timezone.utc,
+            ),
+        )
+
+    def test_same_domain_same_request_is_one_candidate_with_history(
+        self,
+    ):
+        first = self.create_message(
+            external_id="same-domain-1",
+            sender="person1@vendor-a.com",
+            minute=1,
+        )
+
+        second = self.create_message(
+            external_id="same-domain-2",
+            sender="person2@vendor-a.com",
+            minute=2,
+        )
+
+        first_candidate, first_created = (
+            _create_review_candidate(
+                msg=first,
+                item=self.item,
+                extraction_method=(
+                    "deterministic"
+                ),
+            )
+        )
+
+        second_candidate, second_created = (
+            _create_review_candidate(
+                msg=second,
+                item=self.item,
+                extraction_method=(
+                    "deterministic"
+                ),
+            )
+        )
+
+        self.assertTrue(
+            first_created
+        )
+
+        self.assertFalse(
+            second_created
+        )
+
+        self.assertEqual(
+            first_candidate.id,
+            second_candidate.id,
+        )
+
+        first_candidate.refresh_from_db()
+
+        self.assertEqual(
+            AIActionCandidate.objects.count(),
+            1,
+        )
+
+        self.assertEqual(
+            first_candidate.source_domain,
+            "vendor-a.com",
+        )
+
+        self.assertEqual(
+            first_candidate.extraction_method,
+            "deterministic",
+        )
+
+        self.assertEqual(
+            first_candidate.occurrence_count,
+            2,
+        )
+
+        self.assertEqual(
+            ActionReviewCandidateOccurrence
+            .objects
+            .filter(
+                candidate=first_candidate
+            )
+            .count(),
+            2,
+        )
+
+    def test_same_request_different_domain_is_separate_candidate(
+        self,
+    ):
+        first = self.create_message(
+            external_id="different-domain-1",
+            sender="person@vendor-a.com",
+            minute=3,
+        )
+
+        second = self.create_message(
+            external_id="different-domain-2",
+            sender="person@vendor-b.com",
+            minute=4,
+        )
+
+        _create_review_candidate(
+            msg=first,
+            item=self.item,
+            extraction_method="deterministic",
+        )
+
+        _create_review_candidate(
+            msg=second,
+            item=self.item,
+            extraction_method="deterministic",
+        )
+
+        self.assertEqual(
+            AIActionCandidate.objects.count(),
+            2,
+        )
+
+    def test_neutral_review_api_exposes_provenance_and_history(
+        self,
+    ):
+        first = self.create_message(
+            external_id="neutral-api-1",
+            sender="one@vendor-a.com",
+            minute=5,
+        )
+
+        second = self.create_message(
+            external_id="neutral-api-2",
+            sender="two@vendor-a.com",
+            minute=6,
+        )
+
+        candidate, _ = (
+            _create_review_candidate(
+                msg=first,
+                item=self.item,
+                extraction_method="deterministic",
+            )
+        )
+
+        _create_review_candidate(
+            msg=second,
+            item=self.item,
+            extraction_method="deterministic",
+        )
+
+        response = self.client.get(
+            "/api/actions/review-candidates/"
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+
+        self.assertEqual(
+            len(response.data),
+            1,
+        )
+
+        payload = response.data[0]
+
+        self.assertEqual(
+            payload["id"],
+            candidate.id,
+        )
+
+        self.assertEqual(
+            payload["extraction_method"],
+            "deterministic",
+        )
+
+        self.assertEqual(
+            payload["source_domain"],
+            "vendor-a.com",
+        )
+
+        self.assertEqual(
+            payload["occurrence_count"],
+            2,
+        )
+
+        self.assertEqual(
+            len(payload["history"]),
+            2,
+        )
+
+    def test_deterministic_candidate_promotes_as_email_provenance(
+        self,
+    ):
+        message = self.create_message(
+            external_id="det-promote-1",
+            sender="person@vendor-a.com",
+            minute=7,
+        )
+
+        candidate, _ = (
+            _create_review_candidate(
+                msg=message,
+                item=self.item,
+                extraction_method="deterministic",
+            )
+        )
+
+        response = self.client.post(
+            (
+                "/api/actions/review-candidates/"
+                f"{candidate.id}/promote/"
+            ),
+            {},
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+
+        action = ActionItem.objects.get()
+
+        self.assertEqual(
+            action.source_type,
+            "email",
+        )
+
+        evidence = KnowledgeEvidence.objects.get()
+
+        self.assertEqual(
+            evidence.metadata.get(
+                "extraction_method"
+            ),
+            "deterministic",
+        )
+
+        self.assertEqual(
+            evidence.metadata.get(
+                "processing_mode"
+            ),
+            "deterministic",
+        )
+
+
+    def test_same_domain_same_request_across_methods_is_one_candidate(
+        self,
+    ):
+        first = self.create_message(
+            external_id="cross-method-action-1",
+            sender="one@vendor-a.com",
+            minute=8,
+        )
+
+        second = self.create_message(
+            external_id="cross-method-action-2",
+            sender="two@vendor-a.com",
+            minute=9,
+        )
+
+        candidate, created = (
+            _create_review_candidate(
+                msg=first,
+                item=self.item,
+                extraction_method="deterministic",
+            )
+        )
+
+        duplicate, duplicate_created = (
+            _create_review_candidate(
+                msg=second,
+                item=self.item,
+                extraction_method="ai",
+            )
+        )
+
+        self.assertTrue(
+            created
+        )
+
+        self.assertFalse(
+            duplicate_created
+        )
+
+        self.assertEqual(
+            candidate.id,
+            duplicate.id,
+        )
+
+        candidate.refresh_from_db()
+
+        self.assertEqual(
+            candidate.extraction_method,
+            "deterministic",
+        )
+
+        self.assertEqual(
+            candidate.occurrence_count,
+            2,
+        )
+
+        methods = set(
+            candidate.occurrences.values_list(
+                "extraction_method",
+                flat=True,
+            )
+        )
+
+        self.assertEqual(
+            methods,
+            {
+                "deterministic",
+                "ai",
+            },
+        )
+
+    def test_shared_mail_domain_different_senders_are_not_merged(
+        self,
+    ):
+        first = self.create_message(
+            external_id="public-domain-action-1",
+            sender="alice@gmail.com",
+            minute=10,
+        )
+
+        second = self.create_message(
+            external_id="public-domain-action-2",
+            sender="bob@gmail.com",
+            minute=11,
+        )
+
+        _create_review_candidate(
+            msg=first,
+            item=self.item,
+            extraction_method="deterministic",
+        )
+
+        _create_review_candidate(
+            msg=second,
+            item=self.item,
+            extraction_method="deterministic",
+        )
+
+        self.assertEqual(
+            AIActionCandidate.objects.count(),
+            2,
+        )

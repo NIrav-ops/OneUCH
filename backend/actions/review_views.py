@@ -22,9 +22,54 @@ def _organization_for(user):
         return None
 
 
+def _occurrence_payload(
+    occurrence,
+):
+    message = occurrence.message
+    conversation_id = (
+        message.conversation_id
+    )
+
+    return {
+        "message":
+            occurrence.message_id,
+        "conversation":
+            conversation_id,
+        "subject":
+            message.subject
+            or "No Subject",
+        "source_domain":
+            occurrence.source_domain,
+        "extraction_method":
+            occurrence.extraction_method,
+        "observed_at":
+            occurrence.observed_at,
+        "open_url": (
+            f"/inbox?conversation={conversation_id}"
+            if conversation_id
+            else "/inbox"
+        ),
+    }
+
+
 def _candidate_payload(candidate):
     message = candidate.message
     conversation_id = message.conversation_id
+
+    history = [
+        _occurrence_payload(
+            occurrence
+        )
+        for occurrence in (
+            candidate
+            .occurrences
+            .select_related(
+                "message",
+                "message__conversation",
+            )
+            .all()[:20]
+        )
+    ]
 
     return {
         "id": candidate.id,
@@ -41,6 +86,16 @@ def _candidate_payload(candidate):
         "reason": candidate.reason,
         "provider": candidate.provider,
         "model": candidate.model,
+        "extraction_method":
+            candidate.extraction_method,
+        "source_domain":
+            candidate.source_domain,
+        "occurrence_count":
+            candidate.occurrence_count,
+        "last_seen_at":
+            candidate.last_seen_at,
+        "history":
+            history,
         "status": candidate.status,
         "created_at": candidate.created_at,
         "updated_at": candidate.updated_at,
@@ -51,6 +106,29 @@ def _candidate_payload(candidate):
         ),
     }
 
+
+def _candidate_source_type(
+    candidate,
+):
+    if (
+        candidate.extraction_method
+        == "deterministic"
+    ):
+        return "email"
+
+    return "ai"
+
+
+def _candidate_processing_mode(
+    candidate,
+):
+    if (
+        candidate.extraction_method
+        == "deterministic"
+    ):
+        return "deterministic"
+
+    return "unknown"
 
 def _source_tenant_is_valid(candidate):
     return (
@@ -143,7 +221,7 @@ class PromoteAIActionCandidateAPIView(APIView):
             return Response(
                 {
                     "error":
-                        "AI Action candidate not found"
+                        "Action review candidate not found"
                 },
                 status=status.HTTP_404_NOT_FOUND,
             )
@@ -159,6 +237,12 @@ class PromoteAIActionCandidateAPIView(APIView):
                 status=status.HTTP_409_CONFLICT,
             )
 
+        promoted_source_type = (
+            _candidate_source_type(
+                candidate
+            )
+        )
+
         existing = (
             ActionItem.objects
             .filter(
@@ -173,12 +257,12 @@ class PromoteAIActionCandidateAPIView(APIView):
         if candidate.status == "promoted":
             if (
                 existing is None
-                or existing.source_type != "ai"
+                or existing.source_type != promoted_source_type
             ):
                 return Response(
                     {
                         "error":
-                            "Promoted candidate has no governed AI Action"
+                            "Promoted candidate has no governed Action"
                     },
                     status=status.HTTP_409_CONFLICT,
                 )
@@ -230,11 +314,15 @@ class PromoteAIActionCandidateAPIView(APIView):
                     candidate.confidence_score,
                 "evidence": candidate.evidence,
                 "processing_mode":
-                    "unknown",
+                    _candidate_processing_mode(
+                        candidate
+                    ),
                 "provider": candidate.provider,
                 "model": candidate.model,
             },
-            source_type="ai",
+            source_type=(
+                promoted_source_type
+            ),
         )
 
         if not created:
@@ -298,7 +386,7 @@ class RejectAIActionCandidateAPIView(APIView):
             return Response(
                 {
                     "error":
-                        "AI Action candidate not found"
+                        "Action review candidate not found"
                 },
                 status=status.HTTP_404_NOT_FOUND,
             )

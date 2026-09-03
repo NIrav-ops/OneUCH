@@ -28,6 +28,23 @@ urlpatterns = [
     path("<int:approval_id>/ignore/", IgnoreApprovalAPIView.as_view(), name="ignore-approval-item"),
     path("<int:approval_id>/reopen/", ReopenApprovalAPIView.as_view(), name="reopen-approval-item"),
     path(
+        "review-candidates/",
+        AIApprovalCandidateListAPIView.as_view(),
+        name="approval-review-candidate-list",
+    ),
+    path(
+        "review-candidates/<int:candidate_id>/promote/",
+        PromoteAIApprovalCandidateAPIView.as_view(),
+        name="approval-review-candidate-promote",
+    ),
+    path(
+        "review-candidates/<int:candidate_id>/reject/",
+        RejectAIApprovalCandidateAPIView.as_view(),
+        name="approval-review-candidate-reject",
+    ),
+
+    # Backwards-compatible PR3B AI aliases.
+    path(
         "ai-candidates/",
         AIApprovalCandidateListAPIView.as_view(),
         name="ai-approval-candidate-list",

@@ -4,7 +4,7 @@ import axios from "../axiosConfig";
 export default function ApprovalCenter() {
   const [approvals, setApprovals] = useState([]);
   const [teamMembers, setTeamMembers] = useState([]);
-  const [aiApprovalCandidates, setAiApprovalCandidates] = useState([]);
+  const [reviewCandidates, setReviewCandidates] = useState([]);
   const [candidateBusyId, setCandidateBusyId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -22,7 +22,7 @@ export default function ApprovalCenter() {
       const [approvalsRes, teamMembersRes, candidatesRes] = await Promise.all([
         axios.get("/api/approvals/"),
         axios.get("/api/approvals/team-members/"),
-        axios.get("/api/approvals/ai-candidates/"),
+        axios.get("/api/approvals/review-candidates/"),
       ]);
 
       const approvalData = Array.isArray(approvalsRes.data) ? approvalsRes.data : [];
@@ -33,7 +33,7 @@ export default function ApprovalCenter() {
 
       setApprovals(approvalData);
       setTeamMembers(membersData);
-      setAiApprovalCandidates(candidateData);
+      setReviewCandidates(candidateData);
 
       const initialNotes = {};
       const initialAssigned = {};
@@ -125,20 +125,20 @@ export default function ApprovalCenter() {
   };
 
 
-  const reviewAICandidate = async (candidateId, decision) => {
+  const reviewCandidate = async (candidateId, decision) => {
     try {
       setCandidateBusyId(candidateId);
 
       await axios.post(
-        `/api/approvals/ai-candidates/${candidateId}/${decision}/`
+        `/api/approvals/review-candidates/${candidateId}/${decision}/`
       );
 
       await fetchData();
     } catch (err) {
-      console.error("AI Approval review failed:", err);
+      console.error("Approval review failed:", err);
       alert(
         err.response?.data?.error ||
-          "Could not review the AI Approval suggestion."
+          "Could not review the Approval suggestion."
       );
     } finally {
       setCandidateBusyId(null);
@@ -221,7 +221,7 @@ export default function ApprovalCenter() {
 
 
         {/* ===================================================
-            AI HUMAN REVIEW QUEUE
+            HUMAN REVIEW QUEUE
         ==================================================== */}
 
         <section className="mt-5 overflow-hidden rounded-[26px] border border-violet-200 bg-white shadow-sm">
@@ -232,33 +232,33 @@ export default function ApprovalCenter() {
                   Human review gate
                 </p>
                 <span className="rounded-full border border-violet-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-violet-700">
-                  AI does not authorize
+                  No automatic authorization
                 </span>
               </div>
               <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-950">
-                AI Approval suggestions
+                Approval suggestions
               </h2>
               <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-500">
-                AI suggestions remain outside the Approval queue until a human explicitly promotes or rejects them.
+                Deterministic and governed AI suggestions remain outside the Approval queue until a human explicitly promotes or rejects them.
               </p>
             </div>
             <span className="w-fit rounded-full bg-violet-100 px-3 py-1 text-xs font-semibold text-violet-700">
-              {aiApprovalCandidates.length} awaiting review
+              {reviewCandidates.length} awaiting review
             </span>
           </div>
 
-          {aiApprovalCandidates.length === 0 ? (
+          {reviewCandidates.length === 0 ? (
             <div className="px-6 py-8 text-center">
               <p className="text-sm font-semibold text-slate-700">
-                No AI Approval suggestions awaiting review
+                No Approval suggestions awaiting review
               </p>
               <p className="mt-1 text-xs text-slate-400">
-                Suggestions will appear here only after governed AI calibration is enabled.
+                Governed extraction suggestions will appear here when review routing is enabled.
               </p>
             </div>
           ) : (
             <div className="divide-y divide-slate-100">
-              {aiApprovalCandidates.map((candidate) => {
+              {reviewCandidates.map((candidate) => {
                 const busy = candidateBusyId === candidate.id;
 
                 return (
@@ -267,11 +267,29 @@ export default function ApprovalCenter() {
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-violet-700">
-                            Needs AI review
+                            {candidate.extraction_method === "deterministic" ? "Deterministic review" : "AI review"}
                           </span>
                           <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold text-slate-500">
                             Confidence {candidate.confidence_score ?? 0}%
                           </span>
+
+                          <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold text-slate-600">
+                            {candidate.extraction_method === "deterministic"
+                              ? "Deterministic"
+                              : "AI"}
+                          </span>
+
+                          {candidate.source_domain && (
+                            <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold text-slate-500">
+                              {candidate.source_domain}
+                            </span>
+                          )}
+
+                          {(candidate.occurrence_count ?? 1) > 1 && (
+                            <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[10px] font-semibold text-amber-700">
+                              {candidate.occurrence_count} occurrences
+                            </span>
+                          )}
                         </div>
 
                         <p className="mt-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
@@ -282,7 +300,7 @@ export default function ApprovalCenter() {
                         </p>
 
                         <h3 className="mt-3 text-base font-semibold tracking-tight text-slate-950">
-                          {candidate.title || "Untitled AI Approval suggestion"}
+                          {candidate.title || "Untitled Approval suggestion"}
                         </h3>
 
                         {candidate.description && (
@@ -308,7 +326,7 @@ export default function ApprovalCenter() {
                           Why One UCH suggested this
                         </p>
                         <p className="mt-2 text-xs leading-5 text-slate-600">
-                          {candidate.reason || "No additional AI rationale supplied."}
+                          {candidate.reason || "No additional extraction rationale supplied."}
                         </p>
 
                         {candidate.approver_reference && (
@@ -329,7 +347,7 @@ export default function ApprovalCenter() {
                           <button
                             type="button"
                             disabled={busy}
-                            onClick={() => reviewAICandidate(candidate.id, "promote")}
+                            onClick={() => reviewCandidate(candidate.id, "promote")}
                             className="rounded-xl bg-slate-950 px-3.5 py-2.5 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {busy ? "Processing..." : "Add to Approval Queue"}
@@ -338,7 +356,7 @@ export default function ApprovalCenter() {
                           <button
                             type="button"
                             disabled={busy}
-                            onClick={() => reviewAICandidate(candidate.id, "reject")}
+                            onClick={() => reviewCandidate(candidate.id, "reject")}
                             className="rounded-xl border border-rose-200 bg-white px-3.5 py-2.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             Reject suggestion
