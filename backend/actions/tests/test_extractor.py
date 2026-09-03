@@ -174,19 +174,14 @@ class EnterpriseActionPrecisionTests(SimpleTestCase):
 
         self.assertEqual(actions, [])
 
-    def test_your_approval_required_is_action(self):
+    def test_approval_required_is_not_action(self):
         actions = extract_actions(
             "Approval required",
             "Your approval is required before "
             "we proceed.",
         )
 
-        self.assertTrue(
-            any(
-                item["title"] == "Approval Required"
-                for item in actions
-            )
-        )
+        self.assertEqual(actions, [])
 
     def test_fyi_payment_update_is_not_action(self):
         actions = extract_actions(
@@ -209,6 +204,47 @@ class EnterpriseActionPrecisionTests(SimpleTestCase):
                 for item in actions
             )
         )
+
+    def test_privacy_policy_review_is_not_action(self):
+        actions = extract_actions(
+            "Privacy policy update",
+            "Please review our updated Privacy Policy "
+            "for information about recent changes.",
+        )
+
+        self.assertEqual(actions, [])
+
+    def test_terms_of_service_review_is_not_action(self):
+        actions = extract_actions(
+            "Terms update",
+            "Please review the updated Terms of Service "
+            "before continuing.",
+        )
+
+        self.assertEqual(actions, [])
+
+    def test_descriptive_review_required_is_not_action(self):
+        actions = extract_actions(
+            "Automated processing notice",
+            "Human review is required for some "
+            "automated classifications.",
+        )
+
+        self.assertEqual(actions, [])
+
+    def test_explicit_security_review_request_remains_action(self):
+        actions = extract_actions(
+            "Security notice",
+            "Please review the recent account activity.",
+        )
+
+        self.assertTrue(
+            any(
+                item["title"] == "Review Required"
+                for item in actions
+            )
+        )
+
 
 class ActionDueDateExtractionTests(SimpleTestCase):
 

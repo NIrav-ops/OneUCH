@@ -6,20 +6,9 @@ from django.utils import timezone
 
 ACTION_PATTERNS = [
     {
-        "trigger": r"\bapprove|approval\b",
-        "intent": (
-            r"\b(?:please|kindly)\s+approve\b"
-            r"|\bapproval\s+(?:is\s+)?required\b"
-            r"|\brequires?\s+(?:your\s+)?approval\b"
-        ),
-        "title": "Approval Required",
-        "priority": 90,
-    },
-    {
         "trigger": r"\breview\b",
         "intent": (
             r"\b(?:please|kindly)\s+review\b"
-            r"|\breview\s+(?:is\s+)?required\b"
             r"|\brequires?\s+(?:your\s+)?review\b"
         ),
         "title": "Review Required",
@@ -75,6 +64,12 @@ NON_ACTION_PATTERNS = [
     r"\bfor\s+your\s+records\b",
     r"\bpayment\s+(?:has\s+been\s+)?received\b",
     r"\bpayment\s+received\s+successfully\b",
+]
+
+
+REVIEW_SUPPRESSION_PATTERNS = [
+    r"\bprivacy\s+policy\b",
+    r"\bterms\s+of\s+service\b",
 ]
 
 
@@ -222,20 +217,38 @@ def extract_actions(
 
         if trigger_found and intent_found:
 
+            evidence = (
+                _extract_matching_evidence(
+                    subject,
+                    body,
+                    [
+                        item["intent"]
+                    ],
+                )
+            )
+
+            if (
+                item["title"] == "Review Required"
+                and any(
+                    re.search(
+                        pattern,
+                        evidence,
+                        flags=re.IGNORECASE,
+                    )
+                    for pattern in (
+                        REVIEW_SUPPRESSION_PATTERNS
+                    )
+                )
+            ):
+                continue
+
             actions.append({
                 "title": item["title"],
                 "description": subject,
                 "priority": item["priority"],
                 "confidence_score": 80,
                 "due_date": due_date,
-                "evidence":
-                    _extract_matching_evidence(
-                        subject,
-                        body,
-                        [
-                            item["intent"]
-                        ],
-                    ),
+                "evidence": evidence,
             })
 
     return actions
