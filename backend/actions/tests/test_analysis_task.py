@@ -74,7 +74,9 @@ class ActionAnalysisTaskTests(TestCase):
             self.ai_account_override.disable
         )
 
-    def test_analysis_persists_extracted_due_date(self):
+    def test_analysis_routes_extracted_due_date_to_review(
+        self,
+    ):
         received_at = datetime(
             2026,
             8,
@@ -106,21 +108,37 @@ class ActionAnalysisTaskTests(TestCase):
 
         self.assertEqual(processed, 1)
 
-        action = ActionItem.objects.get(
+        self.assertFalse(
+            ActionItem.objects.filter(
+                message=message,
+            ).exists()
+        )
+
+        candidate = AIActionCandidate.objects.get(
             message=message,
         )
 
         self.assertEqual(
-            action.title,
+            candidate.title,
             "Send Quotation",
         )
 
-        self.assertIsNotNone(
-            action.due_date
+        self.assertEqual(
+            candidate.extraction_method,
+            "deterministic",
         )
 
         self.assertEqual(
-            action.due_date.date().isoformat(),
+            candidate.status,
+            "pending_review",
+        )
+
+        self.assertIsNotNone(
+            candidate.due_date
+        )
+
+        self.assertEqual(
+            candidate.due_date.date().isoformat(),
             "2026-08-28",
         )
 
@@ -130,7 +148,9 @@ class ActionAnalysisTaskTests(TestCase):
             message.action_analyzed
         )
 
-    def test_reanalysis_does_not_duplicate_action(self):
+    def test_reanalysis_does_not_duplicate_review_candidate(
+        self,
+    ):
         message = InboxMessage.objects.create(
             user=self.user,
             organization=self.organization,
@@ -161,12 +181,30 @@ class ActionAnalysisTaskTests(TestCase):
             ActionItem.objects.filter(
                 message=message,
             ).count(),
+            0,
+        )
+
+        self.assertEqual(
+            AIActionCandidate.objects.filter(
+                message=message,
+            ).count(),
+            1,
+        )
+
+        candidate = AIActionCandidate.objects.get(
+            message=message,
+        )
+
+        self.assertEqual(
+            candidate.occurrence_count,
             1,
         )
 
         message.action_analyzed = False
         message.save(
-            update_fields=["action_analyzed"]
+            update_fields=[
+                "action_analyzed"
+            ]
         )
 
         analyze_new_messages.run()
@@ -175,6 +213,20 @@ class ActionAnalysisTaskTests(TestCase):
             ActionItem.objects.filter(
                 message=message,
             ).count(),
+            0,
+        )
+
+        self.assertEqual(
+            AIActionCandidate.objects.filter(
+                message=message,
+            ).count(),
+            1,
+        )
+
+        candidate.refresh_from_db()
+
+        self.assertEqual(
+            candidate.occurrence_count,
             1,
         )
 
@@ -228,7 +280,9 @@ class ActionAnalysisTaskTests(TestCase):
             message.action_analyzed
         )
 
-    def test_analysis_can_target_specific_message_ids(self):
+    def test_analysis_can_target_specific_message_ids(
+        self,
+    ):
         target = InboxMessage.objects.create(
             user=self.user,
             organization=self.organization,
@@ -239,7 +293,9 @@ class ActionAnalysisTaskTests(TestCase):
             sender="customer@example.com",
             recipients=self.user.email,
             subject="Quotation required",
-            body="Please send the revised quotation by Friday.",
+            body=(
+                "Please send the revised quotation by Friday."
+            ),
             received_at=datetime(
                 2026,
                 8,
@@ -261,7 +317,9 @@ class ActionAnalysisTaskTests(TestCase):
             sender="other@example.com",
             recipients=self.user.email,
             subject="Contract review required",
-            body="Please review the attached contract.",
+            body=(
+                "Please review the attached contract."
+            ),
             received_at=datetime(
                 2026,
                 8,
@@ -274,25 +332,42 @@ class ActionAnalysisTaskTests(TestCase):
         )
 
         processed = analyze_new_messages.run(
-            message_ids=[target.id]
+            message_ids=[
+                target.id
+            ]
         )
 
-        self.assertEqual(processed, 1)
+        self.assertEqual(
+            processed,
+            1,
+        )
 
-        self.assertTrue(
+        self.assertFalse(
             ActionItem.objects.filter(
                 message=target,
+            ).exists()
+        )
+
+        self.assertTrue(
+            AIActionCandidate.objects.filter(
+                message=target,
+                extraction_method="deterministic",
             ).exists()
         )
 
         target.refresh_from_db()
         untouched.refresh_from_db()
 
-        self.assertTrue(target.action_analyzed)
-        self.assertFalse(untouched.action_analyzed)
+        self.assertTrue(
+            target.action_analyzed
+        )
 
         self.assertFalse(
-            ActionItem.objects.filter(
+            untouched.action_analyzed
+        )
+
+        self.assertFalse(
+            AIActionCandidate.objects.filter(
                 message=untouched,
             ).exists()
         )
@@ -349,7 +424,7 @@ class ActionAnalysisTaskTests(TestCase):
         ACTION_AI_AUTO_CREATE_THRESHOLD=90,
         ACTION_AI_REVIEW_THRESHOLD=75,
     )
-    def test_deterministic_action_does_not_call_ai(
+    def test_deterministic_action_routes_to_review_and_does_not_call_ai(
         self,
         ai_extract_mock,
     ):
@@ -381,7 +456,9 @@ class ActionAnalysisTaskTests(TestCase):
         )
 
         processed = analyze_new_messages.run(
-            message_ids=[message.id]
+            message_ids=[
+                message.id
+            ]
         )
 
         self.assertEqual(
@@ -391,15 +468,31 @@ class ActionAnalysisTaskTests(TestCase):
 
         ai_extract_mock.assert_not_called()
 
-        action = ActionItem.objects.get(
+        self.assertFalse(
+            ActionItem.objects.filter(
+                message=message,
+            ).exists()
+        )
+
+        candidate = AIActionCandidate.objects.get(
             message=message,
         )
 
         self.assertEqual(
-            action.source_type,
-            "email",
+            candidate.extraction_method,
+            "deterministic",
         )
 
+        self.assertEqual(
+            candidate.status,
+            "pending_review",
+        )
+
+        message.refresh_from_db()
+
+        self.assertTrue(
+            message.action_analyzed
+        )
 
     @patch(
         "actions.tasks."

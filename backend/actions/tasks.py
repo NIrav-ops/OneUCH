@@ -425,10 +425,12 @@ def analyze_new_messages(
         if deterministic_actions:
 
             for item in deterministic_actions:
-                _create_action(
+                _create_review_candidate(
                     msg=msg,
                     item=item,
-                    source_type="email",
+                    extraction_method=(
+                        "deterministic"
+                    ),
                 )
 
             msg.action_analyzed = True

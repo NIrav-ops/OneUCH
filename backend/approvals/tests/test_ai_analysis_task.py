@@ -129,7 +129,7 @@ class ApprovalAIAnalysisTaskTests(
     @override_settings(
         **AI_SETTINGS
     )
-    def test_deterministic_hit_does_not_call_ai(
+    def test_deterministic_hit_routes_to_review_and_does_not_call_ai(
         self,
         ai_mock,
     ):
@@ -163,15 +163,30 @@ class ApprovalAIAnalysisTaskTests(
 
         ai_mock.assert_not_called()
 
-        approval = (
-            ApprovalItem.objects.get(
+        self.assertFalse(
+            ApprovalItem.objects.filter(
                 message=message,
-            )
+            ).exists()
+        )
+
+        candidate = AIApprovalCandidate.objects.get(
+            message=message,
         )
 
         self.assertEqual(
-            approval.source_type,
-            "email",
+            candidate.extraction_method,
+            "deterministic",
+        )
+
+        self.assertEqual(
+            candidate.status,
+            "pending_review",
+        )
+
+        message.refresh_from_db()
+
+        self.assertTrue(
+            message.approval_analyzed
         )
 
     @patch(

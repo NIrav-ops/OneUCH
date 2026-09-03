@@ -8,7 +8,10 @@ from django.contrib.auth import (
 )
 from django.test import TestCase
 
-from approvals.models import ApprovalItem
+from approvals.models import (
+    ApprovalItem,
+    AIApprovalCandidate,
+)
 from approvals.tasks import analyze_new_approvals
 from inbox.models import (
     InboxMessage,
@@ -72,7 +75,7 @@ class ApprovalAnalysisTaskTests(
             ),
         )
 
-    def test_inbound_approval_is_created(
+    def test_inbound_approval_is_routed_to_review(
         self,
     ):
         message = self.create_message(
@@ -99,34 +102,43 @@ class ApprovalAnalysisTaskTests(
             1,
         )
 
-        approval = (
-            ApprovalItem.objects.get(
+        self.assertFalse(
+            ApprovalItem.objects.filter(
                 message=message,
-            )
+            ).exists()
+        )
+
+        candidate = AIApprovalCandidate.objects.get(
+            message=message,
         )
 
         self.assertEqual(
-            approval.title,
+            candidate.title,
             "Approval Required",
         )
 
         self.assertEqual(
-            approval.priority,
+            candidate.priority,
             90,
         )
 
         self.assertEqual(
-            approval.confidence_score,
+            candidate.confidence_score,
             85,
         )
 
         self.assertEqual(
-            approval.source_type,
-            "email",
+            candidate.extraction_method,
+            "deterministic",
+        )
+
+        self.assertEqual(
+            candidate.status,
+            "pending_review",
         )
 
         self.assertIsNone(
-            approval.due_date
+            candidate.due_date
         )
 
         message.refresh_from_db()
@@ -245,14 +257,21 @@ class ApprovalAnalysisTaskTests(
             1,
         )
 
-        self.assertTrue(
+        self.assertFalse(
             ApprovalItem.objects.filter(
                 message=target,
             ).exists()
         )
 
+        self.assertTrue(
+            AIApprovalCandidate.objects.filter(
+                message=target,
+                extraction_method="deterministic",
+            ).exists()
+        )
+
         self.assertFalse(
-            ApprovalItem.objects.filter(
+            AIApprovalCandidate.objects.filter(
                 message=untouched,
             ).exists()
         )
@@ -268,7 +287,7 @@ class ApprovalAnalysisTaskTests(
             untouched.approval_analyzed
         )
 
-    def test_reanalysis_does_not_duplicate_approval(
+    def test_reanalysis_does_not_duplicate_review_candidate(
         self,
     ):
         message = self.create_message(
@@ -290,10 +309,27 @@ class ApprovalAnalysisTaskTests(
             ApprovalItem.objects.filter(
                 message=message,
             ).count(),
+            0,
+        )
+
+        self.assertEqual(
+            AIApprovalCandidate.objects.filter(
+                message=message,
+            ).count(),
+            1,
+        )
+
+        candidate = AIApprovalCandidate.objects.get(
+            message=message,
+        )
+
+        self.assertEqual(
+            candidate.occurrence_count,
             1,
         )
 
         message.approval_analyzed = False
+
         message.save(
             update_fields=[
                 "approval_analyzed"
@@ -310,6 +346,20 @@ class ApprovalAnalysisTaskTests(
             ApprovalItem.objects.filter(
                 message=message,
             ).count(),
+            0,
+        )
+
+        self.assertEqual(
+            AIApprovalCandidate.objects.filter(
+                message=message,
+            ).count(),
+            1,
+        )
+
+        candidate.refresh_from_db()
+
+        self.assertEqual(
+            candidate.occurrence_count,
             1,
         )
 

@@ -429,10 +429,12 @@ def analyze_new_approvals(
         if approvals:
 
             for item in approvals:
-                _create_approval(
+                _create_review_candidate(
                     msg=msg,
                     item=item,
-                    source_type="email",
+                    extraction_method=(
+                        "deterministic"
+                    ),
                 )
 
             msg.approval_analyzed = True
