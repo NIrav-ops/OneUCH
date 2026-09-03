@@ -301,6 +301,10 @@ class AIApprovalCandidate(models.Model):
                     "candidate_fingerprint",
                 ],
                 condition=(
+                    models.Q(
+                        status="pending_review"
+                    )
+                    &
                     ~models.Q(
                         source_domain=""
                     )

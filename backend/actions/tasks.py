@@ -153,14 +153,22 @@ def _create_review_candidate(
     """
     Create or observe one governed Action review candidate.
 
-    Dedupe is deliberately scoped to:
-        user
-        organization
-        extraction method
-        normalized sender domain
-        conservative evidence fingerprint
+    Lifecycle rules:
 
-    The same request from another domain remains independent.
+    1. Same conversation + existing candidate:
+       retain that candidate lifecycle.
+
+    2. Any unresolved candidate with the same governed
+       domain/request identity:
+       retain one pending review candidate.
+
+    3. Resolved candidate + new conversation:
+       create a new pending review cycle.
+
+    4. Resolved candidate + same conversation:
+       preserve the prior human decision and append history.
+
+    Fuzzy/semantic dedupe is intentionally not used here.
     """
 
     title = item["title"]
@@ -201,65 +209,94 @@ def _create_review_candidate(
     )
 
     defaults = {
-        "message": msg,
-        "title": title,
-        "description": item.get(
-            "description",
-            "",
-        ),
-        "owner_reference": (
+        "message":
+            msg,
+
+        "title":
+            title,
+
+        "description":
             item.get(
-                "owner_reference"
-            )
-            or ""
-        ),
-        "due_date": item.get(
-            "due_date"
-        ),
-        "priority": item.get(
-            "priority",
-            0,
-        ),
-        "confidence_score": item.get(
-            "confidence_score",
-            0,
-        ),
-        "evidence": evidence,
-        "reason": item.get(
-            "reason",
-            "",
-        ),
-        "provider": (
+                "description",
+                "",
+            ),
+
+        "owner_reference":
+            (
+                item.get(
+                    "owner_reference"
+                )
+                or ""
+            ),
+
+        "due_date":
             item.get(
-                "provider"
-            )
-            or ""
-        ),
-        "model": (
+                "due_date"
+            ),
+
+        "priority":
             item.get(
-                "model"
-            )
-            or ""
-        ),
+                "priority",
+                0,
+            ),
+
+        "confidence_score":
+            item.get(
+                "confidence_score",
+                0,
+            ),
+
+        "evidence":
+            evidence,
+
+        "reason":
+            item.get(
+                "reason",
+                "",
+            ),
+
+        "provider":
+            (
+                item.get(
+                    "provider"
+                )
+                or ""
+            ),
+
+        "model":
+            (
+                item.get(
+                    "model"
+                )
+                or ""
+            ),
+
         "extraction_method":
             extraction_method,
+
         "source_domain":
             source_domain,
+
         "candidate_fingerprint":
             fingerprint,
+
         "occurrence_count":
             1,
+
         "last_seen_at":
             msg.received_at,
     }
+
+    candidate = None
+    created = False
 
     if (
         source_domain
         and fingerprint
     ):
-        candidate, created = (
+        scope = (
             AIActionCandidate.objects
-            .get_or_create(
+            .filter(
                 user=msg.user,
                 organization=(
                     msg.organization
@@ -270,24 +307,125 @@ def _create_review_candidate(
                 candidate_fingerprint=(
                     fingerprint
                 ),
-                defaults=defaults,
             )
         )
+
+        # ----------------------------------------------------
+        # Same conversation stays in the same lifecycle,
+        # even if already promoted/rejected.
+        # ----------------------------------------------------
+
+        if msg.conversation_id:
+
+            candidate = (
+                scope
+                .filter(
+                    status="pending_review",
+                    occurrences__message__conversation_id=(
+                        msg.conversation_id
+                    ),
+                )
+                .distinct()
+                .order_by(
+                    "-last_seen_at",
+                    "-created_at",
+                    "-id",
+                )
+                .first()
+            )
+
+            if candidate is None:
+                candidate = (
+                    scope
+                    .exclude(
+                        status="pending_review"
+                    )
+                    .filter(
+                        occurrences__message__conversation_id=(
+                            msg.conversation_id
+                        ),
+                    )
+                    .distinct()
+                    .order_by(
+                        "-last_seen_at",
+                        "-updated_at",
+                        "-id",
+                    )
+                    .first()
+                )
+
+        # ----------------------------------------------------
+        # Across different conversations, one unresolved
+        # candidate still represents the active request.
+        # ----------------------------------------------------
+
+        if candidate is None:
+            candidate = (
+                scope
+                .filter(
+                    status="pending_review"
+                )
+                .order_by(
+                    "-last_seen_at",
+                    "-created_at",
+                    "-id",
+                )
+                .first()
+            )
+
+        # ----------------------------------------------------
+        # No active/same-thread lifecycle:
+        # start a new review cycle.
+        # Partial unique constraint guarantees only one
+        # pending candidate for this identity.
+        # ----------------------------------------------------
+
+        if candidate is None:
+            candidate, created = (
+                AIActionCandidate.objects
+                .get_or_create(
+                    user=msg.user,
+                    organization=(
+                        msg.organization
+                    ),
+                    source_domain=(
+                        source_domain
+                    ),
+                    candidate_fingerprint=(
+                        fingerprint
+                    ),
+                    status="pending_review",
+                    defaults=defaults,
+                )
+            )
+
     else:
+        fallback_defaults = {
+            "user":
+                msg.user,
+
+            "organization":
+                msg.organization,
+
+            **{
+                key: value
+                for key, value
+                in defaults.items()
+                if key not in {
+                    "message",
+                    "title",
+                }
+            },
+        }
+
         candidate, created = (
             AIActionCandidate.objects
             .get_or_create(
                 message=msg,
                 title=title,
-                defaults={
-                    key: value
-                    for key, value
-                    in defaults.items()
-                    if key not in {
-                        "message",
-                        "title",
-                    }
-                },
+                defaults=(
+                    fallback_defaults
+                ),
             )
         )
 
@@ -300,8 +438,10 @@ def _create_review_candidate(
             defaults={
                 "extraction_method":
                     extraction_method,
+
                 "source_domain":
                     source_domain,
+
                 "observed_at":
                     msg.received_at,
             },
@@ -361,7 +501,6 @@ def _create_review_candidate(
         candidate,
         created,
     )
-
 
 def _create_ai_review_candidate(
     *,

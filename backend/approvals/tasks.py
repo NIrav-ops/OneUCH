@@ -173,9 +173,9 @@ def _create_review_candidate(
     """
     Create or observe one governed Approval review candidate.
 
-    Same-domain repeated evidence is retained as occurrence
-    history rather than creating another candidate.
-    Different sender domains remain separate.
+    Pending duplicates remain one candidate.
+    Resolved same-thread repeats become occurrence history.
+    Resolved new-thread repeats begin a new review cycle.
     """
 
     title = item["title"]
@@ -216,65 +216,94 @@ def _create_review_candidate(
     )
 
     defaults = {
-        "message": msg,
-        "title": title,
-        "description": item.get(
-            "description",
-            "",
-        ),
-        "approver_reference": (
+        "message":
+            msg,
+
+        "title":
+            title,
+
+        "description":
             item.get(
-                "approver_reference"
-            )
-            or ""
-        ),
-        "due_date": item.get(
-            "due_date"
-        ),
-        "priority": item.get(
-            "priority",
-            0,
-        ),
-        "confidence_score": item.get(
-            "confidence_score",
-            0,
-        ),
-        "evidence": evidence,
-        "reason": item.get(
-            "reason",
-            "",
-        ),
-        "provider": (
+                "description",
+                "",
+            ),
+
+        "approver_reference":
+            (
+                item.get(
+                    "approver_reference"
+                )
+                or ""
+            ),
+
+        "due_date":
             item.get(
-                "provider"
-            )
-            or ""
-        ),
-        "model": (
+                "due_date"
+            ),
+
+        "priority":
             item.get(
-                "model"
-            )
-            or ""
-        ),
+                "priority",
+                0,
+            ),
+
+        "confidence_score":
+            item.get(
+                "confidence_score",
+                0,
+            ),
+
+        "evidence":
+            evidence,
+
+        "reason":
+            item.get(
+                "reason",
+                "",
+            ),
+
+        "provider":
+            (
+                item.get(
+                    "provider"
+                )
+                or ""
+            ),
+
+        "model":
+            (
+                item.get(
+                    "model"
+                )
+                or ""
+            ),
+
         "extraction_method":
             extraction_method,
+
         "source_domain":
             source_domain,
+
         "candidate_fingerprint":
             fingerprint,
+
         "occurrence_count":
             1,
+
         "last_seen_at":
             msg.received_at,
     }
+
+    candidate = None
+    created = False
 
     if (
         source_domain
         and fingerprint
     ):
-        candidate, created = (
+        scope = (
             AIApprovalCandidate.objects
-            .get_or_create(
+            .filter(
                 user=msg.user,
                 organization=(
                     msg.organization
@@ -285,24 +314,108 @@ def _create_review_candidate(
                 candidate_fingerprint=(
                     fingerprint
                 ),
-                defaults=defaults,
             )
         )
+
+        if msg.conversation_id:
+
+            candidate = (
+                scope
+                .filter(
+                    status="pending_review",
+                    occurrences__message__conversation_id=(
+                        msg.conversation_id
+                    ),
+                )
+                .distinct()
+                .order_by(
+                    "-last_seen_at",
+                    "-created_at",
+                    "-id",
+                )
+                .first()
+            )
+
+            if candidate is None:
+                candidate = (
+                    scope
+                    .exclude(
+                        status="pending_review"
+                    )
+                    .filter(
+                        occurrences__message__conversation_id=(
+                            msg.conversation_id
+                        ),
+                    )
+                    .distinct()
+                    .order_by(
+                        "-last_seen_at",
+                        "-updated_at",
+                        "-id",
+                    )
+                    .first()
+                )
+
+        if candidate is None:
+            candidate = (
+                scope
+                .filter(
+                    status="pending_review"
+                )
+                .order_by(
+                    "-last_seen_at",
+                    "-created_at",
+                    "-id",
+                )
+                .first()
+            )
+
+        if candidate is None:
+            candidate, created = (
+                AIApprovalCandidate.objects
+                .get_or_create(
+                    user=msg.user,
+                    organization=(
+                        msg.organization
+                    ),
+                    source_domain=(
+                        source_domain
+                    ),
+                    candidate_fingerprint=(
+                        fingerprint
+                    ),
+                    status="pending_review",
+                    defaults=defaults,
+                )
+            )
+
     else:
+        fallback_defaults = {
+            "user":
+                msg.user,
+
+            "organization":
+                msg.organization,
+
+            **{
+                key: value
+                for key, value
+                in defaults.items()
+                if key not in {
+                    "message",
+                    "title",
+                }
+            },
+        }
+
         candidate, created = (
             AIApprovalCandidate.objects
             .get_or_create(
                 message=msg,
                 title=title,
-                defaults={
-                    key: value
-                    for key, value
-                    in defaults.items()
-                    if key not in {
-                        "message",
-                        "title",
-                    }
-                },
+                defaults=(
+                    fallback_defaults
+                ),
             )
         )
 
@@ -315,8 +428,10 @@ def _create_review_candidate(
             defaults={
                 "extraction_method":
                     extraction_method,
+
                 "source_domain":
                     source_domain,
+
                 "observed_at":
                     msg.received_at,
             },
@@ -376,7 +491,6 @@ def _create_review_candidate(
         candidate,
         created,
     )
-
 
 def _create_ai_review_candidate(
     *,

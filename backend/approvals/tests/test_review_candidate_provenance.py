@@ -18,6 +18,7 @@ from approvals.tasks import (
     _create_review_candidate,
 )
 from inbox.models import (
+    Conversation,
     InboxMessage,
     Organization,
     OrganizationUser,
@@ -80,12 +81,14 @@ class ApprovalReviewCandidateProvenanceTests(
         external_id,
         sender,
         minute,
+        conversation=None,
     ):
         return InboxMessage.objects.create(
             user=self.user,
             organization=self.organization,
             platform="gmail",
             direction="inbound",
+            conversation=conversation,
             external_message_id=external_id,
             sender=sender,
             recipients=self.user.email,
@@ -436,4 +439,262 @@ class ApprovalReviewCandidateProvenanceTests(
         self.assertEqual(
             AIApprovalCandidate.objects.count(),
             2,
+        )
+
+
+    def test_promoted_same_conversation_repeat_stays_history_only(
+        self,
+    ):
+        conversation = Conversation.objects.create(
+            user=self.user,
+            organization=self.organization,
+            subject="Recurring approval request",
+            conversation_key=(
+                "pr3d7c-approval-same-conversation"
+            ),
+        )
+
+        first = self.create_message(
+            external_id="approval-cycle-same-1",
+            sender="one@vendor-a.com",
+            minute=12,
+            conversation=conversation,
+        )
+
+        candidate, _ = (
+            _create_review_candidate(
+                msg=first,
+                item=self.item,
+                extraction_method="deterministic",
+            )
+        )
+
+        response = self.client.post(
+            (
+                "/api/approvals/review-candidates/"
+                f"{candidate.id}/promote/"
+            ),
+            {},
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+
+        candidate.refresh_from_db()
+
+        self.assertEqual(
+            candidate.status,
+            "promoted",
+        )
+
+        second = self.create_message(
+            external_id="approval-cycle-same-2",
+            sender="two@vendor-a.com",
+            minute=13,
+            conversation=conversation,
+        )
+
+        repeated, created = (
+            _create_review_candidate(
+                msg=second,
+                item=self.item,
+                extraction_method="deterministic",
+            )
+        )
+
+        self.assertFalse(
+            created
+        )
+
+        self.assertEqual(
+            repeated.id,
+            candidate.id,
+        )
+
+        repeated.refresh_from_db()
+
+        self.assertEqual(
+            repeated.status,
+            "promoted",
+        )
+
+        self.assertEqual(
+            repeated.occurrence_count,
+            2,
+        )
+
+        self.assertEqual(
+            AIApprovalCandidate.objects.count(),
+            1,
+        )
+
+        pending = self.client.get(
+            "/api/approvals/review-candidates/"
+        )
+
+        self.assertEqual(
+            len(pending.data),
+            0,
+        )
+
+        history = self.client.get(
+            (
+                "/api/approvals/review-candidates/"
+                "?scope=history"
+            )
+        )
+
+        self.assertEqual(
+            history.status_code,
+            200,
+        )
+
+        self.assertEqual(
+            len(history.data),
+            1,
+        )
+
+        payload = history.data[0]
+
+        self.assertEqual(
+            payload["status"],
+            "promoted",
+        )
+
+        self.assertTrue(
+            payload[
+                "post_decision_recurrence"
+            ]
+        )
+
+        self.assertEqual(
+            payload["occurrence_count"],
+            2,
+        )
+
+        self.assertEqual(
+            len(payload["history"]),
+            2,
+        )
+
+    def test_promoted_new_conversation_starts_new_review_cycle(
+        self,
+    ):
+        first_conversation = (
+            Conversation.objects.create(
+                user=self.user,
+                organization=self.organization,
+                subject="Old approval cycle",
+                conversation_key=(
+                    "pr3d7c-approval-cycle-old"
+                ),
+            )
+        )
+
+        second_conversation = (
+            Conversation.objects.create(
+                user=self.user,
+                organization=self.organization,
+                subject="New approval cycle",
+                conversation_key=(
+                    "pr3d7c-approval-cycle-new"
+                ),
+            )
+        )
+
+        first = self.create_message(
+            external_id="approval-new-cycle-1",
+            sender="one@vendor-a.com",
+            minute=14,
+            conversation=first_conversation,
+        )
+
+        old_candidate, _ = (
+            _create_review_candidate(
+                msg=first,
+                item=self.item,
+                extraction_method="deterministic",
+            )
+        )
+
+        promote = self.client.post(
+            (
+                "/api/approvals/review-candidates/"
+                f"{old_candidate.id}/promote/"
+            ),
+            {},
+            format="json",
+        )
+
+        self.assertEqual(
+            promote.status_code,
+            200,
+        )
+
+        second = self.create_message(
+            external_id="approval-new-cycle-2",
+            sender="two@vendor-a.com",
+            minute=15,
+            conversation=second_conversation,
+        )
+
+        new_candidate, created = (
+            _create_review_candidate(
+                msg=second,
+                item=self.item,
+                extraction_method="deterministic",
+            )
+        )
+
+        self.assertTrue(
+            created
+        )
+
+        self.assertNotEqual(
+            new_candidate.id,
+            old_candidate.id,
+        )
+
+        self.assertEqual(
+            new_candidate.status,
+            "pending_review",
+        )
+
+        self.assertEqual(
+            AIApprovalCandidate.objects.count(),
+            2,
+        )
+
+        pending = self.client.get(
+            "/api/approvals/review-candidates/"
+        )
+
+        self.assertEqual(
+            len(pending.data),
+            1,
+        )
+
+        self.assertEqual(
+            pending.data[0]["id"],
+            new_candidate.id,
+        )
+
+        history = self.client.get(
+            (
+                "/api/approvals/review-candidates/"
+                "?scope=history"
+            )
+        )
+
+        self.assertEqual(
+            len(history.data),
+            1,
+        )
+
+        self.assertEqual(
+            history.data[0]["id"],
+            old_candidate.id,
         )

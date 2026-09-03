@@ -44,6 +44,8 @@ def _occurrence_payload(
             occurrence.extraction_method,
         "observed_at":
             occurrence.observed_at,
+        "recorded_at":
+            occurrence.created_at,
         "open_url": (
             f"/inbox?conversation={conversation_id}"
             if conversation_id
@@ -55,6 +57,20 @@ def _occurrence_payload(
 def _candidate_payload(candidate):
     message = candidate.message
     conversation_id = message.conversation_id
+
+    post_decision_recurrence = False
+
+    if candidate.status != "pending_review":
+        post_decision_recurrence = (
+            candidate
+            .occurrences
+            .filter(
+                created_at__gt=(
+                    candidate.updated_at
+                )
+            )
+            .exists()
+        )
 
     history = [
         _occurrence_payload(
@@ -97,6 +113,14 @@ def _candidate_payload(candidate):
         "history":
             history,
         "status": candidate.status,
+        "post_decision_recurrence":
+            post_decision_recurrence,
+        "decision_at": (
+            candidate.updated_at
+            if candidate.status
+            != "pending_review"
+            else None
+        ),
         "created_at": candidate.created_at,
         "updated_at": candidate.updated_at,
         "open_url": (
@@ -154,31 +178,74 @@ class AIActionCandidateListAPIView(APIView):
                 status=status.HTTP_200_OK,
             )
 
-        candidates = (
+        review_scope = (
+            request.query_params
+            .get(
+                "scope",
+                "pending",
+            )
+            .strip()
+            .lower()
+        )
+
+        base = (
             AIActionCandidate.objects
             .filter(
                 user=request.user,
                 organization=organization,
-                status="pending_review",
             )
             .select_related(
                 "message",
                 "message__conversation",
             )
-            .order_by(
-                "-confidence_score",
-                "-created_at",
-            )
         )
+
+        if review_scope == "history":
+            candidates = (
+                base
+                .exclude(
+                    status="pending_review"
+                )
+                .order_by(
+                    "-last_seen_at",
+                    "-updated_at",
+                    "-id",
+                )[:50]
+            )
+
+        elif review_scope == "all":
+            candidates = (
+                base
+                .order_by(
+                    "-last_seen_at",
+                    "-updated_at",
+                    "-id",
+                )[:100]
+            )
+
+        else:
+            candidates = (
+                base
+                .filter(
+                    status="pending_review"
+                )
+                .order_by(
+                    "-confidence_score",
+                    "-last_seen_at",
+                    "-created_at",
+                )
+            )
 
         return Response(
             [
-                _candidate_payload(candidate)
-                for candidate in candidates
+                _candidate_payload(
+                    candidate
+                )
+                for candidate
+                in candidates
             ],
             status=status.HTTP_200_OK,
         )
-
 
 class PromoteAIActionCandidateAPIView(APIView):
     permission_classes = [IsAuthenticated]
