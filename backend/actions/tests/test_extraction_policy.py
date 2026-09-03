@@ -9,7 +9,7 @@ class ActionExtractionPolicyTests(
     SimpleTestCase
 ):
 
-    def test_high_confidence_auto_creates(
+    def test_high_confidence_requires_review(
         self,
     ):
         result = decide_ai_action(
@@ -20,10 +20,10 @@ class ActionExtractionPolicyTests(
 
         self.assertEqual(
             result.decision,
-            "auto_create",
+            "review",
         )
 
-    def test_exact_auto_threshold_auto_creates(
+    def test_exact_former_auto_threshold_requires_review(
         self,
     ):
         result = decide_ai_action(
@@ -34,7 +34,7 @@ class ActionExtractionPolicyTests(
 
         self.assertEqual(
             result.decision,
-            "auto_create",
+            "review",
         )
 
     def test_review_band_requires_review(
@@ -79,7 +79,7 @@ class ActionExtractionPolicyTests(
             "ignore",
         )
 
-    def test_confidence_is_clamped(
+    def test_confidence_is_clamped_and_still_review_only(
         self,
     ):
         result = decide_ai_action(
@@ -95,5 +95,19 @@ class ActionExtractionPolicyTests(
 
         self.assertEqual(
             result.decision,
-            "auto_create",
+            "review",
+        )
+
+    def test_auto_create_threshold_does_not_enable_creation(
+        self,
+    ):
+        result = decide_ai_action(
+            confidence_score=100,
+            auto_create_threshold=1,
+            review_threshold=75,
+        )
+
+        self.assertEqual(
+            result.decision,
+            "review",
         )

@@ -9,7 +9,7 @@ class ApprovalExtractionPolicyTests(
     SimpleTestCase
 ):
 
-    def test_95_auto_creates(
+    def test_95_requires_review(
         self,
     ):
         result = decide_ai_approval(
@@ -18,10 +18,10 @@ class ApprovalExtractionPolicyTests(
 
         self.assertEqual(
             result.decision,
-            "auto_create",
+            "review",
         )
 
-    def test_100_auto_creates(
+    def test_100_requires_review(
         self,
     ):
         result = decide_ai_approval(
@@ -30,7 +30,7 @@ class ApprovalExtractionPolicyTests(
 
         self.assertEqual(
             result.decision,
-            "auto_create",
+            "review",
         )
 
     def test_94_requires_review(
@@ -86,17 +86,41 @@ class ApprovalExtractionPolicyTests(
         )
 
         self.assertEqual(
+            high.decision,
+            "review",
+        )
+
+        self.assertEqual(
             low.confidence_score,
             0,
         )
 
-    def test_custom_thresholds_are_supported(
+        self.assertEqual(
+            low.decision,
+            "ignore",
+        )
+
+    def test_custom_review_threshold_is_supported(
         self,
     ):
         result = decide_ai_approval(
             confidence_score=90,
             auto_create_threshold=92,
             review_threshold=80,
+        )
+
+        self.assertEqual(
+            result.decision,
+            "review",
+        )
+
+    def test_auto_create_threshold_does_not_enable_creation(
+        self,
+    ):
+        result = decide_ai_approval(
+            confidence_score=100,
+            auto_create_threshold=1,
+            review_threshold=85,
         )
 
         self.assertEqual(

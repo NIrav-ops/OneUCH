@@ -412,7 +412,7 @@ class ActionAnalysisTaskTests(TestCase):
         ACTION_AI_AUTO_CREATE_THRESHOLD=90,
         ACTION_AI_REVIEW_THRESHOLD=75,
     )
-    def test_high_confidence_ai_action_is_created(
+    def test_high_confidence_ai_action_requires_review(
         self,
         ai_extract_mock,
     ):
@@ -427,7 +427,7 @@ class ActionAnalysisTaskTests(TestCase):
             platform="gmail",
             direction="inbound",
             external_message_id=(
-                "ai-auto-create-001"
+                "ai-high-confidence-review-001"
             ),
             sender="customer@example.com",
             recipients=self.user.email,
@@ -491,33 +491,36 @@ class ActionAnalysisTaskTests(TestCase):
             1,
         )
 
-        action = ActionItem.objects.get(
-            message=message,
+        self.assertFalse(
+            ActionItem.objects.filter(
+                message=message,
+            ).exists()
+        )
+
+        candidate = (
+            AIActionCandidate.objects.get(
+                message=message,
+            )
         )
 
         self.assertEqual(
-            action.title,
+            candidate.status,
+            "pending_review",
+        )
+
+        self.assertEqual(
+            candidate.title,
             "Resolve firewall access",
         )
 
         self.assertEqual(
-            action.source_type,
-            "ai",
-        )
-
-        self.assertEqual(
-            action.confidence_score,
+            candidate.confidence_score,
             99,
         )
 
-        self.assertIsNone(
-            action.owner
-        )
-
-        self.assertFalse(
-            AIActionCandidate.objects.filter(
-                message=message,
-            ).exists()
+        self.assertEqual(
+            candidate.owner_reference,
+            "Abhishek",
         )
 
         message.refresh_from_db()
@@ -525,7 +528,6 @@ class ActionAnalysisTaskTests(TestCase):
         self.assertTrue(
             message.action_analyzed
         )
-
 
     @patch(
         "actions.tasks."

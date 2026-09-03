@@ -474,8 +474,12 @@ def analyze_new_messages(
         ).delete()
 
         # --------------------------------------------------
-        # 5. Apply confidence policy to every validated AI
+        # 5. Apply review-only policy to every validated AI
         # candidate.
+        #
+        # AI output must never create ActionItem directly.
+        # Human promotion from AIActionCandidate is the only
+        # path from AI suggestion to confirmed Action.
         # --------------------------------------------------
 
         for item in ai_result.candidates:
@@ -485,10 +489,6 @@ def analyze_new_messages(
                     "confidence_score",
                     0,
                 ),
-                auto_create_threshold=(
-                    settings
-                    .ACTION_AI_AUTO_CREATE_THRESHOLD
-                ),
                 review_threshold=(
                     settings
                     .ACTION_AI_REVIEW_THRESHOLD
@@ -496,16 +496,6 @@ def analyze_new_messages(
             )
 
             if (
-                decision.decision
-                == "auto_create"
-            ):
-                _create_action(
-                    msg=msg,
-                    item=item,
-                    source_type="ai",
-                )
-
-            elif (
                 decision.decision
                 == "review"
             ):

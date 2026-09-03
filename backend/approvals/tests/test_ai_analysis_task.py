@@ -181,13 +181,13 @@ class ApprovalAIAnalysisTaskTests(
     @override_settings(
         **AI_SETTINGS
     )
-    def test_high_confidence_ai_creates_approval(
+    def test_high_confidence_ai_requires_review(
         self,
         ai_mock,
     ):
         message = self.create_message(
             external_message_id=(
-                "approval-ai-auto-001"
+                "approval-ai-high-review-001"
             ),
             body=(
                 "Are you comfortable with us "
@@ -248,30 +248,42 @@ class ApprovalAIAnalysisTaskTests(
             1,
         )
 
-        approval = (
-            ApprovalItem.objects.get(
+        self.assertFalse(
+            ApprovalItem.objects.filter(
+                message=message,
+            ).exists()
+        )
+
+        candidate = (
+            AIApprovalCandidate.objects.get(
                 message=message,
             )
         )
 
         self.assertEqual(
-            approval.source_type,
-            "ai",
+            candidate.status,
+            "pending_review",
         )
 
         self.assertEqual(
-            approval.confidence_score,
+            candidate.title,
+            "Authorize production",
+        )
+
+        self.assertEqual(
+            candidate.confidence_score,
             98,
         )
 
-        self.assertIsNone(
-            approval.assigned_to
+        self.assertEqual(
+            candidate.approver_reference,
+            "Rakesh",
         )
 
-        self.assertFalse(
-            AIApprovalCandidate.objects.filter(
-                message=message,
-            ).exists()
+        message.refresh_from_db()
+
+        self.assertTrue(
+            message.approval_analyzed
         )
 
     @patch(

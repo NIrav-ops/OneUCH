@@ -502,7 +502,11 @@ def analyze_new_approvals(
         ).delete()
 
         # --------------------------------------------------
-        # 8. Apply Approval-specific confidence policy.
+        # 8. Apply review-only Approval policy.
+        #
+        # AI output must never create ApprovalItem directly.
+        # Human promotion from AIApprovalCandidate is the only
+        # path from AI suggestion to confirmed Approval.
         # --------------------------------------------------
 
         for item in ai_result.candidates:
@@ -512,10 +516,6 @@ def analyze_new_approvals(
                     "confidence_score",
                     0,
                 ),
-                auto_create_threshold=(
-                    settings
-                    .APPROVAL_AI_AUTO_CREATE_THRESHOLD
-                ),
                 review_threshold=(
                     settings
                     .APPROVAL_AI_REVIEW_THRESHOLD
@@ -523,16 +523,6 @@ def analyze_new_approvals(
             )
 
             if (
-                decision.decision
-                == "auto_create"
-            ):
-                _create_approval(
-                    msg=msg,
-                    item=item,
-                    source_type="ai",
-                )
-
-            elif (
                 decision.decision
                 == "review"
             ):

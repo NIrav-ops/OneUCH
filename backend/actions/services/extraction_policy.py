@@ -3,7 +3,6 @@ from typing import Literal
 
 
 Decision = Literal[
-    "auto_create",
     "review",
     "ignore",
 ]
@@ -26,8 +25,17 @@ def decide_ai_action(
     Decide how One UCH should treat one validated
     AI Action candidate.
 
+    AI Action creation is review-only.
+
+    The auto_create_threshold argument is retained for
+    backward-compatible callers and configuration, but
+    automatic AI Action creation is intentionally disabled.
+
     This function performs no database writes.
     """
+
+    # Retained only for backward-compatible callers.
+    _ = auto_create_threshold
 
     confidence_score = max(
         0,
@@ -37,22 +45,13 @@ def decide_ai_action(
         ),
     )
 
-    if confidence_score >= auto_create_threshold:
-        return ActionExtractionDecision(
-            decision="auto_create",
-            confidence_score=confidence_score,
-            reason=(
-                "AI confidence meets automatic "
-                "creation threshold."
-            ),
-        )
-
     if confidence_score >= review_threshold:
         return ActionExtractionDecision(
             decision="review",
             confidence_score=confidence_score,
             reason=(
-                "AI confidence requires human review."
+                "AI Action candidates require human "
+                "review before Action creation."
             ),
         )
 

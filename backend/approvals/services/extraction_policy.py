@@ -3,7 +3,6 @@ from typing import Literal
 
 
 Decision = Literal[
-    "auto_create",
     "review",
     "ignore",
 ]
@@ -26,8 +25,17 @@ def decide_ai_approval(
     Decide how One UCH should treat one validated
     semantic Approval candidate.
 
+    AI Approval creation is review-only.
+
+    The auto_create_threshold argument is retained for
+    backward-compatible callers and configuration, but
+    automatic AI Approval creation is intentionally disabled.
+
     This function performs no database writes.
     """
+
+    # Retained only for backward-compatible callers.
+    _ = auto_create_threshold
 
     confidence_score = max(
         0,
@@ -37,36 +45,12 @@ def decide_ai_approval(
         ),
     )
 
-    if (
-        review_threshold
-        > auto_create_threshold
-    ):
-        review_threshold = (
-            auto_create_threshold
-        )
-
-    if (
-        confidence_score
-        >= auto_create_threshold
-    ):
-        return ApprovalExtractionDecision(
-            decision="auto_create",
-            confidence_score=confidence_score,
-            reason=(
-                "AI confidence meets automatic "
-                "Approval creation threshold."
-            ),
-        )
-
-    if (
-        confidence_score
-        >= review_threshold
-    ):
+    if confidence_score >= review_threshold:
         return ApprovalExtractionDecision(
             decision="review",
             confidence_score=confidence_score,
             reason=(
-                "AI confidence requires human "
+                "AI Approval candidates require human "
                 "review before Approval creation."
             ),
         )
