@@ -1,6 +1,16 @@
+from uuid import uuid4
+
 from django.db import models
 from django.conf import settings
 from email_accounts.models import EmailAccount
+
+
+def generate_workspace_public_id():
+    return (
+        "WSP-"
+        + uuid4().hex[:12].upper()
+    )
+
 
 User = settings.AUTH_USER_MODEL
 
@@ -503,6 +513,13 @@ class UserAttachmentPolicy(models.Model):
         return f"{self.user} → {self.policy}"
 
 class Organization(models.Model):
+    public_id = models.CharField(
+        max_length=20,
+        unique=True,
+        default=generate_workspace_public_id,
+        editable=False,
+    )
+
     name = models.CharField(max_length=255)
     slug = models.SlugField(unique=True)
 
@@ -565,6 +582,11 @@ class AuditLog(models.Model):
         ("ATTACHMENT_POLICY_UPDATE", "Attachment Policy Update"),
         ("LOGIN", "User Login"),
         ("LOGOUT", "User Logout"),
+        ("SIGNUP", "User Signup"),
+        (
+            "SIGNUP_REGISTRY_VIEW",
+            "Signup Registry View",
+        ),
     )
 
     user = models.ForeignKey(

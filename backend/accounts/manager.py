@@ -1,7 +1,9 @@
 from django.contrib.auth.base_user import BaseUserManager
 
 
-class UserManager(BaseUserManager):
+class UserManager(
+    BaseUserManager
+):
 
     def create_user(
         self,
@@ -10,22 +12,37 @@ class UserManager(BaseUserManager):
         **extra_fields,
     ):
         """
-        Create and save a regular user.
+        Create and save a One UCH user.
+
+        Work-email identity is normalized to
+        lowercase because authentication is
+        case-insensitive.
         """
 
         if not email:
-            raise ValueError("Email is required")
+            raise ValueError(
+                "Email is required"
+            )
 
-        email = self.normalize_email(email)
+        email = (
+            self.normalize_email(
+                str(email).strip()
+            )
+            .lower()
+        )
 
         user = self.model(
             email=email,
             **extra_fields,
         )
 
-        user.set_password(password)
+        user.set_password(
+            password
+        )
 
-        user.save(using=self._db)
+        user.save(
+            using=self._db
+        )
 
         return user
 
@@ -35,9 +52,6 @@ class UserManager(BaseUserManager):
         password,
         **extra_fields,
     ):
-        """
-        Create and save a superuser.
-        """
 
         extra_fields.setdefault(
             "is_staff",

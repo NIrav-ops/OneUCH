@@ -10,8 +10,11 @@ from django.conf import settings
 from django.conf.urls.static import static
 
 from rest_framework_simplejwt.views import (
-    TokenObtainPairView,
     TokenRefreshView,
+)
+
+from accounts.token_views import (
+    OneUCHTokenObtainPairView,
 )
 
 from drf_spectacular.views import (
@@ -189,7 +192,7 @@ if settings.DEBUG:
 urlpatterns += [
     path(
         "api/auth/token/",
-        TokenObtainPairView.as_view(),
+        OneUCHTokenObtainPairView.as_view(),
         name="token_obtain_pair",
     ),
 

@@ -344,9 +344,49 @@ INSTALLED_APPS += ["search"]
 
 from datetime import timedelta
 
+
+# ==================================================
+# One UCH self-service authentication
+# ==================================================
+#
+# Fail closed by default.
+#
+# SEC-RC1B must pass before this is enabled
+# on a public cloud environment.
+# ==================================================
+
+AUTH_SELF_SERVICE_SIGNUP_ENABLED = (
+    os.environ.get(
+        "AUTH_SELF_SERVICE_SIGNUP_ENABLED",
+        "false",
+    ).strip().lower()
+    in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+)
+
+
+# ==================================================
+# One UCH operational environment metadata
+# ==================================================
+
+ONEUCH_ENVIRONMENT = os.environ.get(
+    "ONEUCH_ENVIRONMENT",
+    "development",
+).strip().lower()
+
+ONEUCH_REGION = os.environ.get(
+    "ONEUCH_REGION",
+    "local",
+).strip()
+
+
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "accounts.authentication.OneUCHJWTAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.IsAuthenticated",
@@ -356,7 +396,18 @@ REST_FRAMEWORK = {
         "rest_framework.throttling.UserRateThrottle",
     ],
     "DEFAULT_THROTTLE_RATES": {
-        "user": os.environ.get("DRF_USER_THROTTLE_RATE", "1000/hour"),
+        "user": os.environ.get(
+            "DRF_USER_THROTTLE_RATE",
+            "1000/hour",
+        ),
+        "signup": os.environ.get(
+            "AUTH_SIGNUP_THROTTLE_RATE",
+            "10/hour",
+        ),
+        "login": os.environ.get(
+            "AUTH_LOGIN_THROTTLE_RATE",
+            "30/minute",
+        ),
     },
 }
 
