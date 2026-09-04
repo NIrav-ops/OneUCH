@@ -469,6 +469,103 @@ class AuthSecRC1AA3Tests(
             403,
         )
 
+    def test_auth_environment_templates_use_real_line_breaks(
+        self,
+    ):
+
+        from pathlib import Path
+
+        backend_root = (
+            Path(__file__)
+            .resolve()
+            .parents[1]
+        )
+
+        expected = {
+            ".env.example": {
+                (
+                    "AUTH_SELF_SERVICE_"
+                    "SIGNUP_ENABLED"
+                ): "false",
+                "ONEUCH_ENVIRONMENT": (
+                    "development"
+                ),
+                "ONEUCH_REGION": (
+                    "local"
+                ),
+            },
+            ".env.pilot.example": {
+                (
+                    "AUTH_SELF_SERVICE_"
+                    "SIGNUP_ENABLED"
+                ): "false",
+                "ONEUCH_ENVIRONMENT": (
+                    "pilot"
+                ),
+                "ONEUCH_REGION": (
+                    "replace-with-deployment-region"
+                ),
+            },
+        }
+
+        for (
+            filename,
+            required,
+        ) in expected.items():
+
+            text = (
+                backend_root
+                .joinpath(
+                    filename
+                )
+                .read_text(
+                    encoding="utf-8"
+                )
+            )
+
+            self.assertNotIn(
+                "\\nONEUCH_ENVIRONMENT=",
+                text,
+            )
+
+            self.assertNotIn(
+                "\\nONEUCH_REGION=",
+                text,
+            )
+
+            parsed = {}
+
+            for line in text.splitlines():
+
+                line = line.strip()
+
+                if (
+                    not line
+                    or line.startswith("#")
+                    or "=" not in line
+                ):
+                    continue
+
+                key, value = line.split(
+                    "=",
+                    1,
+                )
+
+                parsed[key] = value
+
+            for (
+                key,
+                expected_value,
+            ) in required.items():
+
+                self.assertEqual(
+                    parsed.get(
+                        key
+                    ),
+                    expected_value,
+                )
+
+
     def test_me_returns_provider_category_not_mailbox_address(
         self,
     ):
