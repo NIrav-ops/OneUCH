@@ -55,6 +55,7 @@ def refresh_conversation_local_state(
         conversation.messages
         .filter(
             user=conversation.user,
+            organization=conversation.organization,
             is_draft=False,
         )
         .exclude(
@@ -772,6 +773,7 @@ def _conversation_messages(
         )
         .filter(
             user=conversation.user,
+            organization=conversation.organization,
             is_draft=False,
         )
         .exclude(

@@ -24,10 +24,15 @@ from inbox.services.mail_mutations import (
     trash_conversation,
 )
 
+from platform_core.api.tenant import (
+    get_user_organization_or_404,
+)
+
 
 def _conversation(
     *,
     user,
+    organization,
     conversation_id,
 ):
     return (
@@ -38,6 +43,7 @@ def _conversation(
         .filter(
             id=conversation_id,
             user=user,
+            organization=organization,
         )
         .first()
     )
@@ -56,9 +62,16 @@ class MarkConversationReadAPIView(
         request,
         conversation_id,
     ):
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
+
         conversation = (
             _conversation(
                 user=request.user,
+                organization=organization,
                 conversation_id=(
                     conversation_id
                 ),
@@ -165,6 +178,7 @@ class MarkConversationReadAPIView(
                 conversation.messages
                 .filter(
                     user=request.user,
+                    organization=organization,
                     is_draft=False,
                 )
                 .exclude(
@@ -223,9 +237,16 @@ class ToggleConversationStarAPIView(
         request,
         conversation_id,
     ):
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
+
         conversation = (
             _conversation(
                 user=request.user,
+                organization=organization,
                 conversation_id=(
                     conversation_id
                 ),
@@ -355,9 +376,16 @@ class DeleteConversationAPIView(
         request,
         conversation_id,
     ):
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
+
         conversation = (
             _conversation(
                 user=request.user,
+                organization=organization,
                 conversation_id=(
                     conversation_id
                 ),

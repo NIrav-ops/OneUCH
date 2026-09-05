@@ -76,16 +76,35 @@ def resolve_websocket_user(
     authentication rules instead of decoding the JWT manually.
     """
 
-    from rest_framework_simplejwt.authentication import (
-        JWTAuthentication,
+    # Resolve the JWT user and then enforce the
+    # same active-workspace invariant used by HTTP.
+    #
+    # Imports remain lazy because ASGI imports this
+    # module before Django application setup completes.
+
+    from accounts.authentication import (
+        OneUCHJWTAuthentication,
+        get_active_membership,
     )
 
-    return (
-        JWTAuthentication()
-        .get_user(
-            validated_token
+    authenticator = (
+        OneUCHJWTAuthentication()
+    )
+
+    user = authenticator.get_user(
+        validated_token
+    )
+
+    membership = (
+        get_active_membership(
+            user
         )
     )
+
+    if membership is None:
+        return None
+
+    return user
 
 
 class JWTAuthMiddleware(

@@ -3,15 +3,26 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from inbox.models import InboxMessage
 
+from platform_core.api.tenant import (
+    get_user_organization_or_404,
+)
+
 
 class MessageStatusAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, message_id):
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
+
         try:
             message = InboxMessage.objects.get(
                 id=message_id,
                 user=request.user,
+                organization=organization,
             )
         except InboxMessage.DoesNotExist:
             return Response({"error": "Message not found"}, status=404)
@@ -34,6 +45,12 @@ class BulkMessageStatusAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
+
         message_ids = request.data.get("message_ids", [])
 
         # ✅ Validate input
@@ -55,6 +72,7 @@ class BulkMessageStatusAPIView(APIView):
         # ✅ Filter securely by user
         messages = InboxMessage.objects.filter(
             user=request.user,
+            organization=organization,
             id__in=message_ids,
         )
 

@@ -20,6 +20,10 @@ from inbox.services.mail_mutations import (
     set_conversation_star,
 )
 
+from platform_core.api.tenant import (
+    get_user_organization_or_404,
+)
+
 
 def _conversation_ids(
     request,
@@ -69,6 +73,12 @@ class BulkMarkConversationReadAPIView(
         self,
         request,
     ):
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
+
         conversation_ids = (
             _conversation_ids(
                 request
@@ -116,6 +126,7 @@ class BulkMarkConversationReadAPIView(
                     conversation_ids
                 ),
                 user=request.user,
+                organization=organization,
             )
             .select_related(
                 "email_account"
@@ -212,6 +223,12 @@ class BulkToggleConversationStarAPIView(
         self,
         request,
     ):
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
+
         conversation_ids = (
             _conversation_ids(
                 request
@@ -263,6 +280,7 @@ class BulkToggleConversationStarAPIView(
                     conversation_ids
                 ),
                 user=request.user,
+                organization=organization,
             )
             .select_related(
                 "email_account"

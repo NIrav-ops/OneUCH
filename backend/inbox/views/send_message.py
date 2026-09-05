@@ -70,6 +70,10 @@ from inbox.utils.conversation_key import (
     generate_conversation_key,
 )
 
+from platform_core.api.tenant import (
+    get_user_organization_or_404,
+)
+
 
 class UnifiedSendMessageAPIView(
     APIView
@@ -103,6 +107,12 @@ class UnifiedSendMessageAPIView(
         try:
 
             user = request.user
+
+            organization = (
+                get_user_organization_or_404(
+                    request
+                )
+            )
 
             subject = data.get(
                 "subject",
@@ -381,6 +391,7 @@ class UnifiedSendMessageAPIView(
                             ]
                         ),
                         user=user,
+                        organization=organization,
                         email_account=account,
                     )
                     .select_related(
@@ -410,6 +421,7 @@ class UnifiedSendMessageAPIView(
                     .filter(
                         id=conversation_id,
                         user=user,
+                        organization=organization,
                     )
                     .first()
                 )
@@ -442,15 +454,11 @@ class UnifiedSendMessageAPIView(
                     Conversation.objects
                     .get_or_create(
                         user=user,
+                        organization=organization,
                         conversation_key=(
                             conversation_key
                         ),
                         defaults={
-                            "organization":
-                                user
-                                .organization_membership
-                                .organization,
-
                             "subject":
                                 (
                                     subject
@@ -892,11 +900,7 @@ class UnifiedSendMessageAPIView(
                 InboxMessage.objects
                 .create(
                     user=user,
-                    organization=(
-                        user
-                        .organization_membership
-                        .organization
-                    ),
+                    organization=organization,
                     platform=(
                         account_type
                     ),

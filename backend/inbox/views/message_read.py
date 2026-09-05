@@ -19,6 +19,10 @@ from inbox.services.mail_mutations import (
     set_message_read,
 )
 
+from platform_core.api.tenant import (
+    get_user_organization_or_404,
+)
+
 
 class MessageReadStateAPIView(
     APIView
@@ -33,6 +37,12 @@ class MessageReadStateAPIView(
         request,
         message_id,
     ):
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
+
         is_read = (
             request.data.get(
                 "is_read"
@@ -63,6 +73,7 @@ class MessageReadStateAPIView(
             .filter(
                 id=message_id,
                 user=request.user,
+                organization=organization,
             )
             .first()
         )

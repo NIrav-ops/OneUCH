@@ -7,18 +7,31 @@ from inbox.models import InboxMessage
 from inbox.serializers import InboxMessageSerializer
 from inbox.services.smart_ai import analyze_email
 
+from platform_core.api.tenant import (
+    get_user_organization_or_404,
+)
+
 class InboxListAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         user = request.user
 
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
+
         query = request.query_params.get("q")
         unread = request.query_params.get("unread")
         tag = request.query_params.get("tag")
         sort = request.query_params.get("sort")
 
-        qs = InboxMessage.objects.filter(user=user)
+        qs = InboxMessage.objects.filter(
+            user=user,
+            organization=organization,
+        )
 
         platform = request.query_params.get("platform")
 

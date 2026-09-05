@@ -7,16 +7,27 @@ from inbox.billing.utils import check_usage_limit, UsageLimitExceeded
 from inbox.models import InboxMessage, UsageEvent
 from inbox.serializers import InboxMessageSerializer
 
+from platform_core.api.tenant import (
+    get_user_organization_or_404,
+)
+
 
 class InboxMessageDetailAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, message_id):
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
+
         # 1️⃣ Fetch message
         try:
             message = InboxMessage.objects.get(
                 id=message_id,
                 user=request.user,
+            organization=organization,
             )
         except InboxMessage.DoesNotExist:
             return Response(

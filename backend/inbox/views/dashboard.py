@@ -9,14 +9,25 @@ from timeline.models import TimelineEvent
 
 from common.sla import calculate_sla
 
+from platform_core.api.tenant import (
+    get_user_organization_or_404,
+)
+
 
 class InboxDashboardAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
 
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
+
         qs = InboxMessage.objects.filter(
-            user=request.user
+            user=request.user,
+            organization=organization,
         )
 
         # -------------------------
@@ -25,6 +36,7 @@ class InboxDashboardAPIView(APIView):
 
         assigned_actions = ActionItem.objects.filter(
             owner=request.user,
+            organization=organization,
             status__in=[
                 "open",
                 "in_progress",
@@ -33,16 +45,19 @@ class InboxDashboardAPIView(APIView):
 
         pending_approvals = ApprovalItem.objects.filter(
             assigned_to=request.user,
+            organization=organization,
             status="pending",
         ).count()
 
         pending_followups = FollowUpItem.objects.filter(
             user=request.user,
+            organization=organization,
             status="pending",
         ).count()
 
         overdue_actions = ActionItem.objects.filter(
             owner=request.user,
+            organization=organization,
             escalation_level__gt=0,
         ).count()
 
@@ -56,6 +71,7 @@ class InboxDashboardAPIView(APIView):
 
         actions = ActionItem.objects.filter(
             owner=request.user,
+            organization=organization,
         ).exclude(
             status="completed"
         )
@@ -76,6 +92,7 @@ class InboxDashboardAPIView(APIView):
 
         approvals = ApprovalItem.objects.filter(
             assigned_to=request.user,
+            organization=organization,
         ).exclude(
             status__in=[
                 "approved",
@@ -99,6 +116,7 @@ class InboxDashboardAPIView(APIView):
 
         followups = FollowUpItem.objects.filter(
             user=request.user,
+            organization=organization,
             status="pending",
         )
 
@@ -122,7 +140,8 @@ class InboxDashboardAPIView(APIView):
 
         recent_events = (
             TimelineEvent.objects.filter(
-                conversation__user=request.user
+                conversation__user=request.user,
+                conversation__organization=organization,
             )
             .order_by("-created_at")[:10]
         )
@@ -145,11 +164,13 @@ class InboxDashboardAPIView(APIView):
 
         completed_actions = ActionItem.objects.filter(
             owner=request.user,
+            organization=organization,
             status="completed",
         ).count()
 
         approved_items = ApprovalItem.objects.filter(
             assigned_to=request.user,
+            organization=organization,
             status="approved",
         ).count()
 

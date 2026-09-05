@@ -5,21 +5,34 @@ from rest_framework.response import Response
 from .models import Notification
 from .serializers import NotificationSerializer
 
+from platform_core.api.tenant import (
+    get_user_organization_or_404,
+)
+
 
 class NotificationListAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
 
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
+
         notifications = (
             Notification.objects
-            .filter(user=request.user)
+            .filter(
+                user=request.user,
+                organization=organization,
+            )
             .order_by("-created_at")
         )
 
         serializer = NotificationSerializer(
             notifications,
-            many=True
+            many=True,
         )
 
         unread_count = notifications.filter(
@@ -35,26 +48,46 @@ class NotificationListAPIView(APIView):
 class MarkNotificationReadAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
-    def post(self, request, notification_id):
+    def post(
+        self,
+        request,
+        notification_id,
+    ):
+
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
 
         try:
-            notification = Notification.objects.get(
-                id=notification_id,
-                user=request.user,
+            notification = (
+                Notification.objects.get(
+                    id=notification_id,
+                    user=request.user,
+                    organization=organization,
+                )
             )
-
-            notification.is_read = True
-            notification.save()
-
-            return Response({
-                "status": "read"
-            })
 
         except Notification.DoesNotExist:
             return Response(
-                {"error": "Not found"},
-                status=404
+                {
+                    "error": "Not found"
+                },
+                status=404,
             )
+
+        notification.is_read = True
+
+        notification.save(
+            update_fields=[
+                "is_read"
+            ]
+        )
+
+        return Response({
+            "status": "read"
+        })
 
 
 class MarkAllNotificationsReadAPIView(APIView):
@@ -62,9 +95,16 @@ class MarkAllNotificationsReadAPIView(APIView):
 
     def post(self, request):
 
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
+
         Notification.objects.filter(
             user=request.user,
-            is_read=False
+            organization=organization,
+            is_read=False,
         ).update(
             is_read=True
         )

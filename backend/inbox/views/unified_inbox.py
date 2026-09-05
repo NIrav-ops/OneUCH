@@ -11,11 +11,21 @@ from django.db.models import Q
 from inbox.models import InboxMessage, Conversation
 from inbox.serializers import InboxMessageSerializer
 
+from platform_core.api.tenant import (
+    get_user_organization_or_404,
+)
+
 
 class UnifiedInboxAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
 
         search = request.GET.get("search")
         platform = request.GET.get("platform")
@@ -26,7 +36,8 @@ class UnifiedInboxAPIView(APIView):
         folder = request.GET.get("folder")
 
         queryset = InboxMessage.objects.filter(
-            user=request.user
+            user=request.user,
+            organization=organization,
         )
 
         # 🔎 Filters
@@ -83,6 +94,12 @@ class UnifiedConversationInboxAPIView(APIView):
 
         try:
             user = request.user
+
+            organization = (
+                get_user_organization_or_404(
+                    request
+                )
+            )
             folder = request.GET.get("folder", "inbox")
             search = (request.GET.get("search") or "").strip()
             platform = (request.GET.get("platform") or "").strip()
@@ -92,7 +109,10 @@ class UnifiedConversationInboxAPIView(APIView):
             page = request.GET.get("page", 1)
             page_size = min(int(request.GET.get("page_size", 30) or 30), 100)
 
-            conversations = Conversation.objects.filter(user=user)
+            conversations = Conversation.objects.filter(
+                user=user,
+                organization=organization,
+            )
 
             if folder == "sent":
                 conversations = conversations.filter(

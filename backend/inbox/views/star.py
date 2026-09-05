@@ -22,6 +22,10 @@ from inbox.services.mail_mutations import (
     set_message_star,
 )
 
+from platform_core.api.tenant import (
+    get_user_organization_or_404,
+)
+
 
 class ToggleStarAPIView(
     APIView
@@ -36,6 +40,12 @@ class ToggleStarAPIView(
         request,
         message_id,
     ):
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
+
         message = (
             InboxMessage.objects
             .select_related(
@@ -45,6 +55,7 @@ class ToggleStarAPIView(
             .filter(
                 id=message_id,
                 user=request.user,
+                organization=organization,
             )
             .first()
         )

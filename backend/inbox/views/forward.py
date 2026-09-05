@@ -28,6 +28,10 @@ from inbox.services.forward_attachments import (
     serialize_forward_source_attachments,
 )
 
+from platform_core.api.tenant import (
+    get_user_organization_or_404,
+)
+
 
 def _forward_subject(
     source_subject,
@@ -256,6 +260,12 @@ class ForwardMessageAPIView(
         request,
         message_id,
     ):
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
+
         return (
             InboxMessage.objects
             .select_related(
@@ -268,6 +278,7 @@ class ForwardMessageAPIView(
             .filter(
                 id=message_id,
                 user=request.user,
+                organization=organization,
                 is_draft=False,
             )
             .exclude(

@@ -15,6 +15,10 @@ from inbox.models import (
     InboxMessage,
 )
 
+from platform_core.api.tenant import (
+    get_user_organization_or_404,
+)
+
 
 class ConversationDetailAPIView(
     APIView
@@ -33,12 +37,19 @@ class ConversationDetailAPIView(
             request.user
         )
 
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
+
 
         conversation = (
             Conversation.objects
             .filter(
                 id=conversation_id,
                 user=user,
+                organization=organization,
             )
             .first()
         )
@@ -61,6 +72,7 @@ class ConversationDetailAPIView(
             InboxMessage.objects
             .filter(
                 user=user,
+                organization=organization,
                 conversation=(
                     conversation
                 ),

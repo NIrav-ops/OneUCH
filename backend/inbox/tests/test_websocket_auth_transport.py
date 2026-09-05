@@ -32,6 +32,11 @@ from inbox.routing import (
     websocket_urlpatterns,
 )
 
+from inbox.models import (
+    Organization,
+    OrganizationUser,
+)
+
 
 User = get_user_model()
 
@@ -62,6 +67,19 @@ class WebSocketAuthenticationTransportTests(
                     "test-password-123"
                 ),
             )
+        )
+
+        self.organization = (
+            Organization.objects.create(
+                name="WebSocket Test Workspace",
+                slug="ws-auth-test-workspace",
+            )
+        )
+
+        OrganizationUser.objects.create(
+            user=self.user,
+            organization=self.organization,
+            role="owner",
         )
 
         refresh = (

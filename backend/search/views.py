@@ -18,11 +18,21 @@ from actions.models import (
 from approvals.models import ApprovalItem
 from timeline.models import TimelineEvent
 
+from platform_core.api.tenant import (
+    get_user_organization_or_404,
+)
+
 
 class UnifiedSearchAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
 
         q = request.GET.get(
             "q",
@@ -60,7 +70,8 @@ class UnifiedSearchAPIView(APIView):
 
         messages = (
             InboxMessage.objects.filter(
-                user=request.user
+                user=request.user,
+                organization=organization,
             )
             .filter(
                 Q(subject__icontains=q)
@@ -111,7 +122,8 @@ class UnifiedSearchAPIView(APIView):
 
         actions = (
             ActionItem.objects.filter(
-                user=request.user
+                user=request.user,
+                organization=organization,
             )
             .filter(
                 Q(title__icontains=q)
@@ -162,7 +174,8 @@ class UnifiedSearchAPIView(APIView):
 
         approvals = (
             ApprovalItem.objects.filter(
-                user=request.user
+                user=request.user,
+                organization=organization,
             )
             .filter(
                 Q(title__icontains=q)
@@ -218,7 +231,8 @@ class UnifiedSearchAPIView(APIView):
 
         followups = (
             FollowUpItem.objects.filter(
-                user=request.user
+                user=request.user,
+                organization=organization,
             )
             .filter(
                 Q(
@@ -297,7 +311,8 @@ class UnifiedSearchAPIView(APIView):
 
         timeline_events = (
             TimelineEvent.objects.filter(
-                conversation__user=request.user
+                conversation__user=request.user,
+                conversation__organization=organization,
             )
             .filter(
                 Q(title__icontains=q)
@@ -336,7 +351,8 @@ class UnifiedSearchAPIView(APIView):
 
         conversations = (
             Conversation.objects.filter(
-                user=request.user
+                user=request.user,
+                organization=organization,
             )
             .filter(
                 Q(subject__icontains=q)

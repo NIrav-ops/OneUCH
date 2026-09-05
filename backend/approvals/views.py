@@ -12,6 +12,10 @@ from actions.models import ActionItem
 from notifications.services import create_notification
 from timeline.services import create_timeline_event
 
+from platform_core.api.tenant import (
+    get_user_organization_or_404,
+)
+
 
 def apply_decision(item, new_status, user, notes=""):
     item.status = new_status
@@ -25,25 +29,66 @@ class ApprovalListAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        approvals = ApprovalItem.objects.filter(
-            user=request.user
-        ).order_by("-created_at")
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
 
-        serializer = ApprovalItemSerializer(approvals, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        approvals = (
+            ApprovalItem.objects
+            .filter(
+                user=request.user,
+                organization=organization,
+            )
+            .order_by(
+                "-created_at"
+            )
+        )
+
+        serializer = ApprovalItemSerializer(
+            approvals,
+            many=True,
+        )
+
+        return Response(
+            serializer.data,
+            status=status.HTTP_200_OK,
+        )
 
 
 class PendingApprovalListAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        approvals = ApprovalItem.objects.filter(
-            user=request.user,
-            status="pending"
-        ).order_by("due_date", "-created_at")
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
 
-        serializer = ApprovalItemSerializer(approvals, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        approvals = (
+            ApprovalItem.objects
+            .filter(
+                user=request.user,
+                organization=organization,
+                status="pending",
+            )
+            .order_by(
+                "due_date",
+                "-created_at",
+            )
+        )
+
+        serializer = ApprovalItemSerializer(
+            approvals,
+            many=True,
+        )
+
+        return Response(
+            serializer.data,
+            status=status.HTTP_200_OK,
+        )
 
 
 class TeamMemberListAPIView(APIView):
@@ -78,10 +123,17 @@ class AssignApprovalAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, approval_id):
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
+
         try:
             item = ApprovalItem.objects.get(
                 id=approval_id,
-                user=request.user
+                user=request.user,
+                organization=organization,
             )
         except ApprovalItem.DoesNotExist:
             return Response(
@@ -166,10 +218,17 @@ class ApproveItemAPIView(APIView):
 
     def post(self, request, approval_id):
 
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
+
         try:
             item = ApprovalItem.objects.get(
                 id=approval_id,
                 user=request.user,
+                organization=organization,
             )
 
         except ApprovalItem.DoesNotExist:
@@ -272,8 +331,14 @@ class RejectItemAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, approval_id):
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
+
         try:
-            item = ApprovalItem.objects.get(id=approval_id, user=request.user)
+            item = ApprovalItem.objects.get(id=approval_id, user=request.user, organization=organization)
         except ApprovalItem.DoesNotExist:
             return Response(
                 {"error": "Approval not found"},
@@ -303,8 +368,14 @@ class NeedsInfoItemAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, approval_id):
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
+
         try:
-            item = ApprovalItem.objects.get(id=approval_id, user=request.user)
+            item = ApprovalItem.objects.get(id=approval_id, user=request.user, organization=organization)
         except ApprovalItem.DoesNotExist:
             return Response(
                 {"error": "Approval not found"},
@@ -333,8 +404,14 @@ class IgnoreApprovalAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, approval_id):
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
+
         try:
-            item = ApprovalItem.objects.get(id=approval_id, user=request.user)
+            item = ApprovalItem.objects.get(id=approval_id, user=request.user, organization=organization)
         except ApprovalItem.DoesNotExist:
             return Response(
                 {"error": "Approval not found"},
@@ -351,8 +428,14 @@ class ReopenApprovalAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, approval_id):
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
+
         try:
-            item = ApprovalItem.objects.get(id=approval_id, user=request.user)
+            item = ApprovalItem.objects.get(id=approval_id, user=request.user, organization=organization)
         except ApprovalItem.DoesNotExist:
             return Response(
                 {"error": "Approval not found"},

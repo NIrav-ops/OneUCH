@@ -60,6 +60,10 @@ from inbox.tasks import (
     send_email_task,
 )
 
+from platform_core.api.tenant import (
+    get_user_organization_or_404,
+)
+
 
 class ReplyConversationAPIView(
     APIView
@@ -117,6 +121,12 @@ class ReplyConversationAPIView(
             )
 
 
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
+
         conversation = (
             Conversation.objects
             .select_related(
@@ -125,6 +135,7 @@ class ReplyConversationAPIView(
             .filter(
                 id=conversation_id,
                 user=request.user,
+                organization=organization,
             )
             .first()
         )
@@ -151,6 +162,7 @@ class ReplyConversationAPIView(
             )
             .filter(
                 user=request.user,
+                organization=organization,
                 is_draft=False,
             )
             .exclude(

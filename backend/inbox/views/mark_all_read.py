@@ -5,15 +5,28 @@ from rest_framework import status
 
 from inbox.models import InboxMessage
 
+from platform_core.api.tenant import (
+    get_user_organization_or_404,
+)
+
 
 class MarkAllReadAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
+
         updated = InboxMessage.objects.filter(
             user=request.user,
-            is_read=False
-        ).update(is_read=True)
+            organization=organization,
+            is_read=False,
+        ).update(
+            is_read=True
+        )
 
         return Response(
             {

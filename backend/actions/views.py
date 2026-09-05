@@ -16,6 +16,10 @@ from knowledge.services.intelligence_evidence_persistence import (
     persist_intelligence_evidence,
 )
 
+from platform_core.api.tenant import (
+    get_user_organization_or_404,
+)
+
 User = get_user_model()
 
 def get_user_organization(user):
@@ -54,21 +58,55 @@ class ActionListAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        actions = (
-            ActionItem.objects.filter(user=request.user)
-            .select_related("owner", "message", "source_approval")
-            .order_by("-priority", "-created_at")
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
         )
-        serializer = ActionItemSerializer(actions, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+
+        actions = (
+            ActionItem.objects.filter(
+                user=request.user,
+                organization=organization,
+            )
+            .select_related(
+                "owner",
+                "message",
+                "source_approval",
+            )
+            .order_by(
+                "-priority",
+                "-created_at",
+            )
+        )
+
+        serializer = ActionItemSerializer(
+            actions,
+            many=True,
+        )
+
+        return Response(
+            serializer.data,
+            status=status.HTTP_200_OK,
+        )
 
 
 class FollowUpListAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
+
         followups = (
-            FollowUpItem.objects.filter(user=request.user, status="pending")
+            FollowUpItem.objects.filter(
+                user=request.user,
+                organization=organization,
+                status="pending",
+            )
             .select_related("conversation", "last_message")
             .order_by("followup_due_at", "-created_at")
         )
@@ -105,8 +143,14 @@ class UpdateActionAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, action_id):
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
+
         try:
-            action = ActionItem.objects.get(id=action_id, user=request.user)
+            action = ActionItem.objects.get(id=action_id, user=request.user, organization=organization)
         except ActionItem.DoesNotExist:
             return Response(
                 {"error": "Action not found"},
@@ -208,8 +252,14 @@ class CompleteActionAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, action_id):
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
+
         try:
-            action = ActionItem.objects.get(id=action_id, user=request.user)
+            action = ActionItem.objects.get(id=action_id, user=request.user, organization=organization)
         except ActionItem.DoesNotExist:
             return Response(
                 {"error": "Action not found"},
@@ -274,11 +324,18 @@ class StartActionAPIView(APIView):
 
     def post(self, request, action_id):
 
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
+
         try:
 
             action = ActionItem.objects.get(
                 id=action_id,
                 user=request.user,
+                organization=organization,
             )
 
         except ActionItem.DoesNotExist:
@@ -301,6 +358,8 @@ class StartActionAPIView(APIView):
         )
 
         create_notification(
+
+            organization=action.organization,
 
             user=action.user,
 
@@ -325,8 +384,14 @@ class IgnoreActionAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, action_id):
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
+
         try:
-            action = ActionItem.objects.get(id=action_id, user=request.user)
+            action = ActionItem.objects.get(id=action_id, user=request.user, organization=organization)
         except ActionItem.DoesNotExist:
             return Response(
                 {"error": "Action not found"},
@@ -350,8 +415,14 @@ class ReopenActionAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, action_id):
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
+
         try:
-            action = ActionItem.objects.get(id=action_id, user=request.user)
+            action = ActionItem.objects.get(id=action_id, user=request.user, organization=organization)
         except ActionItem.DoesNotExist:
             return Response(
                 {"error": "Action not found"},
@@ -375,8 +446,14 @@ class SnoozeFollowUpAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, followup_id):
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
+
         try:
-            followup = FollowUpItem.objects.get(id=followup_id, user=request.user)
+            followup = FollowUpItem.objects.get(id=followup_id, user=request.user, organization=organization)
         except FollowUpItem.DoesNotExist:
             return Response(
                 {"error": "Follow-up not found"},
@@ -418,11 +495,18 @@ class UpdateActionStatusAPIView(APIView):
 
     def post(self, request, action_id):
 
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
+
         try:
 
             action = ActionItem.objects.get(
                 id=action_id,
                 user=request.user,
+                organization=organization,
             )
 
         except ActionItem.DoesNotExist:
@@ -525,10 +609,17 @@ class AssignActionAPIView(APIView):
 
     def post(self, request, action_id):
 
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
+
         try:
             action = ActionItem.objects.get(
                 id=action_id,
                 user=request.user,
+                organization=organization,
             )
 
         except ActionItem.DoesNotExist:
@@ -558,20 +649,31 @@ class AssignActionAPIView(APIView):
                 }
             )
 
-        try:
-
-            owner = User.objects.get(
-                id=owner_id
+        membership = (
+            OrganizationUser.objects
+            .select_related(
+                "user"
             )
+            .filter(
+                organization=organization,
+                user__id=owner_id,
+            )
+            .first()
+        )
 
-        except User.DoesNotExist:
+        if membership is None:
 
             return Response(
                 {
-                    "error": "Invalid owner"
+                    "error": (
+                        "Owner must belong "
+                        "to your organization"
+                    )
                 },
                 status=400,
             )
+
+        owner = membership.user
 
         action.owner = owner
 
@@ -582,6 +684,8 @@ class AssignActionAPIView(APIView):
         )
 
         create_notification(
+
+            organization=action.organization,
 
             user=owner,
 
