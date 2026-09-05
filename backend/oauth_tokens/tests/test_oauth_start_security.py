@@ -1,6 +1,13 @@
+from uuid import uuid4
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIClient
+
+from inbox.models import (
+    Organization,
+    OrganizationUser,
+)
 
 
 class OAuthStartSecurityTests(TestCase):
@@ -11,6 +18,22 @@ class OAuthStartSecurityTests(TestCase):
         self.user = User.objects.create_user(
             email="oauth-test@oneuch.local",
             password="test-password-123",
+        )
+
+        self.organization = (
+            Organization.objects.create(
+                name="OAuth Test Workspace",
+                slug=(
+                    "oauth-test-"
+                    + uuid4().hex
+                ),
+            )
+        )
+
+        OrganizationUser.objects.create(
+            user=self.user,
+            organization=self.organization,
+            role="owner",
         )
 
         self.client = APIClient()

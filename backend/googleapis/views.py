@@ -376,8 +376,9 @@ from rest_framework.permissions import (
     AllowAny,
     IsAuthenticated,
 )
-from rest_framework_simplejwt.authentication import (
-    JWTAuthentication,
+from accounts.authentication import (
+    OneUCHJWTAuthentication,
+    get_active_membership,
 )
 
 from oauth_tokens.oauth_state import (
@@ -387,7 +388,7 @@ from oauth_tokens.oauth_state import (
 )
 
 @api_view(["GET"])
-@authentication_classes([JWTAuthentication])
+@authentication_classes([OneUCHJWTAuthentication])
 @permission_classes([IsAuthenticated])
 def google_oauth_start(request):
 
@@ -479,6 +480,21 @@ def google_oauth_callback(request):
             status=400,
         )
 
+    # OAuth callback state identifies a user,
+    # but that user must still belong to an
+    # active One UCH workspace before any
+    # provider token exchange occurs.
+
+    if get_active_membership(
+        user
+    ) is None:
+        return JsonResponse(
+            {
+                "error": "OAuth user is unavailable",
+            },
+            status=400,
+        )
+
     token_url = "https://oauth2.googleapis.com/token"
 
     data = {
@@ -496,10 +512,12 @@ def google_oauth_callback(request):
     token_data = response.json()
 
     if "access_token" not in token_data:
-        return JsonResponse({
-            "error": "Invalid OAuth response",
-            "details": token_data
-        }, status=400)
+        return JsonResponse(
+            {
+                "error": "Invalid OAuth response",
+            },
+            status=400,
+        )
 
     # 🔥 FIX: expires_at
     expires_in = token_data.get("expires_in", 3600)

@@ -6,6 +6,8 @@ from rest_framework_simplejwt.authentication import (
 )
 
 from accounts.models import (
+    AUTH_METHOD_LEGACY,
+    AUTH_METHOD_WORK_EMAIL,
     User,
 )
 from inbox.models import (
@@ -78,6 +80,20 @@ def authenticate_work_email(
         return None
 
     if not user.is_active:
+        return None
+
+    # Password authentication is valid only
+    # for explicit work-email identities and
+    # pre-RC legacy identities.
+    #
+    # Future Google/Microsoft identity records
+    # must never silently fall back to a local
+    # password merely because one exists.
+
+    if user.signup_method not in {
+        AUTH_METHOD_LEGACY,
+        AUTH_METHOD_WORK_EMAIL,
+    }:
         return None
 
     if not user.check_password(

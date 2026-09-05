@@ -13,7 +13,10 @@ from microsoftapis.utils import get_microsoft_access_token
 from oauth_tokens.models import OAuthToken
 from django.utils.timezone import make_naive
 from datetime import timezone as dt_timezone
-from rest_framework_simplejwt.authentication import JWTAuthentication
+from accounts.authentication import (
+    OneUCHJWTAuthentication,
+    get_active_membership,
+)
 from rest_framework.exceptions import AuthenticationFailed
 import urllib.parse
 from timeline.services import create_timeline_event
@@ -25,7 +28,7 @@ class MicrosoftOAuthStart(APIView):
 
 
     authentication_classes = [
-        JWTAuthentication,
+        OneUCHJWTAuthentication,
     ]
 
     permission_classes = [
@@ -116,6 +119,20 @@ class MicrosoftOAuthCallback(APIView):
                 status=400,
             )
 
+        # A valid signed OAuth state is not
+        # sufficient if the originating user
+        # no longer owns an active workspace.
+
+        if get_active_membership(
+            user
+        ) is None:
+            return Response(
+                {
+                    "error": "OAuth user is unavailable",
+                },
+                status=400,
+            )
+
         token_response = requests.post(
             "https://login.microsoftonline.com/common/oauth2/v2.0/token",
             data={
@@ -150,7 +167,6 @@ class MicrosoftOAuthCallback(APIView):
         )
 
         profile_data = profile_response.json()
-        print("MICROSOFT PROFILE:", profile_data)
         email_address = profile_data.get("mail") or profile_data.get("userPrincipalName")
 
         if not email_address:
