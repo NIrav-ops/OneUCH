@@ -53,6 +53,9 @@ class MailboxSignatureTests(
         self.gmail = (
             EmailAccount.objects.create(
                 user=self.user,
+                organization=(
+                    self.organization
+                ),
                 email_address="signature@gmail.com",
                 account_type="gmail",
                 credential_status="active",
@@ -104,9 +107,31 @@ class MailboxSignatureTests(
             )
         )
 
+        other_organization = (
+            Organization.objects.create(
+                name=(
+                    "Other Signature Organization"
+                ),
+                slug=(
+                    "other-signature-organization"
+                ),
+            )
+        )
+
+        OrganizationUser.objects.create(
+            user=other,
+            organization=(
+                other_organization
+            ),
+            role="member",
+        )
+
         other_account = (
             EmailAccount.objects.create(
                 user=other,
+                organization=(
+                    other_organization
+                ),
                 email_address="other@gmail.com",
                 account_type="gmail",
                 is_active=True,

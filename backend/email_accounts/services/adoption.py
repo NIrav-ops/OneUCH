@@ -6,6 +6,7 @@ from email_accounts.models import (
 
 from inbox.models import (
     InboxSyncStatus,
+    OrganizationUser,
 )
 
 from oauth_tokens.models import (
@@ -54,10 +55,26 @@ class MailAdoptionService:
         cls,
         *,
         user,
+        organization=None,
     ):
+        if organization is None:
+            organization = (
+                OrganizationUser.objects
+                .filter(
+                    user=user,
+                    organization__is_active=True,
+                )
+                .values_list(
+                    "organization_id",
+                    flat=True,
+                )
+                .first()
+            )
+
         providers = [
             cls._provider_status(
                 user=user,
+                organization=organization,
                 config=config,
             )
             for config in cls.PROVIDERS
@@ -81,12 +98,14 @@ class MailAdoptionService:
         cls,
         *,
         user,
+        organization,
         config,
     ):
         account = (
             EmailAccount.objects
             .filter(
                 user=user,
+                organization_id=organization,
                 account_type=(
                     config[
                         "account_type"

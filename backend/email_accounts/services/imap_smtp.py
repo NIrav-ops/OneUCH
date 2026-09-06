@@ -26,7 +26,21 @@ def fetch_imap_emails(
     Folder-aware incremental IMAP sync with smart priority scoring.
     """
 
-    provider_platform = email_account.account_type  # gmail / outlook / imap
+    if email_account is None:
+        raise ValueError(
+            "IMAP EmailAccount does not exist"
+        )
+
+    if (
+        email_account.user_id
+        !=
+        user.id
+    ):
+        raise ValueError(
+            "IMAP mailbox ownership mismatch."
+        )
+
+    provider_platform = email_account.account_type
 
     update_sync_status(
         user=user,
@@ -37,9 +51,6 @@ def fetch_imap_emails(
 
     if email_account.account_type != "imap":
         return
-
-    if email_account is None:
-        raise ValueError("IMAP EmailAccount does not exist")
 
     try:
         mail = imaplib.IMAP4_SSL(
@@ -69,7 +80,18 @@ def fetch_imap_emails(
         gmail_folders["inbox"] = "INBOX"
 
         total_processed = 0
-        organization = user.organization_membership.organization
+        organization = (
+            email_account.organization
+        )
+
+        if (
+            organization.id
+            !=
+            user.organization_membership.organization_id
+        ):
+            raise ValueError(
+                "IMAP mailbox workspace mismatch."
+            )
 
         for folder_key, folder_name in gmail_folders.items():
 
@@ -213,9 +235,10 @@ def fetch_imap_emails(
                         priority_score=priority_score,
                         email_account=email_account,
                     )
-                except Exception as e:
-                    print("Email Save Failed", e)
-                    return
+                except Exception as exc:
+                    raise RuntimeError(
+                        "IMAP message persistence failed."
+                    ) from exc
 
                 # ✅ Conversation materialization
                 conversation.last_message = message_obj
@@ -259,7 +282,9 @@ def fetch_imap_emails(
             user=user,
             platform=provider_platform,
             status="failed",
-            error_message=str(e),
+            error_message=(
+                "IMAP synchronization failed."
+            ),
         )
 
         channel_layer = get_channel_layer()
@@ -269,9 +294,8 @@ def fetch_imap_emails(
             {
                 "type": "inbox_update",
                 "data": {
-                    "event": "new_email",
-                    "subject": subject,
-                    "sender": sender
+                    "event":
+                        "sync_failed"
                 }
             }
         )

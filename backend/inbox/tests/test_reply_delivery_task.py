@@ -82,12 +82,20 @@ class ReplyDeliveryTaskTests(
         account = (
             EmailAccount.objects.create(
                 user=self.user,
+                organization=(
+                    self.organization
+                ),
                 email_address=(
                     account_type
                     + "-user@oneuch.local"
                 ),
                 account_type=(
                     account_type
+                ),
+                smtp_password=(
+                    "synthetic-imap-test-credential"
+                    if account_type == "imap"
+                    else None
                 ),
                 credential_status="active",
                 is_active=True,

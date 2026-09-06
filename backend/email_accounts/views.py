@@ -1,65 +1,187 @@
-from rest_framework.views import APIView
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
-from rest_framework import status
 
 from django.utils import timezone
 
-from .models import EmailAccount
-from inbox.models import InboxMessage
-from inbox.tasks import send_email_task
+from rest_framework import (
+    status,
+)
 
-class SendEmailAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+from rest_framework.permissions import (
+    IsAuthenticated,
+)
 
-    def post(self, request, *args, **kwargs):
-        # 1️⃣ Get active email account
-        email_account = EmailAccount.objects.filter(
-            user=request.user,
-            is_active=True
-        ).first()
+from rest_framework.response import (
+    Response,
+)
 
-        if not email_account:
+from rest_framework.views import (
+    APIView,
+)
+
+from accounts.authentication import (
+    get_active_membership,
+)
+
+from email_accounts.services.credential_vault import (
+    CredentialVaultError,
+)
+
+from .models import (
+    EmailAccount,
+)
+
+from inbox.models import (
+    InboxMessage,
+)
+
+from inbox.tasks import (
+    send_email_task,
+)
+
+
+class SendEmailAPIView(
+    APIView
+):
+    permission_classes = [
+        IsAuthenticated
+    ]
+
+    def post(
+        self,
+        request,
+        *args,
+        **kwargs,
+    ):
+        membership = (
+            get_active_membership(
+                request.user
+            )
+        )
+
+        if membership is None:
             return Response(
-                {"error": "No active email account"},
-                status=status.HTTP_400_BAD_REQUEST
+                {
+                    "error":
+                        "Active workspace required."
+                },
+                status=(
+                    status.HTTP_403_FORBIDDEN
+                ),
             )
 
-        # Ensure SMTP password exists
-        if not email_account.smtp_password:
+        organization = (
+            membership.organization
+        )
+
+        email_account = (
+            EmailAccount.objects
+            .filter(
+                user=request.user,
+                organization=organization,
+                account_type="imap",
+                is_active=True,
+            )
+            .order_by(
+                "-id"
+            )
+            .first()
+        )
+
+        if email_account is None:
             return Response(
-                {"error": "SMTP app password not configured"},
-                status=status.HTTP_400_BAD_REQUEST
+                {
+                    "error":
+                        "No active Other Work Email mailbox."
+                },
+                status=(
+                    status.HTTP_400_BAD_REQUEST
+                ),
             )
 
-        # 2️⃣ Extract request data
-        to_email = request.data.get("to")
-        subject = request.data.get("subject", "")
-        body = request.data.get("body", "")
+        if not (
+            email_account
+            .is_credential_valid()
+        ):
+            return Response(
+                {
+                    "error":
+                        "Mailbox credential requires re-authentication."
+                },
+                status=(
+                    status.HTTP_400_BAD_REQUEST
+                ),
+            )
+
+        try:
+            credential = (
+                email_account
+                .get_credential()
+            )
+
+        except CredentialVaultError:
+            credential = None
+
+        if not credential:
+            return Response(
+                {
+                    "error":
+                        "Mailbox credential is unavailable."
+                },
+                status=(
+                    status.HTTP_400_BAD_REQUEST
+                ),
+            )
+
+        to_email = (
+            request.data.get(
+                "to"
+            )
+        )
+
+        subject = (
+            request.data.get(
+                "subject",
+                "",
+            )
+        )
+
+        body = (
+            request.data.get(
+                "body",
+                "",
+            )
+        )
 
         if not to_email:
             return Response(
-                {"error": "Recipient email is required"},
-                status=status.HTTP_400_BAD_REQUEST
+                {
+                    "error":
+                        "Recipient email is required"
+                },
+                status=(
+                    status.HTTP_400_BAD_REQUEST
+                ),
             )
 
-        # 3️⃣ Create queued inbox record
-        inbox_message = InboxMessage.objects.create(
-            user=request.user,
-            organization=request.user.organization_membership.organization,
-            platform="imap",
-            direction="outbound",
-            external_message_id="pending",
-            sender=email_account.email_address,
-            recipients=to_email,
-            subject=subject,
-            body=body,
-            received_at=timezone.now(),
-            is_read=True,
-            status="queued",
+        inbox_message = (
+            InboxMessage.objects.create(
+                user=request.user,
+                organization=organization,
+                email_account=email_account,
+                platform="imap",
+                direction="outbound",
+                external_message_id="pending",
+                sender=(
+                    email_account.email_address
+                ),
+                recipients=to_email,
+                subject=subject,
+                body=body,
+                received_at=timezone.now(),
+                is_read=True,
+                status="queued",
+            )
         )
 
-        # 4️⃣ Send asynchronously via Celery
         send_email_task.delay(
             email_account.id,
             to_email,
@@ -69,23 +191,68 @@ class SendEmailAPIView(APIView):
         )
 
         return Response(
-            {"status": "Email queued for sending"},
-            status=status.HTTP_202_ACCEPTED
+            {
+                "status":
+                    "Email queued for sending"
+            },
+            status=(
+                status.HTTP_202_ACCEPTED
+            ),
         )
 
-class EmailAccountListAPIView(APIView):
-    permission_classes = [IsAuthenticated]
 
-    def get(self, request):
-        accounts = EmailAccount.objects.filter(user=request.user)
+class EmailAccountListAPIView(
+    APIView
+):
+    permission_classes = [
+        IsAuthenticated
+    ]
 
-        data = [
-            {
-                "id": acc.id,
-                "email_address": acc.email_address,
-                "account_type": acc.account_type,
-            }
-            for acc in accounts
-        ]
+    def get(
+        self,
+        request,
+    ):
+        membership = (
+            get_active_membership(
+                request.user
+            )
+        )
 
-        return Response(data)
+        if membership is None:
+            return Response(
+                [],
+                status=(
+                    status.HTTP_403_FORBIDDEN
+                ),
+            )
+
+        accounts = (
+            EmailAccount.objects
+            .filter(
+                user=request.user,
+                organization=(
+                    membership.organization
+                ),
+            )
+            .order_by(
+                "id"
+            )
+        )
+
+        return Response(
+            [
+                {
+                    "id":
+                        account.id,
+
+                    "email_address":
+                        account.email_address,
+
+                    "account_type":
+                        account.account_type,
+                }
+
+                for account
+                in accounts
+            ]
+        )

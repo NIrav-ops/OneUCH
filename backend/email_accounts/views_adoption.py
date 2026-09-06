@@ -65,7 +65,10 @@ class MailAdoptionAPIView(APIView):
         return Response(
             MailAdoptionService
             .build_payload(
-                user=request.user
+                user=request.user,
+                organization=(
+                    membership.organization
+                ),
             ),
             status=(
                 status.HTTP_200_OK

@@ -98,6 +98,9 @@ class MailboxSignatureAPIView(
             .filter(
                 id=account_id,
                 user=request.user,
+                organization=(
+                    membership.organization
+                ),
                 is_active=True,
                 account_type__in=[
                     "gmail",

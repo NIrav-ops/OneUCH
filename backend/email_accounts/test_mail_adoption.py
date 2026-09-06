@@ -54,6 +54,25 @@ class MailAdoptionServiceTests(
             )
         )
 
+        self.organization = (
+            Organization.objects.create(
+                name=(
+                    "Mail Adoption Service Org"
+                ),
+                slug=(
+                    "mail-adoption-service-org"
+                ),
+            )
+        )
+
+        OrganizationUser.objects.create(
+            user=self.user,
+            organization=(
+                self.organization
+            ),
+            role="member",
+        )
+
     def token(
         self,
         *,
@@ -90,6 +109,9 @@ class MailAdoptionServiceTests(
     ):
         return EmailAccount.objects.create(
             user=self.user,
+            organization=(
+                self.organization
+            ),
             account_type=account_type,
             email_address=email,
             is_active=is_active,
@@ -448,8 +470,30 @@ class MailAdoptionServiceTests(
             )
         )
 
+        other_organization = (
+            Organization.objects.create(
+                name=(
+                    "Other Mail Adoption Org"
+                ),
+                slug=(
+                    "other-mail-adoption-org"
+                ),
+            )
+        )
+
+        OrganizationUser.objects.create(
+            user=other,
+            organization=(
+                other_organization
+            ),
+            role="member",
+        )
+
         EmailAccount.objects.create(
             user=other,
+            organization=(
+                other_organization
+            ),
             account_type="gmail",
             email_address="other@gmail.com",
             is_active=True,

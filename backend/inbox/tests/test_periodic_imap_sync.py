@@ -15,6 +15,11 @@ from email_accounts.models import (
     EmailAccount,
 )
 
+from inbox.models import (
+    Organization,
+    OrganizationUser,
+)
+
 from inbox.tasks import (
     sync_email_account,
 )
@@ -35,6 +40,25 @@ class PeriodicIMAPSyncTests(
             )
         )
 
+        self.organization = (
+            Organization.objects.create(
+                name=(
+                    "Periodic IMAP Test Organization"
+                ),
+                slug=(
+                    "periodic-imap-test-organization"
+                ),
+            )
+        )
+
+        OrganizationUser.objects.create(
+            user=self.user,
+            organization=(
+                self.organization
+            ),
+            role="member",
+        )
+
     def create_account(
         self,
         *,
@@ -43,6 +67,9 @@ class PeriodicIMAPSyncTests(
         return (
             EmailAccount.objects.create(
                 user=self.user,
+                organization=(
+                    self.organization
+                ),
                 account_type="imap",
                 email_address=(
                     "imap-pilot@example.com"
@@ -56,6 +83,7 @@ class PeriodicIMAPSyncTests(
                 ),
                 smtp_port=465,
                 smtp_password=password,
+                credential_status="active",
                 is_active=True,
             )
         )

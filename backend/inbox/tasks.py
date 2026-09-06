@@ -7,6 +7,11 @@ from django.utils import timezone
 from django.contrib.auth import get_user_model
 
 from email_accounts.models import EmailAccount
+
+from email_accounts.services.credential_vault import (
+    CredentialVaultError,
+)
+
 from oauth_tokens.models import OAuthToken
 
 from inbox.models import InboxMessage
@@ -228,21 +233,17 @@ def sync_email_account(
             )
 
 
-            # Generic IMAP currently uses the existing temporary
-            # SMTP/app-password field for provider authentication.
-            imap_password = (
-                account.smtp_password
-            )
-
-
-            if not imap_password:
+            if not (
+                account
+                .is_credential_valid()
+            ):
 
                 log_event(
                     logger,
                     "warning",
                     (
                         "sync.account."
-                        "skipped_missing_credential"
+                        "skipped_invalid_credential"
                     ),
                     account_id=(
                         account.id
@@ -250,6 +251,39 @@ def sync_email_account(
                     provider="imap",
                 )
 
+                return {
+                    "status":
+                        "skipped",
+
+                    "reason":
+                        "invalid_credential",
+
+                    "provider":
+                        "imap",
+                }
+
+
+            try:
+                imap_password = (
+                    account
+                    .get_credential()
+                )
+
+            except CredentialVaultError:
+
+                return {
+                    "status":
+                        "skipped",
+
+                    "reason":
+                        "credential_unavailable",
+
+                    "provider":
+                        "imap",
+                }
+
+
+            if not imap_password:
 
                 return {
                     "status":
@@ -647,6 +681,30 @@ def _deliver_reply_message(
 
     if email_account.account_type == "imap":
 
+        if not (
+            email_account
+            .is_credential_valid()
+        ):
+            raise ValueError(
+                "IMAP mailbox credential unavailable."
+            )
+
+        try:
+            smtp_credential = (
+                email_account
+                .get_credential()
+            )
+
+        except CredentialVaultError as exc:
+            raise ValueError(
+                "IMAP mailbox credential unavailable."
+            ) from exc
+
+        if not smtp_credential:
+            raise ValueError(
+                "IMAP mailbox credential unavailable."
+            )
+
         if attachments:
 
             raise ValueError(
@@ -683,8 +741,7 @@ def _deliver_reply_message(
                     inbox_message
                 ),
                 password=(
-                    email_account
-                    .smtp_password
+                    smtp_credential
                 ),
             )
         )
@@ -799,6 +856,39 @@ def send_email_task(
             raise ValueError(
                 "Reply mailbox ownership mismatch."
             )
+
+
+        if (
+            inbox_message.organization_id
+            !=
+            email_account.organization_id
+        ):
+
+            inbox_message.status = (
+                "failed"
+            )
+
+            inbox_message.error_reason = (
+                "Mailbox workspace mismatch."
+            )
+
+            inbox_message.save(
+                update_fields=[
+                    "status",
+                    "error_reason",
+                ]
+            )
+
+            return {
+                "status":
+                    "blocked",
+
+                "reason":
+                    "workspace_mismatch",
+
+                "message_id":
+                    inbox_message.id,
+            }
 
 
         # A completed local delivery is authoritative. A Celery

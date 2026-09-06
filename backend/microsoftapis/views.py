@@ -123,15 +123,23 @@ class MicrosoftOAuthCallback(APIView):
         # sufficient if the originating user
         # no longer owns an active workspace.
 
-        if get_active_membership(
-            user
-        ) is None:
+        membership = (
+            get_active_membership(
+                user
+            )
+        )
+
+        if membership is None:
             return Response(
                 {
                     "error": "OAuth user is unavailable",
                 },
                 status=400,
             )
+
+        organization = (
+            membership.organization
+        )
 
         token_response = requests.post(
             "https://login.microsoftonline.com/common/oauth2/v2.0/token",
@@ -178,9 +186,10 @@ class MicrosoftOAuthCallback(APIView):
 
         EmailAccount.objects.update_or_create(
             user=user,
+            organization=organization,
+            account_type="outlook",
             email_address=email_address,
             defaults={
-                "account_type": "outlook",
                 "is_active": True,
             },
         )

@@ -485,15 +485,23 @@ def google_oauth_callback(request):
     # active One UCH workspace before any
     # provider token exchange occurs.
 
-    if get_active_membership(
-        user
-    ) is None:
+    membership = (
+        get_active_membership(
+            user
+        )
+    )
+
+    if membership is None:
         return JsonResponse(
             {
                 "error": "OAuth user is unavailable",
             },
             status=400,
         )
+
+    organization = (
+        membership.organization
+    )
 
     token_url = "https://oauth2.googleapis.com/token"
 
@@ -550,11 +558,12 @@ def google_oauth_callback(request):
 
         EmailAccount.objects.update_or_create(
             user=user,
+            organization=organization,
+            account_type="gmail",
             email_address=email,
             defaults={
-                "account_type": "gmail",
                 "is_active": True,
-            }
+            },
         )
 
     return JsonResponse({"status": "Gmail connected successfully"})

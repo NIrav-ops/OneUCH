@@ -28,6 +28,8 @@ from email_accounts.models import (
 
 from inbox.models import (
     InboxSyncStatus,
+    Organization,
+    OrganizationUser,
 )
 
 from oauth_tokens.models import (
@@ -57,9 +59,31 @@ class GmailScheduledSyncStatusTests(
             )
         )
 
+        self.organization = (
+            Organization.objects.create(
+                name=(
+                    "Gmail Sync Status Organization"
+                ),
+                slug=(
+                    "gmail-sync-status-organization"
+                ),
+            )
+        )
+
+        OrganizationUser.objects.create(
+            user=self.user,
+            organization=(
+                self.organization
+            ),
+            role="member",
+        )
+
         self.account = (
             EmailAccount.objects.create(
                 user=self.user,
+                organization=(
+                    self.organization
+                ),
                 account_type="gmail",
                 email_address=(
                     "gmail-sync-status@gmail.com"
@@ -233,27 +257,6 @@ class GmailScheduledSyncStatusTests(
     ):
         from inbox.models import (
             InboxMessage,
-            Organization,
-            OrganizationUser,
-        )
-
-
-        organization = (
-            Organization.objects.create(
-                name=(
-                    "Gmail Partial Sync Org"
-                ),
-                slug=(
-                    "gmail-partial-sync-org"
-                ),
-            )
-        )
-
-
-        OrganizationUser.objects.create(
-            user=self.user,
-            organization=organization,
-            role="member",
         )
 
 
