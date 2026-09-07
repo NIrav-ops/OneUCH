@@ -67,6 +67,10 @@ logger = get_logger("oneuch.runtime.scheduler")
 User = get_user_model()
 MAX_RETRIES = 3
 
+DELIVERY_UNCERTAIN_ERROR_PREFIX = (
+    "Delivery outcome uncertain; automatic resend suppressed"
+)
+
 INTELLIGENCE_HANDOFF_BATCH_SIZE = (
     500
 )
@@ -1122,6 +1126,7 @@ def send_email_task(
     body,
     inbox_message_id,
     reply_mode="reply",
+    allow_retry=True,
 ):
     inbox_message = None
 
@@ -1216,6 +1221,26 @@ def send_email_task(
             }
 
 
+        if (
+            inbox_message.direction
+            !=
+            "outbound"
+            or
+            inbox_message.is_draft
+        ):
+
+            return {
+                "status":
+                    "blocked",
+
+                "reason":
+                    "invalid_delivery_message",
+
+                "message_id":
+                    inbox_message.id,
+            }
+
+
         # A completed local delivery is authoritative. A Celery
         # replay of the same task must never call the provider
         # again.
@@ -1252,8 +1277,79 @@ def send_email_task(
 
         except OutboundIdempotencyUnavailable:
 
-            # Legacy replies created without an Idempotency-Key
-            # remain compatible with the prior task behavior.
+            # A durable local delivery-uncertain marker survives a
+            # temporary safety-store outage and must remain
+            # authoritative enough to suppress automatic resend.
+            if (
+                inbox_message.error_reason
+                and
+                inbox_message.error_reason.startswith(
+                    DELIVERY_UNCERTAIN_ERROR_PREFIX
+                )
+            ):
+
+                inbox_message.status = (
+                    "failed"
+                )
+
+                inbox_message.save(
+                    update_fields=[
+                        "status",
+                    ]
+                )
+
+                return {
+                    "status":
+                        "delivery_uncertain",
+
+                    "message_id":
+                        inbox_message.id,
+
+                    "error": (
+                        "Provider delivery outcome is uncertain. "
+                        "Automatic resend is blocked."
+                    ),
+                }
+
+
+            # Initial legacy delivery remains backwards-compatible.
+            #
+            # Once a delivery has already failed/retried, however,
+            # losing the safety index makes the provider outcome
+            # impossible to prove. A second automatic provider call
+            # would risk duplicate delivery, so retries fail closed.
+            if inbox_message.retry_count > 0:
+
+                inbox_message.status = (
+                    "failed"
+                )
+
+                inbox_message.error_reason = (
+                    "Automatic retry blocked because outbound "
+                    "delivery safety state is unavailable."
+                )
+
+                inbox_message.save(
+                    update_fields=[
+                        "status",
+                        "error_reason",
+                    ]
+                )
+
+                return {
+                    "status":
+                        "blocked",
+
+                    "reason":
+                        "idempotency_unavailable",
+
+                    "message_id":
+                        inbox_message.id,
+                }
+
+
+            # First-attempt legacy replies created without an
+            # Idempotency-Key retain the historical behavior.
             intent = None
 
 
@@ -1314,6 +1410,76 @@ def send_email_task(
             ==
             "delivery_uncertain"
         ):
+
+            return {
+                "status":
+                    "delivery_uncertain",
+
+                "message_id":
+                    inbox_message.id,
+
+                "error": (
+                    "Provider delivery outcome is uncertain. "
+                    "Automatic resend is blocked."
+                ),
+            }
+
+
+        # A readable completed semantic intent above is allowed to
+        # repair local state even when the mailbox was subsequently
+        # disabled. No provider I/O occurs during that repair.
+        #
+        # From this point forward, however, a provider attempt is
+        # possible, so an inactive mailbox must fail closed.
+        if not email_account.is_active:
+
+            inbox_message.status = (
+                "failed"
+            )
+
+            inbox_message.error_reason = (
+                "Mailbox is inactive; automatic delivery blocked."
+            )
+
+            inbox_message.save(
+                update_fields=[
+                    "status",
+                    "error_reason",
+                ]
+            )
+
+            return {
+                "status":
+                    "blocked",
+
+                "reason":
+                    "inactive_mailbox",
+
+                "message_id":
+                    inbox_message.id,
+            }
+
+
+        # If the safety store is readable but has no reverse intent,
+        # retain the durable local uncertain marker as a final
+        # duplicate-delivery suppression boundary.
+        if (
+            inbox_message.error_reason
+            and
+            inbox_message.error_reason.startswith(
+                DELIVERY_UNCERTAIN_ERROR_PREFIX
+            )
+        ):
+
+            inbox_message.status = (
+                "failed"
+            )
+
+            inbox_message.save(
+                update_fields=[
+                    "status",
+                ]
+            )
 
             return {
                 "status":
@@ -1582,6 +1748,33 @@ def send_email_task(
         )
 
 
+        if not allow_retry:
+
+            inbox_message.status = (
+                "failed"
+            )
+
+            inbox_message.save(
+                update_fields=[
+                    "retry_count",
+                    "error_reason",
+                    "last_attempt_at",
+                    "status",
+                ]
+            )
+
+            return {
+                "status":
+                    "failed",
+
+                "message_id":
+                    inbox_message.id,
+
+                "error":
+                    inbox_message.error_reason,
+            }
+
+
         if (
             inbox_message.retry_count
             >=
@@ -1654,136 +1847,83 @@ def send_email_task(
 
 @shared_task
 def retry_failed_messages():
+    """
+    Retry only governed failed outbound delivery rows.
+
+    The periodic task must never maintain a second provider
+    implementation. Every retry is routed back through
+    send_email_task(), which owns:
+
+      * user/workspace mailbox ownership checks
+      * inactive mailbox blocking
+      * semantic idempotency state
+      * completed-provider repair
+      * delivery-uncertain suppression
+      * provider delivery locking
+      * provider routing and attachment/thread semantics
+
+    Messages without an explicit mailbox are never guessed onto
+    another mailbox.
+    """
+
     failed_messages = (
         InboxMessage.objects
         .filter(
             status="failed",
+            direction="outbound",
+            is_draft=False,
             retry_count__lt=(
                 MAX_RETRIES
             ),
         )
+        .select_related(
+            "email_account"
+        )
+        .order_by(
+            "id"
+        )
     )
+
+
+    summary = {
+        "scanned":
+            0,
+
+        "retried":
+            0,
+
+        "blocked":
+            0,
+
+        "failed":
+            0,
+
+        "deferred":
+            0,
+    }
 
 
     for message in failed_messages:
 
-        message.status = (
-            "retrying"
-        )
+        summary[
+            "scanned"
+        ] += 1
 
-        message.last_attempt_at = (
-            timezone.now()
-        )
 
-        message.save(
-            update_fields=[
-                "status",
-                "last_attempt_at",
-            ]
+        email_account = (
+            message.email_account
         )
 
 
-        try:
-
-            email_account = (
-                message.email_account
-            )
-
-
-            if email_account is None:
-
-                email_account = (
-                    message.user
-                    .email_accounts
-                    .filter(
-                        is_active=True
-                    )
-                    .first()
-                )
-
-
-            if email_account is None:
-
-                raise ValueError(
-                    "No email account available for retry."
-                )
-
-
-            recipient_meta = (
-                message.recipient_meta
-                if isinstance(
-                    message.recipient_meta,
-                    dict,
-                )
-                else {}
-            )
-
-
-            reply_mode = (
-                "reply_all"
-                if recipient_meta.get(
-                    "cc"
-                )
-                else "reply"
-            )
-
-
-            provider_result = (
-                _deliver_reply_message(
-                    email_account=(
-                        email_account
-                    ),
-                    inbox_message=(
-                        message
-                    ),
-                    fallback_to=(
-                        message.recipients
-                    ),
-                    subject=(
-                        message.subject
-                    ),
-                    body=(
-                        message.body
-                    ),
-                    reply_mode=(
-                        reply_mode
-                    ),
-                )
-            )
-
-
-            _mark_delivery_success(
-                inbox_message=(
-                    message
-                ),
-                provider_result=(
-                    provider_result
-                ),
-            )
-
-
-            create_notification(
-                user=message.user,
-                type="send_retried",
-                title=(
-                    "Message sent after retry"
-                ),
-                message=(
-                    message.subject
-                ),
-            )
-
-
-        except Exception as exc:
+        if email_account is None:
 
             message.status = (
                 "failed"
             )
 
             message.error_reason = (
-                str(
-                    exc
-                )
+                "Automatic retry blocked: outbound message "
+                "is not bound to a mailbox."
             )
 
             message.last_attempt_at = (
@@ -1803,9 +1943,196 @@ def retry_failed_messages():
                 user=message.user,
                 type="send_failed",
                 title=(
-                    "Message delivery failed"
+                    "Automatic retry blocked"
                 ),
                 message=(
                     message.subject
                 ),
             )
+
+
+            summary[
+                "blocked"
+            ] += 1
+
+            continue
+
+
+        recipient_meta = (
+            message.recipient_meta
+            if isinstance(
+                message.recipient_meta,
+                dict,
+            )
+            else {}
+        )
+
+
+        reply_mode = (
+            "reply_all"
+            if recipient_meta.get(
+                "cc"
+            )
+            else "reply"
+        )
+
+
+        try:
+
+            result = (
+                send_email_task.run(
+                    email_account.id,
+                    message.recipients,
+                    message.subject,
+                    message.body,
+                    message.id,
+                    reply_mode,
+                    allow_retry=False,
+                )
+            )
+
+
+        except Exception:
+
+            # Unexpected wrapper failures must not create another
+            # provider path or preserve raw exception text.
+            message.refresh_from_db()
+
+
+            if (
+                message.status
+                !=
+                "sent"
+            ):
+
+                message.status = (
+                    "failed"
+                )
+
+                message.error_reason = (
+                    "Automatic retry failed inside governed "
+                    "delivery processing."
+                )
+
+                message.last_attempt_at = (
+                    timezone.now()
+                )
+
+                message.save(
+                    update_fields=[
+                        "status",
+                        "error_reason",
+                        "last_attempt_at",
+                    ]
+                )
+
+
+            create_notification(
+                user=message.user,
+                type="send_failed",
+                title=(
+                    "Message retry failed"
+                ),
+                message=(
+                    message.subject
+                ),
+            )
+
+
+            summary[
+                "failed"
+            ] += 1
+
+            continue
+
+
+        message.refresh_from_db()
+
+
+        result_status = (
+            result.get(
+                "status"
+            )
+            if isinstance(
+                result,
+                dict,
+            )
+            else None
+        )
+
+
+        if result_status in {
+            "sent",
+            "already_sent",
+            "already_provider_accepted",
+            "sent_idempotency_finalize_degraded",
+        }:
+
+            create_notification(
+                user=message.user,
+                type="send_retried",
+                title=(
+                    "Message sent after retry"
+                ),
+                message=(
+                    message.subject
+                ),
+            )
+
+
+            summary[
+                "retried"
+            ] += 1
+
+            continue
+
+
+        if (
+            result_status
+            ==
+            "duplicate_delivery_in_progress"
+        ):
+
+            summary[
+                "deferred"
+            ] += 1
+
+            continue
+
+
+        create_notification(
+            user=message.user,
+            type="send_failed",
+            title=(
+                "Automatic retry blocked"
+                if result_status
+                in {
+                    "blocked",
+                    "delivery_uncertain",
+                }
+                else
+                "Message retry failed"
+            ),
+            message=(
+                message.subject
+            ),
+        )
+
+
+        if result_status in {
+            "blocked",
+            "delivery_uncertain",
+        }:
+
+            summary[
+                "blocked"
+            ] += 1
+
+        else:
+
+            summary[
+                "failed"
+            ] += 1
+
+
+    return summary
