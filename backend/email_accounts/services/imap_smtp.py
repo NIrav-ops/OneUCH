@@ -14,7 +14,9 @@ from email.header import (
 )
 
 from email.utils import (
+    formataddr,
     getaddresses,
+    make_msgid,
     parsedate_to_datetime,
 )
 
@@ -32,6 +34,10 @@ from email_accounts.services.mailbox_network_policy import (
     connect_validated_mailbox_endpoint,
     create_verified_tls_context,
     validate_mailbox_endpoint,
+)
+
+from email_accounts.services.credential_vault import (
+    CredentialVaultError,
 )
 
 from inbox.models import (
@@ -604,16 +610,205 @@ def _extract_imap_body(
     return ""
 
 
+def _imap_attachment_locator(
+    *,
+    folder_key,
+    uidvalidity,
+    uid,
+    part_index,
+):
+    if folder_key not in {
+        "inbox",
+        "sent",
+    }:
+        raise ValueError(
+            "Unsupported IMAP attachment folder."
+        )
+
+
+    try:
+
+        uid_value = int(
+            uid
+        )
+
+        part_value = int(
+            part_index
+        )
+
+    except (
+        TypeError,
+        ValueError,
+    ) as exc:
+
+        raise ValueError(
+            "Invalid IMAP attachment locator."
+        ) from exc
+
+
+    if (
+        uid_value <= 0
+        or
+        part_value < 0
+    ):
+
+        raise ValueError(
+            "Invalid IMAP attachment locator."
+        )
+
+
+    if uidvalidity is None:
+
+        raise ValueError(
+            "IMAP attachment retrieval requires UIDVALIDITY."
+        )
+
+
+    validity = (
+        str(
+            uidvalidity
+        )
+        .strip()
+    )
+
+
+    if (
+        not validity
+        or
+        validity.casefold()
+        ==
+        "unknown"
+        or
+        ":" in validity
+    ):
+
+        raise ValueError(
+            "Invalid IMAP UIDVALIDITY."
+        )
+
+
+    return (
+        "imap:"
+        + folder_key
+        + ":"
+        + validity
+        + ":"
+        + str(
+            uid_value
+        )
+        + ":"
+        + str(
+            part_value
+        )
+    )
+
+
+def _parse_imap_attachment_locator(
+    value,
+):
+    source = (
+        str(
+            value
+            or ""
+        )
+        .strip()
+    )
+
+
+    parts = (
+        source.split(
+            ":"
+        )
+    )
+
+
+    if (
+        len(parts) != 5
+        or
+        parts[0] != "imap"
+        or
+        parts[1] not in {
+            "inbox",
+            "sent",
+        }
+        or
+        not parts[2]
+        or
+        parts[2].casefold()
+        ==
+        "unknown"
+    ):
+
+        raise ValueError(
+            "Invalid IMAP attachment locator."
+        )
+
+
+    try:
+
+        uid = int(
+            parts[3]
+        )
+
+        part_index = int(
+            parts[4]
+        )
+
+    except ValueError as exc:
+
+        raise ValueError(
+            "Invalid IMAP attachment locator."
+        ) from exc
+
+
+    if (
+        uid <= 0
+        or
+        part_index < 0
+    ):
+
+        raise ValueError(
+            "Invalid IMAP attachment locator."
+        )
+
+
+    return {
+        "folder_key":
+            parts[1],
+
+        "uidvalidity":
+            parts[2],
+
+        "uid":
+            uid,
+
+        "part_index":
+            part_index,
+    }
+
+
 def _extract_imap_attachments(
     message,
+    *,
+    folder_key,
+    uidvalidity,
+    uid,
 ):
     attachments = []
 
 
-    for part in (
+    parts = list(
         message.walk()
         if message.is_multipart()
         else [message]
+    )
+
+
+    for (
+        part_index,
+        part,
+    ) in enumerate(
+        parts
     ):
 
         filename = (
@@ -621,8 +816,24 @@ def _extract_imap_attachments(
         )
 
         if not filename:
-
             continue
+
+
+        payload = (
+            part.get_payload(
+                decode=True
+            )
+        )
+
+
+        size = (
+            len(
+                payload
+            )
+            if payload is not None
+            else 0
+        )
+
 
         attachments.append(
             {
@@ -632,10 +843,24 @@ def _extract_imap_attachments(
                     ),
 
                 "attachment_id":
-                    None,
+                    _imap_attachment_locator(
+                        folder_key=(
+                            folder_key
+                        ),
+                        uidvalidity=(
+                            uidvalidity
+                        ),
+                        uid=uid,
+                        part_index=(
+                            part_index
+                        ),
+                    ),
 
                 "mime_type":
                     part.get_content_type(),
+
+                "size":
+                    size,
             }
         )
 
@@ -2367,7 +2592,20 @@ def fetch_imap_emails(
 
                     attachments = (
                         _extract_imap_attachments(
-                            message
+                            message,
+                            folder_key=(
+                                folder_key
+                            ),
+                            uidvalidity=(
+                                current_validity
+                                or
+                                batch[
+                                    "uidvalidity"
+                                ]
+                            ),
+                            uid=(
+                                uid_text
+                            ),
                         )
                     )
 
@@ -3029,6 +3267,332 @@ def fetch_imap_emails(
                 pass
 
 
+def load_imap_attachment_content(
+    *,
+    email_account,
+    attachment_id,
+):
+    """
+    Load one synchronized IMAP attachment on demand.
+
+    The locator is bound to:
+    - normalized Inbox/Sent role
+    - UIDVALIDITY
+    - UID
+    - deterministic MIME walk index
+
+    All network access still traverses the C5A validated,
+    DNS-pinned and certificate-verified IMAP transport.
+    """
+
+    if (
+        email_account is None
+        or
+        email_account.account_type
+        !=
+        "imap"
+        or
+        not email_account.is_active
+    ):
+
+        raise ValueError(
+            "Original IMAP mailbox is unavailable."
+        )
+
+
+    if not (
+        email_account
+        .is_credential_valid()
+    ):
+
+        raise ValueError(
+            "IMAP mailbox credential unavailable."
+        )
+
+
+    try:
+
+        credential = (
+            email_account
+            .get_credential()
+        )
+
+    except CredentialVaultError as exc:
+
+        raise ValueError(
+            "IMAP mailbox credential unavailable."
+        ) from exc
+
+
+    if not credential:
+
+        raise ValueError(
+            "IMAP mailbox credential unavailable."
+        )
+
+
+    locator = (
+        _parse_imap_attachment_locator(
+            attachment_id
+        )
+    )
+
+
+    endpoint = (
+        validate_mailbox_endpoint(
+            host=(
+                email_account
+                .imap_server
+            ),
+            port=(
+                email_account
+                .imap_port
+            ),
+            protocol="imap",
+        )
+    )
+
+
+    mail = (
+        _PinnedIMAP4SSL(
+            endpoint
+        )
+    )
+
+
+    try:
+
+        mail.login(
+            email_account.email_address,
+            credential,
+        )
+
+
+        if (
+            locator[
+                "folder_key"
+            ]
+            ==
+            "inbox"
+        ):
+
+            folder_name = (
+                "INBOX"
+            )
+
+
+        else:
+
+            status, folder_list = (
+                mail.list()
+            )
+
+
+            if status != "OK":
+
+                raise RuntimeError(
+                    "Unable to fetch IMAP folder list."
+                )
+
+
+            folder_config = (
+                _discover_imap_folders(
+                    folder_list
+                )
+            )
+
+
+            sent = [
+                item
+                for item in (
+                    folder_config
+                )
+                if (
+                    item[
+                        "folder_key"
+                    ]
+                    ==
+                    "sent"
+                )
+            ]
+
+
+            if len(
+                sent
+            ) != 1:
+
+                raise RuntimeError(
+                    "Unable to resolve IMAP Sent folder."
+                )
+
+
+            folder_name = (
+                sent[0][
+                    "folder_name"
+                ]
+            )
+
+
+        status, _ = (
+            mail.select(
+                _quote_imap_mailbox(
+                    folder_name
+                )
+            )
+        )
+
+
+        if status != "OK":
+
+            raise RuntimeError(
+                "Unable to select IMAP attachment folder."
+            )
+
+
+        current_validity = (
+            _current_uidvalidity(
+                mail
+            )
+        )
+
+
+        expected_validity = (
+            locator[
+                "uidvalidity"
+            ]
+        )
+
+
+        if (
+            current_validity is None
+            or
+            str(
+                current_validity
+            )
+            !=
+            str(
+                expected_validity
+            )
+        ):
+
+            raise RuntimeError(
+                "IMAP UIDVALIDITY changed or is unavailable; "
+                "original attachment must be resynchronized."
+            )
+
+
+        status, message_data = (
+            mail.uid(
+                "fetch",
+                str(
+                    locator[
+                        "uid"
+                    ]
+                ),
+                "(BODY.PEEK[])",
+            )
+        )
+
+
+        if (
+            status != "OK"
+            or
+            not message_data
+            or
+            not isinstance(
+                message_data[0],
+                tuple,
+            )
+            or
+            len(
+                message_data[0]
+            ) < 2
+        ):
+
+            raise RuntimeError(
+                "Unable to fetch original IMAP attachment message."
+            )
+
+
+        raw_email = (
+            message_data[0][1]
+        )
+
+
+        message = (
+            email.message_from_bytes(
+                raw_email
+            )
+        )
+
+
+        parts = list(
+            message.walk()
+            if message.is_multipart()
+            else [message]
+        )
+
+
+        part_index = (
+            locator[
+                "part_index"
+            ]
+        )
+
+
+        if part_index >= len(
+            parts
+        ):
+
+            raise RuntimeError(
+                "Original IMAP attachment part is unavailable."
+            )
+
+
+        part = (
+            parts[
+                part_index
+            ]
+        )
+
+
+        if not (
+            part.get_filename()
+        ):
+
+            raise RuntimeError(
+                "Original IMAP attachment part is unavailable."
+            )
+
+
+        content = (
+            part.get_payload(
+                decode=True
+            )
+        )
+
+
+        if not content:
+
+            raise RuntimeError(
+                "Original IMAP attachment content is unavailable."
+            )
+
+
+        return content
+
+
+    finally:
+
+        try:
+
+            mail.logout()
+
+        except Exception:
+
+            pass
+
+
 # ================================
 # SMTP SEND
 # ================================
@@ -3103,74 +3667,564 @@ class _PinnedSMTPSSL(
             raise
 
 
+def _smtp_recipient_identities(
+    value,
+):
+    if value is None:
+        return []
+
+
+    if isinstance(
+        value,
+        (
+            list,
+            tuple,
+        ),
+    ):
+
+        sources = list(
+            value
+        )
+
+    else:
+
+        sources = [
+            value
+        ]
+
+
+    identities = []
+
+    seen = set()
+
+
+    for source in sources:
+
+        candidates = []
+
+
+        if isinstance(
+            source,
+            dict,
+        ):
+
+            candidates.append(
+                (
+                    str(
+                        source.get(
+                            "name",
+                            "",
+                        )
+                        or ""
+                    ).strip(),
+
+                    str(
+                        source.get(
+                            "email"
+                        )
+                        or
+                        source.get(
+                            "address"
+                        )
+                        or
+                        ""
+                    )
+                    .strip()
+                    .lower(),
+                )
+            )
+
+
+        else:
+
+            candidates.extend(
+                getaddresses(
+                    [
+                        str(
+                            source
+                            or ""
+                        )
+                        .replace(
+                            ";",
+                            ",",
+                        )
+                    ]
+                )
+            )
+
+
+        for (
+            name,
+            address,
+        ) in candidates:
+
+            email_value = (
+                str(
+                    address
+                    or ""
+                )
+                .strip()
+                .lower()
+            )
+
+
+            if (
+                not email_value
+                or
+                email_value in seen
+            ):
+
+                continue
+
+
+            seen.add(
+                email_value
+            )
+
+
+            identities.append(
+                {
+                    "name":
+                        str(
+                            name
+                            or ""
+                        ).strip(),
+
+                    "email":
+                        email_value,
+                }
+            )
+
+
+    return identities
+
+
+def _smtp_header_value(
+    identities,
+):
+    return ", ".join(
+        formataddr(
+            (
+                item[
+                    "name"
+                ],
+                item[
+                    "email"
+                ],
+            )
+        )
+        if item[
+            "name"
+        ]
+        else item[
+            "email"
+        ]
+
+        for item in (
+            identities
+            or []
+        )
+    )
+
+
+def _smtp_envelope_addresses(
+    *buckets,
+):
+    result = []
+
+    seen = set()
+
+
+    for identities in buckets:
+
+        for item in (
+            identities
+            or []
+        ):
+
+            address = (
+                str(
+                    item.get(
+                        "email",
+                        "",
+                    )
+                )
+                .strip()
+                .lower()
+            )
+
+
+            if (
+                not address
+                or
+                address in seen
+            ):
+
+                continue
+
+
+            seen.add(
+                address
+            )
+
+            result.append(
+                address
+            )
+
+
+    return result
+
+
 def send_via_smtp(
     *,
     email_account,
-    to_email,
+    to_email=None,
     subject,
     body,
     inbox_message=None,
-    password=None
+    password=None,
+    to_emails=None,
+    cc_emails=None,
+    bcc_emails=None,
+    attachments=None,
+    in_reply_to=None,
+    references=None,
 ):
+    """
+    Governed implicit-TLS SMTP delivery.
 
-    try:
-        if not password:
-            raise ValueError("SMTP password not configured")
+    Bcc is envelope-only and is intentionally never serialized
+    into the message headers.
 
-        smtp_endpoint = (
-            validate_mailbox_endpoint(
-                host=(
-                    email_account
-                    .smtp_server
-                ),
-                port=(
-                    email_account
-                    .smtp_port
-                ),
-                protocol="smtp",
+    The generated RFC Message-ID is also converted into the same
+    stable external_message_id format used by C5B Sent sync, so
+    provider reconciliation upgrades the existing local Sent row
+    instead of creating a duplicate.
+    """
+
+    del inbox_message
+
+
+    if not password:
+
+        raise ValueError(
+            "SMTP password not configured"
+        )
+
+
+    to_identities = (
+        _smtp_recipient_identities(
+            to_emails
+            if to_emails is not None
+            else to_email
+        )
+    )
+
+
+    cc_identities = (
+        _smtp_recipient_identities(
+            cc_emails
+        )
+    )
+
+
+    bcc_identities = (
+        _smtp_recipient_identities(
+            bcc_emails
+        )
+    )
+
+
+    if not to_identities:
+
+        raise ValueError(
+            "Recipient email is required"
+        )
+
+
+    envelope_addresses = (
+        _smtp_envelope_addresses(
+            to_identities,
+            cc_identities,
+            bcc_identities,
+        )
+    )
+
+
+    smtp_endpoint = (
+        validate_mailbox_endpoint(
+            host=(
+                email_account
+                .smtp_server
+            ),
+            port=(
+                email_account
+                .smtp_port
+            ),
+            protocol="smtp",
+        )
+    )
+
+
+    msg = EmailMessage()
+
+
+    sender_address = (
+        str(
+            email_account
+            .email_address
+        )
+        .strip()
+        .lower()
+    )
+
+
+    msg[
+        "From"
+    ] = sender_address
+
+
+    msg[
+        "To"
+    ] = (
+        _smtp_header_value(
+            to_identities
+        )
+    )
+
+
+    if cc_identities:
+
+        msg[
+            "Cc"
+        ] = (
+            _smtp_header_value(
+                cc_identities
             )
         )
 
-        msg = EmailMessage()
-        msg["From"] = email_account.email_address
-        msg["To"] = to_email
-        msg["Subject"] = subject
-        msg.set_content(body)
 
-        server = _PinnedSMTPSSL(
+    # Never add a Bcc header.
+    # Bcc identities are supplied only in `to_addrs`.
+    msg[
+        "Subject"
+    ] = str(
+        subject
+        or ""
+    )
+
+
+    domain = (
+        sender_address
+        .partition(
+            "@"
+        )[2]
+        or None
+    )
+
+
+    rfc_message_id = (
+        make_msgid(
+            domain=domain
+        )
+    )
+
+
+    msg[
+        "Message-ID"
+    ] = (
+        rfc_message_id
+    )
+
+
+    parent_id = (
+        _first_message_id(
+            in_reply_to
+        )
+    )
+
+
+    if parent_id:
+
+        msg[
+            "In-Reply-To"
+        ] = (
+            parent_id
+        )
+
+
+    reference_ids = (
+        _message_id_tokens(
+            references
+        )
+    )
+
+
+    if reference_ids:
+
+        msg[
+            "References"
+        ] = (
+            " ".join(
+                reference_ids
+            )
+        )
+
+
+    msg.set_content(
+        str(
+            body
+            or ""
+        )
+    )
+
+
+    for item in (
+        attachments
+        or []
+    ):
+
+        content = (
+            item.get(
+                "content"
+            )
+        )
+
+
+        if not isinstance(
+            content,
+            (
+                bytes,
+                bytearray,
+            ),
+        ):
+
+            raise ValueError(
+                "SMTP attachment content is invalid."
+            )
+
+
+        content_type = (
+            str(
+                item.get(
+                    "content_type"
+                )
+                or
+                "application/octet-stream"
+            )
+            .strip()
+            .lower()
+        )
+
+
+        if "/" in content_type:
+
+            maintype, subtype = (
+                content_type.split(
+                    "/",
+                    1,
+                )
+            )
+
+        else:
+
+            maintype = (
+                "application"
+            )
+
+            subtype = (
+                "octet-stream"
+            )
+
+
+        filename = (
+            str(
+                item.get(
+                    "filename"
+                )
+                or
+                "attachment"
+            )
+            .strip()
+        )
+
+
+        msg.add_attachment(
+            bytes(
+                content
+            ),
+            maintype=(
+                maintype
+            ),
+            subtype=(
+                subtype
+            ),
+            filename=(
+                filename
+            ),
+        )
+
+
+    server = (
+        _PinnedSMTPSSL(
             smtp_endpoint
         )
+    )
 
-        server.login(email_account.email_address, password)
-        server.send_message(msg)
-        server.quit()
 
-        if inbox_message:
-            inbox_message.status = "sent"
-            inbox_message.last_attempt_at = timezone.now()
-            inbox_message.save()
+    try:
 
-            create_notification(
-                user=inbox_message.user,
-                title="Email sent",
-                message=f"Your email '{inbox_message.subject}' was sent successfully.",
-                notification_type="success",
-            )
+        server.login(
+            sender_address,
+            password,
+        )
 
-    except Exception as e:
 
-        if inbox_message:
-            inbox_message.status = "failed"
-            inbox_message.error_reason = str(e)
-            inbox_message.retry_count += 1
-            inbox_message.last_attempt_at = timezone.now()
-            inbox_message.save()
+        server.send_message(
+            msg,
+            from_addr=(
+                sender_address
+            ),
+            to_addrs=(
+                envelope_addresses
+            ),
+        )
 
-            create_notification(
-                user=inbox_message.user,
-                title="Email failed",
-                message=f"Failed to send email '{inbox_message.subject}'.",
-                notification_type="error",
-            )
 
-        raise
+    finally:
+
+        try:
+
+            server.quit()
+
+        except Exception:
+
+            try:
+
+                server.close()
+
+            except Exception:
+
+                pass
+
+
+    stable_id = (
+        _stable_external_message_id(
+            email_account=(
+                email_account
+            ),
+            folder_key="sent",
+            uid="0",
+            uidvalidity=None,
+            message=msg,
+        )
+    )
+
+
+    return {
+        "id":
+            stable_id,
+
+        "rfc_message_id":
+            rfc_message_id,
+    }

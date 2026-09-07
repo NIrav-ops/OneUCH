@@ -42,6 +42,14 @@ from email_accounts.services.signatures import (
     apply_account_signature,
 )
 
+from email_accounts.services.credential_vault import (
+    CredentialVaultError,
+)
+
+from email_accounts.services.imap_smtp import (
+    send_via_smtp,
+)
+
 from inbox.services.outbound_attachments import (
     attachment_metadata,
     prepare_outbound_attachments,
@@ -206,7 +214,11 @@ class UnifiedSendMessageAPIView(
                 account = (
                     user.email_accounts
                     .filter(
-                        id=account_id
+                        id=account_id,
+                        organization=(
+                            organization
+                        ),
+                        is_active=True,
                     )
                     .first()
                 )
@@ -215,6 +227,12 @@ class UnifiedSendMessageAPIView(
 
                 account = (
                     user.email_accounts
+                    .filter(
+                        organization=(
+                            organization
+                        ),
+                        is_active=True,
+                    )
                     .first()
                 )
 
@@ -577,6 +595,10 @@ class UnifiedSendMessageAPIView(
                 "sent"
             )
 
+            provider_conversation_id = (
+                None
+            )
+
 
             if account_type == "gmail":
 
@@ -881,6 +903,88 @@ class UnifiedSendMessageAPIView(
                     )
 
 
+            elif account_type == "imap":
+
+                if not (
+                    account
+                    .is_credential_valid()
+                ):
+
+                    return Response(
+                        {
+                            "error":
+                                "Mailbox credential requires "
+                                "re-authentication."
+                        },
+                        status=400,
+                    )
+
+
+                try:
+
+                    smtp_credential = (
+                        account
+                        .get_credential()
+                    )
+
+                except CredentialVaultError:
+
+                    smtp_credential = None
+
+
+                if not smtp_credential:
+
+                    return Response(
+                        {
+                            "error":
+                                "Mailbox credential is unavailable."
+                        },
+                        status=400,
+                    )
+
+
+                smtp_result = (
+                    send_via_smtp(
+                        email_account=(
+                            account
+                        ),
+                        to_emails=(
+                            to_recipients
+                        ),
+                        cc_emails=(
+                            cc_recipients
+                        ),
+                        bcc_emails=(
+                            bcc_recipients
+                        ),
+                        subject=subject,
+                        body=body,
+                        attachments=(
+                            outbound_attachments
+                        ),
+                        password=(
+                            smtp_credential
+                        ),
+                    )
+                )
+
+
+                provider_message_id = (
+                    smtp_result.get(
+                        "id"
+                    )
+                    or
+                    "sent"
+                )
+
+
+                provider_conversation_id = (
+                    smtp_result.get(
+                        "rfc_message_id"
+                    )
+                )
+
+
             else:
 
                 return Response(
@@ -907,6 +1011,9 @@ class UnifiedSendMessageAPIView(
                     folder="sent",
                     external_message_id=(
                         provider_message_id
+                    ),
+                    external_conversation_id=(
+                        provider_conversation_id
                     ),
                     sender=(
                         sender_email
@@ -961,6 +1068,19 @@ class UnifiedSendMessageAPIView(
                 if body
                 else ""
             )
+
+
+            if (
+                provider_conversation_id
+                and
+                not conversation
+                .external_conversation_id
+            ):
+
+                conversation.external_conversation_id = (
+                    provider_conversation_id
+                )
+
 
             conversation.save()
 

@@ -21,6 +21,15 @@ OUTLOOK_SIMPLE_LIMIT_BYTES = (
     MEBIBYTE
 )
 
+# Conservative generic SMTP attachment ceiling.
+# Base64/MIME expansion keeps an 18 MiB source payload near
+# common 25 MiB provider message-size ceilings.
+IMAP_SMTP_RAW_LIMIT_BYTES = (
+    18
+    *
+    MEBIBYTE
+)
+
 
 def _provider_limit_bytes(
     account,
@@ -41,6 +50,15 @@ def _provider_limit_bytes(
     ):
         return (
             OUTLOOK_SIMPLE_LIMIT_BYTES
+        )
+
+    if (
+        account.account_type
+        ==
+        "imap"
+    ):
+        return (
+            IMAP_SMTP_RAW_LIMIT_BYTES
         )
 
     raise ValueError(

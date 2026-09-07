@@ -21,6 +21,10 @@ from microsoftapis.utils import (
     get_microsoft_access_token,
 )
 
+from email_accounts.services.imap_smtp import (
+    load_imap_attachment_content,
+)
+
 from inbox.services.outbound_attachments import (
     MAX_OUTBOUND_FILES,
     effective_attachment_limit_bytes,
@@ -752,6 +756,37 @@ def _load_source_descriptor(
                 ),
             )
         )
+
+
+    elif source.platform == "imap":
+
+        if source.email_account is None:
+
+            raise ForwardAttachmentProviderError(
+                "Original IMAP mailbox is unavailable."
+            )
+
+
+        try:
+
+            content = (
+                load_imap_attachment_content(
+                    email_account=(
+                        source.email_account
+                    ),
+                    attachment_id=(
+                        descriptor[
+                            "provider_attachment_id"
+                        ]
+                    ),
+                )
+            )
+
+        except Exception as exc:
+
+            raise ForwardAttachmentProviderError(
+                "Unable to load original IMAP attachment."
+            ) from exc
 
 
     else:

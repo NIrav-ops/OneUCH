@@ -689,30 +689,61 @@ def _deliver_reply_message(
                 "IMAP mailbox credential unavailable."
             )
 
+
         try:
+
             smtp_credential = (
                 email_account
                 .get_credential()
             )
 
+
         except CredentialVaultError as exc:
+
             raise ValueError(
                 "IMAP mailbox credential unavailable."
             ) from exc
 
+
         if not smtp_credential:
+
             raise ValueError(
                 "IMAP mailbox credential unavailable."
             )
 
-        if attachments:
 
-            raise ValueError(
-                "Reply attachments are currently supported "
-                "only for Gmail and Microsoft 365."
+        recipient_meta = (
+            inbox_message.recipient_meta
+            if isinstance(
+                inbox_message.recipient_meta,
+                dict,
             )
+            else {}
+        )
 
 
+        smtp_to_identities = (
+            recipient_meta.get(
+                "to",
+                [],
+            )
+            or
+            to_value
+        )
+
+
+        smtp_cc_identities = (
+            recipient_meta.get(
+                "cc",
+                [],
+            )
+            or
+            cc_addresses
+        )
+
+
+        # Keep this compatibility string for older callers/tests,
+        # while actual SMTP role semantics are carried separately.
         smtp_to = (
             to_value
         )
@@ -729,16 +760,41 @@ def _deliver_reply_message(
             )
 
 
+        # C5B stores the raw RFC thread root in
+        # external_conversation_id. The external_message_id is a
+        # stable hash and must never be emitted as In-Reply-To.
+        thread_reference = (
+            inbox_message
+            .external_conversation_id
+            or
+            inbox_message
+            .in_reply_to
+        )
+
+
         return (
             send_via_smtp(
                 email_account=(
                     email_account
                 ),
                 to_email=smtp_to,
+                to_emails=(
+                    smtp_to_identities
+                ),
+                cc_emails=(
+                    smtp_cc_identities
+                ),
+                bcc_emails=[],
                 subject=subject,
                 body=body,
-                inbox_message=(
-                    inbox_message
+                attachments=(
+                    attachments
+                ),
+                in_reply_to=(
+                    thread_reference
+                ),
+                references=(
+                    thread_reference
                 ),
                 password=(
                     smtp_credential
@@ -760,6 +816,8 @@ def _mark_delivery_success(
 ):
     provider_id = None
 
+    provider_thread_id = None
+
 
     if isinstance(
         provider_result,
@@ -769,6 +827,16 @@ def _mark_delivery_success(
         provider_id = (
             provider_result.get(
                 "id"
+            )
+        )
+
+        provider_thread_id = (
+            provider_result.get(
+                "rfc_message_id"
+            )
+            or
+            provider_result.get(
+                "thread_id"
             )
         )
 
@@ -796,14 +864,35 @@ def _mark_delivery_success(
     )
 
 
+    update_fields = [
+        "status",
+        "folder",
+        "error_reason",
+        "last_attempt_at",
+        "external_message_id",
+    ]
+
+
+    if (
+        provider_thread_id
+        and
+        not inbox_message
+        .external_conversation_id
+    ):
+
+        inbox_message.external_conversation_id = (
+            provider_thread_id
+        )
+
+        update_fields.append(
+            "external_conversation_id"
+        )
+
+
     inbox_message.save(
-        update_fields=[
-            "status",
-            "folder",
-            "error_reason",
-            "last_attempt_at",
-            "external_message_id",
-        ]
+        update_fields=(
+            update_fields
+        )
     )
 
 
