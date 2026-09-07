@@ -7,6 +7,14 @@ from .identity_views import (
     IdentityStartAPIView,
 )
 
+from .session_views import (
+    BrowserSessionBootstrapAPIView,
+    BrowserSessionCsrfAPIView,
+    BrowserSessionIdentityExchangeAPIView,
+    BrowserSessionLoginAPIView,
+    BrowserSessionRefreshAPIView,
+)
+
 from .views import (
     LoginAPIView,
     MeAPIView,
@@ -16,6 +24,31 @@ from .views import (
 
 
 urlpatterns = [
+    path(
+        "session/csrf/",
+        BrowserSessionCsrfAPIView.as_view(),
+        name="browser-session-csrf",
+    ),
+    path(
+        "session/login/",
+        BrowserSessionLoginAPIView.as_view(),
+        name="browser-session-login",
+    ),
+    path(
+        "session/identity/exchange/",
+        BrowserSessionIdentityExchangeAPIView.as_view(),
+        name="browser-session-identity-exchange",
+    ),
+    path(
+        "session/refresh/",
+        BrowserSessionRefreshAPIView.as_view(),
+        name="browser-session-refresh",
+    ),
+    path(
+        "session/bootstrap/",
+        BrowserSessionBootstrapAPIView.as_view(),
+        name="browser-session-bootstrap",
+    ),
     path(
         "identity/providers/",
         IdentityProvidersAPIView.as_view(),

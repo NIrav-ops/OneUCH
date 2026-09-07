@@ -158,6 +158,15 @@ CORS_ALLOWED_ORIGINS = [
     if origin.strip()
 ]
 
+CORS_ALLOW_CREDENTIALS = os.environ.get(
+    "CORS_ALLOW_CREDENTIALS",
+    "false",
+).lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
 ROOT_URLCONF = 'backend.urls'
 
 TEMPLATES = [
@@ -370,6 +379,33 @@ AUTH_SELF_SERVICE_SIGNUP_ENABLED = (
 
 
 # ==================================================
+# One UCH browser session security
+# ==================================================
+#
+# Phase F migration path:
+# - access JWT will move to browser memory in F3;
+# - refresh credential is carried only in the scoped
+#   HttpOnly cookie on the browser-session endpoints;
+# - rotation/reuse detection/revocation remain F4.
+#
+# Fail closed until the frontend has migrated in F3.
+# ==================================================
+
+AUTH_BROWSER_SESSION_ENABLED = (
+    os.environ.get(
+        "AUTH_BROWSER_SESSION_ENABLED",
+        "false",
+    ).strip().lower()
+    in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+)
+
+
+# ==================================================
 # One UCH identity-only provider sign-in
 # ==================================================
 #
@@ -503,6 +539,10 @@ REST_FRAMEWORK = {
         "identity_login": os.environ.get(
             "AUTH_IDENTITY_LOGIN_THROTTLE_RATE",
             "20/minute",
+        ),
+        "browser_session": os.environ.get(
+            "AUTH_BROWSER_SESSION_THROTTLE_RATE",
+            "60/minute",
         ),
     },
 }
