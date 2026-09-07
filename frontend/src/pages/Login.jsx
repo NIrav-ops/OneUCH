@@ -362,7 +362,7 @@ export default function Login({
             text-slate-500
           "
         >
-          Communication ? Intelligence ? Action ? Accountability ? Execution
+          Communication &rarr; Intelligence &rarr; Action &rarr; Accountability &rarr; Execution
         </div>
       </section>
 

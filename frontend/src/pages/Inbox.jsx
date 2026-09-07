@@ -10,10 +10,13 @@ import { useLocation } from "react-router-dom";
 import axios from "../axiosConfig";
 import ConversationTimeline from "../components/ConversationTimeline";
 
-import RecipientChipInput, {
+import RecipientChipInput
+  from "../components/RecipientChipInput";
+
+import {
   parseRecipientString,
   serializeRecipients,
-} from "../components/RecipientChipInput";
+} from "../components/recipientUtils";
 
 import {
   API_BASE_URL,

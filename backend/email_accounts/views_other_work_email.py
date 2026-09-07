@@ -244,3 +244,144 @@ class OtherWorkEmailSetupAPIView(
                 status.HTTP_200_OK
             ),
         )
+
+class OtherWorkEmailSyncAPIView(
+    APIView
+):
+    """
+    Queue the already-governed single-mailbox synchronization
+    task for one explicitly owned Other Work Email account.
+
+    No IMAP/SMTP provider work executes in this HTTP request.
+    """
+
+    permission_classes = [
+        IsAuthenticated
+    ]
+
+    def post(
+        self,
+        request,
+        account_id,
+    ):
+        membership = (
+            get_active_membership(
+                request.user
+            )
+        )
+
+        if membership is None:
+            return Response(
+                {
+                    "status":
+                        "workspace_required",
+
+                    "error":
+                        "Active workspace required.",
+                },
+                status=(
+                    status.HTTP_403_FORBIDDEN
+                ),
+            )
+
+        account = (
+            EmailAccount.objects
+            .filter(
+                id=account_id,
+                user=request.user,
+                organization=(
+                    membership.organization
+                ),
+                account_type="imap",
+                is_active=True,
+            )
+            .first()
+        )
+
+        if account is None:
+            return Response(
+                {
+                    "status":
+                        "no_mailbox",
+
+                    "error": (
+                        "Other Work Email mailbox "
+                        "is unavailable."
+                    ),
+                },
+                status=(
+                    status.HTTP_404_NOT_FOUND
+                ),
+            )
+
+        if (
+            not account.is_credential_valid()
+            or
+            not account.credential_ciphertext
+        ):
+            return Response(
+                {
+                    "status":
+                        "reauth_required",
+
+                    "error": (
+                        "Mailbox credential requires "
+                        "reconfiguration."
+                    ),
+                },
+                status=(
+                    status.HTTP_409_CONFLICT
+                ),
+            )
+
+        from inbox.tasks import (
+            sync_email_account,
+        )
+
+        try:
+            sync_email_account.delay(
+                account.id
+            )
+
+        except Exception:
+            return Response(
+                {
+                    "status":
+                        "queue_failed",
+
+                    "error": (
+                        "Unable to start Other Work "
+                        "Email synchronization."
+                    ),
+
+                    "action": (
+                        "Try again shortly. If the "
+                        "problem continues, contact "
+                        "your One UCH administrator."
+                    ),
+                },
+                status=(
+                    status.HTTP_503_SERVICE_UNAVAILABLE
+                ),
+            )
+
+        return Response(
+            {
+                "status":
+                    "sync_queued",
+
+                "provider":
+                    "imap",
+
+                "email_account_id":
+                    account.id,
+
+                "message": (
+                    "Other Work Email "
+                    "synchronization started."
+                ),
+            },
+            status=(
+                status.HTTP_202_ACCEPTED
+            ),
+        )

@@ -148,9 +148,9 @@ class MailAdoptionServiceTests(
         self.assertEqual(
             payload["summary"],
             {
-                "supported": 2,
+                "supported": 3,
                 "connected": 0,
-                "disconnected": 2,
+                "disconnected": 3,
                 "attention_required": 0,
                 "synced_once": 0,
             },
@@ -649,7 +649,7 @@ class MailAdoptionAPITests(
             ][
                 "supported"
             ],
-            2,
+            3,
         )
 
         self.assertEqual(
@@ -664,5 +664,6 @@ class MailAdoptionAPITests(
             {
                 "google",
                 "microsoft",
+                "imap",
             },
         )

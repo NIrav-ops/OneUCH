@@ -25,7 +25,11 @@ from inbox.models import (
 
 class MailAdoptionAPIView(APIView):
     """
-    Read-only Gmail / Microsoft mailbox adoption status.
+    Read-only governed mailbox adoption status.
+
+    Supports OAuth-backed Gmail/Microsoft accounts and
+    credential-backed Other Work Email without returning
+    OAuth tokens or mailbox credentials.
     """
 
     permission_classes = [

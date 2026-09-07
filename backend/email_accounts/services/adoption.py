@@ -32,6 +32,7 @@ class MailAdoptionService:
             "account_type": "gmail",
             "platform": "gmail",
             "label": "Gmail",
+            "auth_mode": "oauth",
             "connect_path": "/api/google/oauth/start/",
             "sync_path": "/api/google/oauth/sync/",
         },
@@ -40,8 +41,17 @@ class MailAdoptionService:
             "account_type": "outlook",
             "platform": "outlook",
             "label": "Microsoft 365 / Outlook",
+            "auth_mode": "oauth",
             "connect_path": "/api/microsoft/oauth/start/",
             "sync_path": "/api/microsoft/oauth/sync/",
+        },
+        {
+            "provider": "imap",
+            "account_type": "imap",
+            "platform": "imap",
+            "label": "Other Work Email",
+            "auth_mode": "credential",
+            "setup_path": "/api/email/other-work-email/",
         },
     )
 
@@ -119,23 +129,33 @@ class MailAdoptionService:
             .first()
         )
 
-        token = (
-            OAuthToken.objects
-            .filter(
-                user=user,
-                provider=(
-                    config[
-                        "provider"
-                    ]
-                ),
+        auth_mode = (
+            config.get(
+                "auth_mode",
+                "oauth",
             )
-            .order_by(
-                "-is_active",
-                "-updated_at",
-                "-id",
-            )
-            .first()
         )
+
+        token = None
+
+        if auth_mode == "oauth":
+            token = (
+                OAuthToken.objects
+                .filter(
+                    user=user,
+                    provider=(
+                        config[
+                            "provider"
+                        ]
+                    ),
+                )
+                .order_by(
+                    "-is_active",
+                    "-updated_at",
+                    "-id",
+                )
+                .first()
+            )
 
         sync = (
             InboxSyncStatus.objects
@@ -154,6 +174,7 @@ class MailAdoptionService:
             cls._connection_status(
                 account=account,
                 token=token,
+                auth_mode=auth_mode,
             )
         )
 
@@ -200,6 +221,9 @@ class MailAdoptionService:
                 config[
                     "account_type"
                 ],
+
+            "auth_mode":
+                auth_mode,
 
             "connection_status":
                 connection_status,
@@ -251,6 +275,72 @@ class MailAdoptionService:
                         account.signature_text
                         or ""
                     ).strip()
+                ),
+
+            "credential_status":
+                (
+                    account.credential_status
+                    if (
+                        account
+                        and auth_mode
+                        ==
+                        "credential"
+                    )
+                    else None
+                ),
+
+            "provider_verified":
+                bool(
+                    account
+                    and account.last_verified_at
+                ),
+
+            "imap_server":
+                (
+                    account.imap_server
+                    if (
+                        account
+                        and auth_mode
+                        ==
+                        "credential"
+                    )
+                    else None
+                ),
+
+            "imap_port":
+                (
+                    account.imap_port
+                    if (
+                        account
+                        and auth_mode
+                        ==
+                        "credential"
+                    )
+                    else None
+                ),
+
+            "smtp_server":
+                (
+                    account.smtp_server
+                    if (
+                        account
+                        and auth_mode
+                        ==
+                        "credential"
+                    )
+                    else None
+                ),
+
+            "smtp_port":
+                (
+                    account.smtp_port
+                    if (
+                        account
+                        and auth_mode
+                        ==
+                        "credential"
+                    )
+                    else None
                 ),
 
             "oauth_present":
@@ -310,14 +400,33 @@ class MailAdoptionService:
                 ),
 
             "connect_path":
-                config[
+                config.get(
                     "connect_path"
-                ],
+                ),
+
+            "setup_path":
+                config.get(
+                    "setup_path"
+                ),
 
             "sync_path":
-                config[
-                    "sync_path"
-                ],
+                (
+                    (
+                        "/api/email/"
+                        "other-work-email/"
+                        f"{account.id}/sync/"
+                    )
+                    if (
+                        auth_mode
+                        ==
+                        "credential"
+                        and account
+                    )
+                    else
+                    config.get(
+                        "sync_path"
+                    )
+                ),
         }
 
     @classmethod
@@ -326,7 +435,33 @@ class MailAdoptionService:
         *,
         account,
         token,
+        auth_mode="oauth",
     ):
+        if auth_mode == "credential":
+
+            if account is None:
+                return (
+                    cls.STATUS_DISCONNECTED
+                )
+
+            if (
+                not account.is_active
+                or
+                not (
+                    account
+                    .is_credential_valid()
+                )
+                or
+                not account.credential_ciphertext
+            ):
+                return (
+                    cls.STATUS_REAUTH_REQUIRED
+                )
+
+            return (
+                cls.STATUS_CONNECTED
+            )
+
         if (
             account is None
             and token is None

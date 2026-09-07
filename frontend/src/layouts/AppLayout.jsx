@@ -142,7 +142,7 @@ const PAGE_CONTEXT = [
     eyebrow: "Communication",
     title: "Unified Inbox",
     description:
-      "Work across connected Gmail and Microsoft 365 mailboxes.",
+      "Work across all connected One UCH mailboxes.",
   },
   {
     match: (path) =>
@@ -358,24 +358,6 @@ export default function AppLayout() {
         location.pathname,
       ]
     )
-  );
-
-
-  useEffect(
-    () => {
-
-      setSidebarOpen(
-        false
-      );
-
-      setMobileSearchOpen(
-        false
-      );
-
-    },
-    [
-      location.pathname,
-    ]
   );
 
 
@@ -643,6 +625,15 @@ export default function AppLayout() {
                             to={
                               item.to
                             }
+                            onClick={() => {
+                              setSidebarOpen(
+                                false
+                              );
+
+                              setMobileSearchOpen(
+                                false
+                              );
+                            }}
                             className={
                               navLinkClass
                             }

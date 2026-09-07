@@ -15,8 +15,9 @@ Backend:
 Frontend:
 
 * React
-* TypeScript
-* Material UI
+* JavaScript (JSX)
+* Tailwind CSS
+* Vite
 
 ---
 
@@ -27,6 +28,7 @@ Implemented:
 * Authentication
 * Gmail Integration
 * Outlook Integration
+* Other Work Email (IMAP / SMTP)
 * Microsoft Teams Integration
 * Inbox Module
 * OAuth Token Management
