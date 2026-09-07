@@ -252,3 +252,86 @@ class IdentityLoginGrant(
             f"{self.provider}:"
             f"{self.user_id}"
         )
+
+BROWSER_SESSION_CLAIM = (
+    "oneuch_browser_session"
+)
+
+
+class BrowserSession(
+    models.Model,
+):
+    """
+    Server authority for a browser authentication session.
+
+    Access and refresh JWTs carry only this public session
+    identifier. Revocation and refresh-generation authority
+    remain server-side.
+
+    No browser JWT, provider token, mailbox credential, or
+    customer message content is stored here.
+    """
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="browser_sessions",
+    )
+
+    public_id = models.UUIDField(
+        default=uuid4,
+        unique=True,
+        editable=False,
+    )
+
+    current_refresh_jti = models.CharField(
+        max_length=64,
+    )
+
+    expires_at = models.DateTimeField()
+
+    revoked_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    revocation_reason = models.CharField(
+        max_length=40,
+        blank=True,
+        default="",
+    )
+
+    created_at = models.DateTimeField(
+        default=timezone.now,
+    )
+
+    last_rotated_at = models.DateTimeField(
+        default=timezone.now,
+    )
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=[
+                    "user",
+                    "revoked_at",
+                ],
+                name=(
+                    "acct_bsess_user_rev_idx"
+                ),
+            ),
+            models.Index(
+                fields=[
+                    "expires_at",
+                ],
+                name=(
+                    "acct_bsess_exp_idx"
+                ),
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f"{self.user_id}:"
+            f"{self.public_id}"
+        )

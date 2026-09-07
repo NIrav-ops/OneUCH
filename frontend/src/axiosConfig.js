@@ -11,6 +11,11 @@ import {
 } from "./authSession";
 
 import {
+  publishSessionInvalidation,
+  withBrowserSessionRotationLock,
+} from "./sessionSync";
+
+import {
   API_BASE_URL,
 } from "./runtimeConfig";
 
@@ -22,11 +27,6 @@ const instance =
   });
 
 
-/*
- * Browser-session transport deliberately has no One UCH
- * response interceptor. Bootstrap/refresh must never recurse
- * back into the access-token refresh lifecycle.
- */
 const sessionClient =
   axios.create({
     baseURL:
@@ -49,11 +49,17 @@ function csrfHeaders(
 }
 
 
-export function invalidateSession() {
+export function invalidateSession(
+  reason = "session-invalidated"
+) {
 
   clearBrowserSessionMemory();
 
   purgeLegacyStoredAuthTokens();
+
+  publishSessionInvalidation(
+    reason
+  );
 
 
   if (
@@ -178,43 +184,51 @@ export async function bootstrapBrowserSession() {
 
   try {
 
-    const csrfToken =
-      await ensureBrowserSessionCsrf();
+    return await (
+      withBrowserSessionRotationLock(
+        async () => {
+
+          const csrfToken =
+            await ensureBrowserSessionCsrf();
 
 
-    const response =
-      await sessionClient.post(
-        "/api/auth/session/bootstrap/",
-        {},
-        {
-          headers:
-            csrfHeaders(
-              csrfToken
-            ),
+          const response =
+            await sessionClient.post(
+              "/api/auth/session/bootstrap/",
+              {},
+              {
+                headers:
+                  csrfHeaders(
+                    csrfToken
+                  ),
+              }
+            );
+
+
+          if (
+            response.data?.authenticated
+            !== true
+          ) {
+
+            clearBrowserSessionMemory();
+
+            return false;
+
+          }
+
+
+          setAccessToken(
+            response.data?.access
+          );
+
+          purgeLegacyStoredAuthTokens();
+
+
+          return true;
+
         }
-      );
-
-
-    if (
-      response.data?.authenticated
-      !== true
-    ) {
-
-      clearBrowserSessionMemory();
-
-      return false;
-
-    }
-
-
-    setAccessToken(
-      response.data?.access
+      )
     );
-
-    purgeLegacyStoredAuthTokens();
-
-
-    return true;
 
   } catch (error) {
 
@@ -225,13 +239,20 @@ export async function bootstrapBrowserSession() {
       error.response?.status;
 
 
-    /*
-     * 401 = no valid browser refresh session.
-     * 404 = F2/F3 feature remains fail-closed in this runtime.
-     */
     if (
       status === 401
-      ||
+    ) {
+
+      publishSessionInvalidation(
+        "bootstrap-rejected"
+      );
+
+      return false;
+
+    }
+
+
+    if (
       status === 404
     ) {
 
@@ -255,24 +276,32 @@ export async function refreshSessionAccessToken() {
       requestRefresh:
         async () => {
 
-          const csrfToken =
-            await ensureBrowserSessionCsrf();
+          return (
+            withBrowserSessionRotationLock(
+              async () => {
+
+                const csrfToken =
+                  await ensureBrowserSessionCsrf();
 
 
-          const response =
-            await sessionClient.post(
-              "/api/auth/session/refresh/",
-              {},
-              {
-                headers:
-                  csrfHeaders(
-                    csrfToken
-                  ),
+                const response =
+                  await sessionClient.post(
+                    "/api/auth/session/refresh/",
+                    {},
+                    {
+                      headers:
+                        csrfHeaders(
+                          csrfToken
+                        ),
+                    }
+                  );
+
+
+                return response.data;
+
               }
-            );
-
-
-          return response.data;
+            )
+          );
 
         },
 
@@ -284,19 +313,32 @@ export async function refreshSessionAccessToken() {
 
 export async function endBrowserSession() {
 
-  const csrfToken =
-    await ensureBrowserSessionCsrf();
+  const ended =
+    await withBrowserSessionRotationLock(
+      async () => {
+
+        const csrfToken =
+          await ensureBrowserSessionCsrf();
 
 
-  const response =
-    await sessionClient.post(
-      "/api/auth/session/end/",
-      {},
-      {
-        headers:
-          csrfHeaders(
-            csrfToken
-          ),
+        const response =
+          await sessionClient.post(
+            "/api/auth/session/end/",
+            {},
+            {
+              headers:
+                csrfHeaders(
+                  csrfToken
+                ),
+            }
+          );
+
+
+        return (
+          response.data?.ended
+          === true
+        );
+
       }
     );
 
@@ -306,10 +348,16 @@ export async function endBrowserSession() {
   purgeLegacyStoredAuthTokens();
 
 
-  return (
-    response.data?.ended
-    === true
-  );
+  if (ended) {
+
+    publishSessionInvalidation(
+      "logout"
+    );
+
+  }
+
+
+  return ended;
 
 }
 
@@ -358,11 +406,6 @@ instance.interceptors.response.use(
       error.response?.data;
 
 
-    /*
-     * Mailbox provider APIs can legitimately return HTTP 401.
-     * Refresh the One UCH browser session only for the exact
-     * SimpleJWT token_not_valid contract.
-     */
     if (
       status !== 401
       ||
@@ -385,7 +428,9 @@ instance.interceptors.response.use(
         ._oneUchRefreshRetry
     ) {
 
-      invalidateSession();
+      invalidateSession(
+        "access-refresh-retry-exhausted"
+      );
 
       return Promise.reject(
         error
@@ -421,7 +466,9 @@ instance.interceptors.response.use(
 
     } catch (refreshError) {
 
-      invalidateSession();
+      invalidateSession(
+        "refresh-rejected"
+      );
 
       return Promise.reject(
         refreshError

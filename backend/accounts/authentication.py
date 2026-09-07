@@ -1,3 +1,10 @@
+from django.core.exceptions import (
+    ValidationError,
+)
+from django.utils import (
+    timezone,
+)
+
 from rest_framework.exceptions import (
     AuthenticationFailed,
 )
@@ -8,6 +15,8 @@ from rest_framework_simplejwt.authentication import (
 from accounts.models import (
     AUTH_METHOD_LEGACY,
     AUTH_METHOD_WORK_EMAIL,
+    BROWSER_SESSION_CLAIM,
+    BrowserSession,
     User,
 )
 from inbox.models import (
@@ -82,14 +91,6 @@ def authenticate_work_email(
     if not user.is_active:
         return None
 
-    # Password authentication is valid only
-    # for explicit work-email identities and
-    # pre-RC legacy identities.
-    #
-    # Future Google/Microsoft identity records
-    # must never silently fall back to a local
-    # password merely because one exists.
-
     if user.signup_method not in {
         AUTH_METHOD_LEGACY,
         AUTH_METHOD_WORK_EMAIL,
@@ -109,6 +110,63 @@ def authenticate_work_email(
     return user
 
 
+def get_active_browser_session(
+    user,
+    token,
+):
+    """
+    Legacy/API JWTs without a browser-session claim retain
+    the existing One UCH authentication contract.
+
+    Browser access JWTs are additionally bound to an active
+    server BrowserSession record, providing immediate logout
+    and reuse-revocation enforcement.
+    """
+
+    session_id = str(
+        token.payload.get(
+            BROWSER_SESSION_CLAIM
+        )
+        or ""
+    ).strip()
+
+    if not session_id:
+        return None
+
+    try:
+        session = (
+            BrowserSession.objects
+            .filter(
+                public_id=session_id,
+                user=user,
+                revoked_at__isnull=True,
+                expires_at__gt=(
+                    timezone.now()
+                ),
+            )
+            .first()
+        )
+
+    except (
+        ValidationError,
+        TypeError,
+        ValueError,
+    ) as exc:
+
+        raise AuthenticationFailed(
+            "Browser session is no longer active."
+        ) from exc
+
+
+    if session is None:
+        raise AuthenticationFailed(
+            "Browser session is no longer active."
+        )
+
+
+    return session
+
+
 class OneUCHJWTAuthentication(
     JWTAuthentication
 ):
@@ -116,8 +174,11 @@ class OneUCHJWTAuthentication(
     """
     A valid JWT is not sufficient on its own.
 
-    Every authenticated customer request must
-    still resolve to an active One UCH workspace.
+    Every authenticated customer request must still resolve
+    to an active One UCH workspace.
+
+    Browser access JWTs additionally require a live
+    server-side BrowserSession record.
     """
 
     def authenticate(
@@ -146,6 +207,15 @@ class OneUCHJWTAuthentication(
                 "Active workspace membership required."
             )
 
+
+        browser_session = (
+            get_active_browser_session(
+                user,
+                token,
+            )
+        )
+
+
         organization = (
             membership.organization
         )
@@ -162,10 +232,11 @@ class OneUCHJWTAuthentication(
             organization.public_id
         )
 
-        # RequestContextMiddleware runs before
-        # DRF JWT authentication. Rebind the
-        # context only after authoritative JWT
-        # authentication succeeds.
+        if browser_session is not None:
+            request.oneuch_browser_session = (
+                browser_session
+            )
+
 
         request_context = (
             ContextManager.current()

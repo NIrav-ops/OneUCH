@@ -16,9 +16,6 @@ from rest_framework.throttling import (
 from rest_framework.views import (
     APIView,
 )
-from rest_framework_simplejwt.tokens import (
-    RefreshToken,
-)
 
 from accounts.authentication import (
     GENERIC_LOGIN_ERROR,
@@ -28,21 +25,23 @@ from accounts.authentication_events import (
     record_authentication_success,
 )
 from accounts.browser_session import (
-    BROWSER_REFRESH_COOKIE,
     BrowserSessionError,
     GENERIC_BROWSER_CSRF_ERROR,
     GENERIC_BROWSER_SESSION_ERROR,
-    access_from_browser_refresh,
     browser_csrf_matches,
     browser_origin_allowed,
     browser_session_enabled,
     clear_browser_refresh_cookie,
     clear_browser_session_cookies,
+    create_browser_session_from_refresh,
+    create_browser_session_tokens,
+    get_browser_csrf_cookie,
     get_browser_refresh_cookie,
     new_browser_csrf_token,
+    revoke_browser_session,
+    rotate_browser_refresh,
     set_browser_csrf_cookie,
     set_browser_refresh_cookie,
-    set_no_store,
 )
 from accounts.identity_service import (
     IdentityAuthenticationError,
@@ -120,7 +119,15 @@ class BrowserSessionCsrfAPIView(
                 ),
             )
 
+
+        # Reuse an existing valid cookie so a second tab does
+        # not invalidate the first tab's in-memory CSRF proof.
+
         token = (
+            get_browser_csrf_cookie(
+                request
+            )
+            or
             new_browser_csrf_token()
         )
 
@@ -192,27 +199,44 @@ class BrowserSessionLoginAPIView(
             ),
         )
 
-        refresh = (
-            RefreshToken.for_user(
-                user
+
+        try:
+            (
+                access,
+                refresh,
+                _user,
+                _session,
+            ) = (
+                create_browser_session_tokens(
+                    user
+                )
             )
-        )
+
+        except BrowserSessionError:
+
+            return Response(
+                {
+                    "error":
+                        GENERIC_BROWSER_SESSION_ERROR,
+                },
+                status=(
+                    status
+                    .HTTP_401_UNAUTHORIZED
+                ),
+            )
+
 
         response = Response(
             {
                 "access":
-                    str(
-                        refresh.access_token
-                    ),
+                    access,
             }
         )
 
         return (
             set_browser_refresh_cookie(
                 response,
-                str(
-                    refresh
-                ),
+                refresh,
             )
         )
 
@@ -258,23 +282,45 @@ class BrowserSessionIdentityExchangeAPIView(
             )
 
 
-        access = (
-            payload.get(
-                "access"
-            )
-        )
-
-        refresh = (
+        raw_refresh = (
             payload.get(
                 "refresh"
             )
         )
 
         if (
-            not access
+            not payload.get(
+                "access"
+            )
             or
-            not refresh
+            not raw_refresh
         ):
+            return Response(
+                {
+                    "error":
+                        GENERIC_BROWSER_SESSION_ERROR,
+                },
+                status=(
+                    status
+                    .HTTP_401_UNAUTHORIZED
+                ),
+            )
+
+
+        try:
+            (
+                access,
+                refresh,
+                _user,
+                _session,
+            ) = (
+                create_browser_session_from_refresh(
+                    raw_refresh
+                )
+            )
+
+        except BrowserSessionError:
+
             return Response(
                 {
                     "error":
@@ -319,6 +365,27 @@ class BrowserSessionEndAPIView(
         ):
             return self.csrf_failure()
 
+
+        # Logout is idempotent from the browser's perspective.
+        # When a valid bound refresh credential is present,
+        # revoke its entire server browser session first.
+
+        try:
+            raw_refresh = (
+                get_browser_refresh_cookie(
+                    request
+                )
+            )
+
+            revoke_browser_session(
+                raw_refresh,
+                reason="logout",
+            )
+
+        except BrowserSessionError:
+            pass
+
+
         response = Response(
             {
                 "ended":
@@ -358,8 +425,13 @@ class BrowserSessionRefreshAPIView(
                 )
             )
 
-            access, _user = (
-                access_from_browser_refresh(
+            (
+                access,
+                refresh,
+                _user,
+                _session,
+            ) = (
+                rotate_browser_refresh(
                     raw_refresh
                 )
             )
@@ -384,12 +456,17 @@ class BrowserSessionRefreshAPIView(
             )
 
 
-        return set_no_store(
-            Response(
-                {
-                    "access":
-                        access,
-                }
+        response = Response(
+            {
+                "access":
+                    access,
+            }
+        )
+
+        return (
+            set_browser_refresh_cookie(
+                response,
+                refresh,
             )
         )
 
@@ -419,8 +496,13 @@ class BrowserSessionBootstrapAPIView(
                 )
             )
 
-            access, user = (
-                access_from_browser_refresh(
+            (
+                access,
+                refresh,
+                user,
+                _session,
+            ) = (
+                rotate_browser_refresh(
                     raw_refresh
                 )
             )
@@ -445,17 +527,22 @@ class BrowserSessionBootstrapAPIView(
             )
 
 
-        return set_no_store(
-            Response(
-                {
-                    "authenticated":
-                        True,
+        response = Response(
+            {
+                "authenticated":
+                    True,
 
-                    "access":
-                        access,
+                "access":
+                    access,
 
-                    "user_id":
-                        user.public_id,
-                }
+                "user_id":
+                    user.public_id,
+            }
+        )
+
+        return (
+            set_browser_refresh_cookie(
+                response,
+                refresh,
             )
         )

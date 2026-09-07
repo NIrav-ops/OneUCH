@@ -13,6 +13,15 @@ import {
   bootstrapBrowserSession,
 } from "./axiosConfig";
 
+import {
+  clearBrowserSessionMemory,
+  purgeLegacyStoredAuthTokens,
+} from "./authSession";
+
+import {
+  subscribeSessionInvalidation,
+} from "./sessionSync";
+
 import AppLayout from "./layouts/AppLayout";
 
 import Dashboard from "./pages/Dashboard";
@@ -41,6 +50,42 @@ export default function App() {
     setSessionState,
   ] = useState(
     "bootstrapping"
+  );
+
+
+  useEffect(
+    () => {
+
+      return (
+        subscribeSessionInvalidation(
+          () => {
+
+            clearBrowserSessionMemory();
+
+            purgeLegacyStoredAuthTokens();
+
+            setSessionState(
+              "anonymous"
+            );
+
+
+            if (
+              window.location.pathname
+              !== "/login"
+            ) {
+
+              window.location.replace(
+                "/login"
+              );
+
+            }
+
+          }
+        )
+      );
+
+    },
+    []
   );
 
 
