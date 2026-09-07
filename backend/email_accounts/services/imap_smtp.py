@@ -3,12 +3,76 @@ import email
 from email.header import decode_header
 from django.utils import timezone
 
+from email_accounts.services.mailbox_network_policy import (
+    connect_validated_mailbox_endpoint,
+    create_verified_tls_context,
+    validate_mailbox_endpoint,
+)
+
 from inbox.models import Conversation, InboxMessage
 from inbox.services.sync_status import update_sync_status
 from inbox.notifications.services import create_notification
 from inbox.utils.conversation_key import generate_conversation_key
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
+
+
+class _PinnedIMAP4SSL(
+    imaplib.IMAP4_SSL
+):
+    """
+    IMAP TLS client whose TCP connection is pinned to the
+    already-policy-validated address set while TLS hostname
+    verification continues to use the configured hostname.
+    """
+
+    def __init__(
+        self,
+        endpoint,
+        *,
+        timeout=None,
+    ):
+        self._validated_endpoint = (
+            endpoint
+        )
+
+        super().__init__(
+            endpoint.host,
+            endpoint.port,
+            ssl_context=(
+                create_verified_tls_context()
+            ),
+            timeout=timeout,
+        )
+
+    def _create_socket(
+        self,
+        timeout,
+    ):
+        raw_socket = (
+            connect_validated_mailbox_endpoint(
+                endpoint=(
+                    self._validated_endpoint
+                ),
+                timeout=timeout,
+            )
+        )
+
+        try:
+            return (
+                self.ssl_context
+                .wrap_socket(
+                    raw_socket,
+                    server_hostname=(
+                        self.host
+                    ),
+                )
+            )
+
+        except Exception:
+            raw_socket.close()
+            raise
+
 
 
 # ================================
@@ -42,6 +106,19 @@ def fetch_imap_emails(
 
     provider_platform = email_account.account_type
 
+    organization = (
+        email_account.organization
+    )
+
+    if (
+        organization.id
+        !=
+        user.organization_membership.organization_id
+    ):
+        raise ValueError(
+            "IMAP mailbox workspace mismatch."
+        )
+
     update_sync_status(
         user=user,
         platform=provider_platform,
@@ -53,9 +130,22 @@ def fetch_imap_emails(
         return
 
     try:
-        mail = imaplib.IMAP4_SSL(
-            email_account.imap_server,
-            email_account.imap_port
+        imap_endpoint = (
+            validate_mailbox_endpoint(
+                host=(
+                    email_account
+                    .imap_server
+                ),
+                port=(
+                    email_account
+                    .imap_port
+                ),
+                protocol="imap",
+            )
+        )
+
+        mail = _PinnedIMAP4SSL(
+            imap_endpoint
         )
 
         mail.login(email_account.email_address, password)
@@ -80,18 +170,6 @@ def fetch_imap_emails(
         gmail_folders["inbox"] = "INBOX"
 
         total_processed = 0
-        organization = (
-            email_account.organization
-        )
-
-        if (
-            organization.id
-            !=
-            user.organization_membership.organization_id
-        ):
-            raise ValueError(
-                "IMAP mailbox workspace mismatch."
-            )
 
         for folder_key, folder_name in gmail_folders.items():
 
@@ -308,7 +386,73 @@ def fetch_imap_emails(
 # ================================
 
 import smtplib
+import socket
+
 from email.message import EmailMessage
+
+
+class _PinnedSMTPSSL(
+    smtplib.SMTP_SSL
+):
+    """
+    SMTP TLS client whose TCP connection is pinned to the
+    validated address set while certificate hostname
+    verification uses the configured SMTP hostname.
+    """
+
+    def __init__(
+        self,
+        endpoint,
+        *,
+        timeout=socket._GLOBAL_DEFAULT_TIMEOUT,
+        source_address=None,
+    ):
+        self._validated_endpoint = (
+            endpoint
+        )
+
+        super().__init__(
+            endpoint.host,
+            endpoint.port,
+            timeout=timeout,
+            source_address=source_address,
+            context=(
+                create_verified_tls_context()
+            ),
+        )
+
+    def _get_socket(
+        self,
+        host,
+        port,
+        timeout,
+    ):
+        raw_socket = (
+            connect_validated_mailbox_endpoint(
+                endpoint=(
+                    self._validated_endpoint
+                ),
+                timeout=timeout,
+                source_address=(
+                    self.source_address
+                ),
+            )
+        )
+
+        try:
+            return (
+                self.context
+                .wrap_socket(
+                    raw_socket,
+                    server_hostname=(
+                        self._host
+                    ),
+                )
+            )
+
+        except Exception:
+            raw_socket.close()
+            raise
 
 
 def send_via_smtp(
@@ -325,15 +469,28 @@ def send_via_smtp(
         if not password:
             raise ValueError("SMTP password not configured")
 
+        smtp_endpoint = (
+            validate_mailbox_endpoint(
+                host=(
+                    email_account
+                    .smtp_server
+                ),
+                port=(
+                    email_account
+                    .smtp_port
+                ),
+                protocol="smtp",
+            )
+        )
+
         msg = EmailMessage()
         msg["From"] = email_account.email_address
         msg["To"] = to_email
         msg["Subject"] = subject
         msg.set_content(body)
 
-        server = smtplib.SMTP_SSL(
-            email_account.smtp_server,
-            email_account.smtp_port
+        server = _PinnedSMTPSSL(
+            smtp_endpoint
         )
 
         server.login(email_account.email_address, password)
