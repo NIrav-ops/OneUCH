@@ -370,6 +370,98 @@ AUTH_SELF_SERVICE_SIGNUP_ENABLED = (
 
 
 # ==================================================
+# One UCH identity-only provider sign-in
+# ==================================================
+#
+# These credentials and redirect URIs are deliberately
+# separate from Gmail / Microsoft mailbox OAuth.
+#
+# Provider tokens are used only to establish identity and
+# are never persisted in oauth_tokens.OAuthToken.
+# ==================================================
+
+AUTH_IDENTITY_SIGNIN_ENABLED = (
+    os.environ.get(
+        "AUTH_IDENTITY_SIGNIN_ENABLED",
+        "false",
+    ).strip().lower()
+    in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+)
+
+AUTH_IDENTITY_STATE_MAX_AGE_SECONDS = int(
+    os.environ.get(
+        "AUTH_IDENTITY_STATE_MAX_AGE_SECONDS",
+        "600",
+    )
+)
+
+AUTH_IDENTITY_GRANT_LIFETIME_SECONDS = int(
+    os.environ.get(
+        "AUTH_IDENTITY_GRANT_LIFETIME_SECONDS",
+        "120",
+    )
+)
+
+AUTH_IDENTITY_PROVIDER_TIMEOUT_SECONDS = float(
+    os.environ.get(
+        "AUTH_IDENTITY_PROVIDER_TIMEOUT_SECONDS",
+        "10",
+    )
+)
+
+ONEUCH_FRONTEND_LOGIN_URL = os.environ.get(
+    "ONEUCH_FRONTEND_LOGIN_URL",
+    "http://localhost:5173/login",
+).strip()
+
+GOOGLE_IDENTITY_CLIENT_ID = os.environ.get(
+    "GOOGLE_IDENTITY_CLIENT_ID",
+    "",
+).strip()
+
+GOOGLE_IDENTITY_CLIENT_SECRET = os.environ.get(
+    "GOOGLE_IDENTITY_CLIENT_SECRET",
+    "",
+).strip()
+
+GOOGLE_IDENTITY_REDIRECT_URI = os.environ.get(
+    "GOOGLE_IDENTITY_REDIRECT_URI",
+    (
+        "http://127.0.0.1:8000/"
+        "api/auth/identity/google/callback/"
+    ),
+).strip()
+
+MICROSOFT_IDENTITY_CLIENT_ID = os.environ.get(
+    "MICROSOFT_IDENTITY_CLIENT_ID",
+    "",
+).strip()
+
+MICROSOFT_IDENTITY_CLIENT_SECRET = os.environ.get(
+    "MICROSOFT_IDENTITY_CLIENT_SECRET",
+    "",
+).strip()
+
+MICROSOFT_IDENTITY_TENANT_ID = os.environ.get(
+    "MICROSOFT_IDENTITY_TENANT_ID",
+    "organizations",
+).strip()
+
+MICROSOFT_IDENTITY_REDIRECT_URI = os.environ.get(
+    "MICROSOFT_IDENTITY_REDIRECT_URI",
+    (
+        "http://127.0.0.1:8000/"
+        "api/auth/identity/microsoft/callback/"
+    ),
+).strip()
+
+
+# ==================================================
 # One UCH operational environment metadata
 # ==================================================
 
@@ -407,6 +499,10 @@ REST_FRAMEWORK = {
         "login": os.environ.get(
             "AUTH_LOGIN_THROTTLE_RATE",
             "30/minute",
+        ),
+        "identity_login": os.environ.get(
+            "AUTH_IDENTITY_LOGIN_THROTTLE_RATE",
+            "20/minute",
         ),
     },
 }

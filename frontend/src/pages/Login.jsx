@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useState,
 } from "react";
 
@@ -12,12 +13,112 @@ import {
 
 import axios from "../axiosConfig";
 
+import {
+  API_BASE_URL,
+} from "../runtimeConfig";
+
 
 const VALUE_POINTS = [
   "Unified communication across all connected work mailboxes",
   "Actions, approvals and commitments from real conversations",
   "Attention, accountability and execution in one workspace",
 ];
+
+
+const IDENTITY_PROVIDER_LABELS = {
+  google: "Google",
+  microsoft: "Microsoft",
+};
+
+
+const IDENTITY_QUERY_KEYS = [
+  "identity_code",
+  "identity_provider",
+  "identity_error",
+];
+
+
+function cleanIdentityCallbackUrl() {
+
+  const url =
+    new URL(
+      window.location.href
+    );
+
+
+  IDENTITY_QUERY_KEYS.forEach(
+    (key) => {
+
+      url.searchParams.delete(
+        key
+      );
+
+    }
+  );
+
+
+  const cleanUrl = (
+    url.pathname
+    + url.search
+    + url.hash
+  );
+
+
+  window.history.replaceState(
+    {},
+    document.title,
+    cleanUrl
+  );
+
+}
+
+
+function buildIdentityStartUrl(
+  provider
+) {
+
+  if (
+    !IDENTITY_PROVIDER_LABELS[
+      provider
+    ]
+  ) {
+
+    throw new Error(
+      "Unsupported identity provider."
+    );
+
+  }
+
+
+  const api =
+    new URL(
+      API_BASE_URL
+    );
+
+
+  if (
+    api.protocol !== "http:"
+    &&
+    api.protocol !== "https:"
+  ) {
+
+    throw new Error(
+      "Invalid One UCH API URL."
+    );
+
+  }
+
+
+  return new URL(
+    (
+      "/api/auth/identity/"
+      + provider
+      + "/start/"
+    ),
+    api.origin
+  ).toString();
+
+}
 
 
 export default function Login({
@@ -46,6 +147,325 @@ export default function Login({
     error,
     setError,
   ] = useState("");
+
+
+  const [
+    identityProviders,
+    setIdentityProviders,
+  ] = useState([]);
+
+
+  const [
+    identityAction,
+    setIdentityAction,
+  ] = useState("");
+
+
+  useEffect(
+    () => {
+
+      let active = true;
+
+
+      const initializeIdentity =
+        async () => {
+
+          const currentUrl =
+            new URL(
+              window.location.href
+            );
+
+
+          const identityCode =
+            currentUrl.searchParams.get(
+              "identity_code"
+            );
+
+
+          const identityProvider =
+            currentUrl.searchParams.get(
+              "identity_provider"
+            );
+
+
+          const identityError =
+            currentUrl.searchParams.get(
+              "identity_error"
+            );
+
+
+          if (
+            identityCode
+            ||
+            identityProvider
+            ||
+            identityError
+          ) {
+
+            cleanIdentityCallbackUrl();
+
+          }
+
+
+          if (
+            identityError
+            &&
+            active
+          ) {
+
+            setError(
+              identityError ===
+                "provider_unavailable"
+                ? (
+                    "This identity provider is not available right now."
+                  )
+                : (
+                    "We couldn't complete identity sign-in. Try again."
+                  )
+            );
+
+          }
+
+
+          if (identityCode) {
+
+            try {
+
+              if (active) {
+
+                setLoading(
+                  true
+                );
+
+                setError(
+                  ""
+                );
+
+              }
+
+
+              const response =
+                await axios.post(
+                  "/api/auth/identity/exchange/",
+                  {
+                    code:
+                      identityCode,
+                  }
+                );
+
+
+              const access =
+                response.data?.access;
+
+              const refresh =
+                response.data?.refresh;
+
+
+              if (
+                !access
+                ||
+                !refresh
+              ) {
+
+                throw new Error(
+                  "Identity exchange did not return a One UCH session."
+                );
+
+              }
+
+
+              /*
+               * Preserve the existing Phase-E JWT storage
+               * behavior exactly. Browser/session hardening
+               * remains Phase F.
+               */
+              localStorage.setItem(
+                "access",
+                access
+              );
+
+
+              localStorage.setItem(
+                "refresh",
+                refresh
+              );
+
+
+              if (active) {
+
+                onLogin();
+
+                return;
+
+              }
+
+            } catch {
+
+              if (active) {
+
+                setError(
+                  "We couldn't complete identity sign-in. Try again."
+                );
+
+              }
+
+            } finally {
+
+              if (active) {
+
+                setLoading(
+                  false
+                );
+
+              }
+
+            }
+
+          }
+
+
+          try {
+
+            const response =
+              await axios.get(
+                "/api/auth/identity/providers/"
+              );
+
+
+            const providers =
+              Array.isArray(
+                response.data?.providers
+              )
+                ? (
+                    response.data.providers
+                      .filter(
+                        (provider) =>
+                          Boolean(
+                            IDENTITY_PROVIDER_LABELS[
+                              provider
+                            ]
+                          )
+                      )
+                  )
+                : [];
+
+
+            if (active) {
+
+              setIdentityProviders(
+                providers
+              );
+
+            }
+
+          } catch {
+
+            /*
+             * Identity sign-in is optional and fail-closed.
+             * Password sign-in must remain usable if provider
+             * discovery is disabled or unavailable.
+             */
+            if (active) {
+
+              setIdentityProviders(
+                []
+              );
+
+            }
+
+          }
+
+        };
+
+
+      /*
+       * Schedule initialization outside the synchronous effect
+       * body so Login does not introduce the set-state-in-effect
+       * lint debt removed during UX-RC1.
+       */
+      const timer =
+        window.setTimeout(
+          () => {
+
+            void initializeIdentity();
+
+          },
+          0
+        );
+
+
+      return () => {
+
+        active = false;
+
+        window.clearTimeout(
+          timer
+        );
+
+      };
+
+    },
+    [
+      onLogin,
+    ]
+  );
+
+
+  const handleIdentityStart =
+    (provider) => {
+
+      if (
+        !identityProviders.includes(
+          provider
+        )
+        ||
+        identityAction
+        ||
+        loading
+      ) {
+
+        return;
+
+      }
+
+
+      try {
+
+        setIdentityAction(
+          provider
+        );
+
+        setError(
+          ""
+        );
+
+
+        /*
+         * Navigate through the One UCH backend rather than
+         * fetching the provider URL with XHR. This allows
+         * the backend to establish its short-lived HttpOnly
+         * identity transaction cookie before redirecting to
+         * the provider.
+         */
+        window.location.assign(
+          buildIdentityStartUrl(
+            provider
+          )
+        );
+
+      } catch {
+
+        setIdentityAction(
+          ""
+        );
+
+        setError(
+          "We couldn't start identity sign-in. Try again."
+        );
+
+      }
+
+    };
 
 
   const handleLogin =
@@ -666,6 +1086,10 @@ export default function Login({
                 type="submit"
                 disabled={
                   loading
+                  ||
+                  Boolean(
+                    identityAction
+                  )
                 }
                 className="
                   flex
@@ -702,6 +1126,162 @@ export default function Login({
                 }
               </button>
             </form>
+
+
+            {
+              identityProviders.length > 0 && (
+
+                <div
+                  className="
+                    mt-6
+                  "
+                >
+
+                  <div
+                    className="
+                      flex
+                      items-center
+                      gap-3
+                      text-[10px]
+                      font-semibold
+                      uppercase
+                      tracking-[0.12em]
+                      text-slate-400
+                    "
+                  >
+                    <span
+                      className="
+                        h-px
+                        flex-1
+                        bg-slate-200
+                      "
+                    />
+
+                    <span>
+                      or use your work identity
+                    </span>
+
+                    <span
+                      className="
+                        h-px
+                        flex-1
+                        bg-slate-200
+                      "
+                    />
+                  </div>
+
+
+                  <div
+                    className="
+                      mt-4
+                      grid
+                      gap-3
+                      sm:grid-cols-2
+                    "
+                  >
+                    {
+                      identityProviders.map(
+                        (provider) => {
+
+                          const label =
+                            IDENTITY_PROVIDER_LABELS[
+                              provider
+                            ];
+
+
+                          return (
+
+                            <button
+                              key={
+                                provider
+                              }
+                              type="button"
+                              aria-label={
+                                `Continue with ${label}`
+                              }
+                              disabled={
+                                loading
+                                ||
+                                Boolean(
+                                  identityAction
+                                )
+                              }
+                              onClick={
+                                () =>
+                                  handleIdentityStart(
+                                    provider
+                                  )
+                              }
+                              className="
+                                flex
+                                min-h-11
+                                items-center
+                                justify-center
+                                gap-2
+                                rounded-xl
+                                border
+                                border-slate-200
+                                bg-white
+                                px-3
+                                py-2.5
+                                text-xs
+                                font-semibold
+                                text-slate-700
+                                shadow-sm
+                                transition
+                                hover:border-slate-300
+                                hover:bg-slate-50
+                                disabled:cursor-not-allowed
+                                disabled:opacity-60
+                              "
+                            >
+                              <span
+                                aria-hidden="true"
+                                className="
+                                  flex
+                                  h-6
+                                  w-6
+                                  items-center
+                                  justify-center
+                                  rounded-md
+                                  border
+                                  border-slate-200
+                                  bg-slate-50
+                                  text-[10px]
+                                  font-black
+                                  text-slate-700
+                                "
+                              >
+                                {
+                                  provider ===
+                                    "google"
+                                    ? "G"
+                                    : "M"
+                                }
+                              </span>
+
+                              <span>
+                                {
+                                  identityAction ===
+                                    provider
+                                    ? "Connecting..."
+                                    : (
+                                        `Continue with ${label}`
+                                      )
+                                }
+                              </span>
+                            </button>
+
+                          );
+
+                        }
+                      )
+                    }
+                  </div>
+                </div>
+
+              )
+            }
 
 
             <div

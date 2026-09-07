@@ -118,3 +118,137 @@ class User(
 
     def __str__(self):
         return self.email
+
+IDENTITY_PROVIDER_CHOICES = (
+    (
+        AUTH_METHOD_GOOGLE,
+        "Google",
+    ),
+    (
+        AUTH_METHOD_MICROSOFT,
+        "Microsoft",
+    ),
+)
+
+
+class ExternalIdentity(
+    models.Model,
+):
+    """
+    Stable external identity binding.
+
+    Provider access/refresh/ID tokens are deliberately
+    never stored here. The binding contains only the
+    provider identity coordinates required to prevent
+    email-only account linking.
+    """
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="external_identities",
+    )
+
+    provider = models.CharField(
+        max_length=20,
+        choices=IDENTITY_PROVIDER_CHOICES,
+    )
+
+    issuer = models.CharField(
+        max_length=255,
+    )
+
+    subject = models.CharField(
+        max_length=255,
+    )
+
+    email_at_binding = models.EmailField()
+
+    created_at = models.DateTimeField(
+        default=timezone.now,
+    )
+
+    last_authenticated_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=[
+                    "provider",
+                    "issuer",
+                    "subject",
+                ],
+                name="acct_identity_subject_uq",
+            ),
+            models.UniqueConstraint(
+                fields=[
+                    "user",
+                    "provider",
+                ],
+                name="acct_identity_user_provider_uq",
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f"{self.provider}:"
+            f"{self.user_id}"
+        )
+
+
+class IdentityLoginGrant(
+    models.Model,
+):
+    """
+    One-time short-lived bridge between the provider
+    callback and the existing One UCH JWT issuance path.
+
+    Only a SHA-256 digest of the browser-visible grant is
+    persisted. Provider tokens are never stored here.
+    """
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="identity_login_grants",
+    )
+
+    provider = models.CharField(
+        max_length=20,
+        choices=IDENTITY_PROVIDER_CHOICES,
+    )
+
+    token_hash = models.CharField(
+        max_length=64,
+        unique=True,
+    )
+
+    expires_at = models.DateTimeField()
+
+    used_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    created_at = models.DateTimeField(
+        default=timezone.now,
+    )
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=[
+                    "expires_at",
+                ],
+                name="acct_grant_expires_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f"{self.provider}:"
+            f"{self.user_id}"
+        )
