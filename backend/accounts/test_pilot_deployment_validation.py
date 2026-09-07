@@ -68,6 +68,40 @@ def secure_pilot_settings(
             "https://api.oneuch.example/"
             "api/microsoft/oauth/callback/"
         ),
+
+        "GOOGLE_CLIENT_ID":
+            "pilot-google-mailbox-client",
+
+        "MICROSOFT_CLIENT_ID":
+            "pilot-microsoft-mailbox-client",
+
+        "AUTH_IDENTITY_SIGNIN_ENABLED":
+            False,
+
+        "ONEUCH_FRONTEND_LOGIN_URL":
+            "https://app.oneuch.example/login",
+
+        "GOOGLE_IDENTITY_CLIENT_ID":
+            "pilot-google-identity-client",
+
+        "GOOGLE_IDENTITY_CLIENT_SECRET":
+            "pilot-google-identity-secret",
+
+        "GOOGLE_IDENTITY_REDIRECT_URI": (
+            "https://api.oneuch.example/"
+            "api/auth/identity/google/callback/"
+        ),
+
+        "MICROSOFT_IDENTITY_CLIENT_ID":
+            "pilot-microsoft-identity-client",
+
+        "MICROSOFT_IDENTITY_CLIENT_SECRET":
+            "pilot-microsoft-identity-secret",
+
+        "MICROSOFT_IDENTITY_REDIRECT_URI": (
+            "https://api.oneuch.example/"
+            "api/auth/identity/microsoft/callback/"
+        ),
     }
 
     values.update(
@@ -211,5 +245,164 @@ class PilotDeploymentValidationTests(
 
         self.assertIn(
             "MICROSOFT_REDIRECT_URI must use HTTPS",
+            joined,
+        )
+
+    def test_secure_enabled_identity_configuration_passes(
+        self,
+    ):
+        errors = (
+            collect_pilot_configuration_errors(
+                secure_pilot_settings(
+                    AUTH_IDENTITY_SIGNIN_ENABLED=True,
+                )
+            )
+        )
+
+        self.assertEqual(
+            errors,
+            [],
+        )
+
+
+    def test_enabled_identity_placeholder_credentials_are_rejected(
+        self,
+    ):
+        errors = (
+            collect_pilot_configuration_errors(
+                secure_pilot_settings(
+                    AUTH_IDENTITY_SIGNIN_ENABLED=True,
+                    GOOGLE_IDENTITY_CLIENT_ID=(
+                        "replace-me"
+                    ),
+                    GOOGLE_IDENTITY_CLIENT_SECRET="",
+                    MICROSOFT_IDENTITY_CLIENT_ID=(
+                        "replace-with-client-id"
+                    ),
+                    MICROSOFT_IDENTITY_CLIENT_SECRET=(
+                        "replace-me"
+                    ),
+                )
+            )
+        )
+
+        joined = "\n".join(
+            errors
+        )
+
+        self.assertIn(
+            "GOOGLE_IDENTITY_CLIENT_ID must be configured",
+            joined,
+        )
+
+        self.assertIn(
+            "GOOGLE_IDENTITY_CLIENT_SECRET must be configured",
+            joined,
+        )
+
+        self.assertIn(
+            "MICROSOFT_IDENTITY_CLIENT_ID must be configured",
+            joined,
+        )
+
+        self.assertIn(
+            "MICROSOFT_IDENTITY_CLIENT_SECRET must be configured",
+            joined,
+        )
+
+
+    def test_enabled_identity_insecure_urls_and_frontend_origin_are_rejected(
+        self,
+    ):
+        errors = (
+            collect_pilot_configuration_errors(
+                secure_pilot_settings(
+                    AUTH_IDENTITY_SIGNIN_ENABLED=True,
+                    ONEUCH_FRONTEND_LOGIN_URL=(
+                        "https://unapproved.example/login"
+                    ),
+                    GOOGLE_IDENTITY_REDIRECT_URI=(
+                        "http://127.0.0.1:8000/"
+                        "api/auth/identity/google/callback/"
+                    ),
+                    MICROSOFT_IDENTITY_REDIRECT_URI=(
+                        "http://localhost:8000/"
+                        "api/auth/identity/microsoft/callback/"
+                    ),
+                )
+            )
+        )
+
+        joined = "\n".join(
+            errors
+        )
+
+        self.assertIn(
+            "GOOGLE_IDENTITY_REDIRECT_URI must use HTTPS",
+            joined,
+        )
+
+        self.assertIn(
+            "MICROSOFT_IDENTITY_REDIRECT_URI must use HTTPS",
+            joined,
+        )
+
+        self.assertIn(
+            "ONEUCH_FRONTEND_LOGIN_URL origin must be present "
+            "in CORS_ALLOWED_ORIGINS",
+            joined,
+        )
+
+
+    def test_enabled_identity_clients_and_callback_hosts_are_separate_and_bound(
+        self,
+    ):
+        errors = (
+            collect_pilot_configuration_errors(
+                secure_pilot_settings(
+                    AUTH_IDENTITY_SIGNIN_ENABLED=True,
+                    GOOGLE_IDENTITY_CLIENT_ID=(
+                        "pilot-google-mailbox-client"
+                    ),
+                    MICROSOFT_IDENTITY_CLIENT_ID=(
+                        "pilot-microsoft-mailbox-client"
+                    ),
+                    GOOGLE_IDENTITY_REDIRECT_URI=(
+                        "https://other-api.example/"
+                        "api/auth/identity/google/callback/"
+                    ),
+                    MICROSOFT_IDENTITY_REDIRECT_URI=(
+                        "https://other-api.example/"
+                        "api/auth/identity/microsoft/callback/"
+                    ),
+                )
+            )
+        )
+
+        joined = "\n".join(
+            errors
+        )
+
+        self.assertIn(
+            "GOOGLE_IDENTITY_CLIENT_ID must use a separate "
+            "OAuth client from GOOGLE_CLIENT_ID",
+            joined,
+        )
+
+        self.assertIn(
+            "MICROSOFT_IDENTITY_CLIENT_ID must use a separate "
+            "OAuth client from MICROSOFT_CLIENT_ID",
+            joined,
+        )
+
+        self.assertIn(
+            "GOOGLE_IDENTITY_REDIRECT_URI hostname must be "
+            "present in DJANGO_ALLOWED_HOSTS",
+            joined,
+        )
+
+        self.assertIn(
+            "MICROSOFT_IDENTITY_REDIRECT_URI hostname must be "
+            "present in DJANGO_ALLOWED_HOSTS",
             joined,
         )
