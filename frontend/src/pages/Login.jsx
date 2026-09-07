@@ -14,7 +14,7 @@ import axios from "../axiosConfig";
 
 
 const VALUE_POINTS = [
-  "Unified Gmail and Microsoft 365 communication",
+  "Unified communication across all connected work mailboxes",
   "Actions, approvals and commitments from real conversations",
   "Attention, accountability and execution in one workspace",
 ];
