@@ -853,9 +853,31 @@ def send_email_task(
             email_account.user_id
         ):
 
-            raise ValueError(
+            inbox_message.status = (
+                "failed"
+            )
+
+            inbox_message.error_reason = (
                 "Reply mailbox ownership mismatch."
             )
+
+            inbox_message.save(
+                update_fields=[
+                    "status",
+                    "error_reason",
+                ]
+            )
+
+            return {
+                "status":
+                    "blocked",
+
+                "reason":
+                    "ownership_mismatch",
+
+                "message_id":
+                    inbox_message.id,
+            }
 
 
         if (
