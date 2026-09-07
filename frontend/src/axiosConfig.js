@@ -1,9 +1,13 @@
 import axios from "axios";
 
 import {
-  clearStoredAuthTokens,
+  clearBrowserSessionMemory,
+  ensureSessionCsrfToken,
+  getAccessToken,
   isJwtTokenFailurePayload,
+  purgeLegacyStoredAuthTokens,
   refreshAccessToken,
+  setAccessToken,
 } from "./authSession";
 
 import {
@@ -11,24 +15,45 @@ import {
 } from "./runtimeConfig";
 
 
-const instance = axios.create({
-  baseURL: API_BASE_URL,
-});
+const instance =
+  axios.create({
+    baseURL:
+      API_BASE_URL,
+  });
 
 
 /*
- * Dedicated client deliberately has no One UCH response
- * interceptor. The refresh request itself must never recurse
- * back into the refresh lifecycle.
+ * Browser-session transport deliberately has no One UCH
+ * response interceptor. Bootstrap/refresh must never recurse
+ * back into the access-token refresh lifecycle.
  */
-const refreshClient = axios.create({
-  baseURL: API_BASE_URL,
-});
+const sessionClient =
+  axios.create({
+    baseURL:
+      API_BASE_URL,
+
+    withCredentials:
+      true,
+  });
+
+
+function csrfHeaders(
+  csrfToken
+) {
+
+  return {
+    "X-OneUCH-CSRF":
+      csrfToken,
+  };
+
+}
 
 
 export function invalidateSession() {
 
-  clearStoredAuthTokens();
+  clearBrowserSessionMemory();
+
+  purgeLegacyStoredAuthTokens();
 
 
   if (
@@ -45,28 +70,246 @@ export function invalidateSession() {
 }
 
 
+export async function ensureBrowserSessionCsrf() {
+
+  return (
+    ensureSessionCsrfToken({
+
+      requestCsrf:
+        async () => {
+
+          const response =
+            await sessionClient.get(
+              "/api/auth/session/csrf/"
+            );
+
+
+          return response.data;
+
+        },
+
+    })
+  );
+
+}
+
+
+export async function establishPasswordBrowserSession({
+  email,
+  password,
+}) {
+
+  const csrfToken =
+    await ensureBrowserSessionCsrf();
+
+
+  const response =
+    await sessionClient.post(
+      "/api/auth/session/login/",
+      {
+        email,
+        password,
+      },
+      {
+        headers:
+          csrfHeaders(
+            csrfToken
+          ),
+      }
+    );
+
+
+  const accessToken =
+    setAccessToken(
+      response.data?.access
+    );
+
+
+  purgeLegacyStoredAuthTokens();
+
+
+  return accessToken;
+
+}
+
+
+export async function exchangeIdentityBrowserSession(
+  identityCode
+) {
+
+  const csrfToken =
+    await ensureBrowserSessionCsrf();
+
+
+  const response =
+    await sessionClient.post(
+      (
+        "/api/auth/session/"
+        + "identity/exchange/"
+      ),
+      {
+        code:
+          identityCode,
+      },
+      {
+        headers:
+          csrfHeaders(
+            csrfToken
+          ),
+      }
+    );
+
+
+  const accessToken =
+    setAccessToken(
+      response.data?.access
+    );
+
+
+  purgeLegacyStoredAuthTokens();
+
+
+  return accessToken;
+
+}
+
+
+export async function bootstrapBrowserSession() {
+
+  try {
+
+    const csrfToken =
+      await ensureBrowserSessionCsrf();
+
+
+    const response =
+      await sessionClient.post(
+        "/api/auth/session/bootstrap/",
+        {},
+        {
+          headers:
+            csrfHeaders(
+              csrfToken
+            ),
+        }
+      );
+
+
+    if (
+      response.data?.authenticated
+      !== true
+    ) {
+
+      clearBrowserSessionMemory();
+
+      return false;
+
+    }
+
+
+    setAccessToken(
+      response.data?.access
+    );
+
+    purgeLegacyStoredAuthTokens();
+
+
+    return true;
+
+  } catch (error) {
+
+    clearBrowserSessionMemory();
+
+
+    const status =
+      error.response?.status;
+
+
+    /*
+     * 401 = no valid browser refresh session.
+     * 404 = F2/F3 feature remains fail-closed in this runtime.
+     */
+    if (
+      status === 401
+      ||
+      status === 404
+    ) {
+
+      return false;
+
+    }
+
+
+    throw error;
+
+  }
+
+}
+
+
 export async function refreshSessionAccessToken() {
 
-  return refreshAccessToken({
+  return (
+    refreshAccessToken({
 
-    requestRefresh:
-      async (refreshToken) => {
+      requestRefresh:
+        async () => {
 
-        const response =
-          await refreshClient.post(
-            "/api/auth/token/refresh/",
-            {
-              refresh:
-                refreshToken,
-            }
-          );
+          const csrfToken =
+            await ensureBrowserSessionCsrf();
 
 
-        return response.data;
+          const response =
+            await sessionClient.post(
+              "/api/auth/session/refresh/",
+              {},
+              {
+                headers:
+                  csrfHeaders(
+                    csrfToken
+                  ),
+              }
+            );
 
-      },
 
-  });
+          return response.data;
+
+        },
+
+    })
+  );
+
+}
+
+
+export async function endBrowserSession() {
+
+  const csrfToken =
+    await ensureBrowserSessionCsrf();
+
+
+  const response =
+    await sessionClient.post(
+      "/api/auth/session/end/",
+      {},
+      {
+        headers:
+          csrfHeaders(
+            csrfToken
+          ),
+      }
+    );
+
+
+  clearBrowserSessionMemory();
+
+  purgeLegacyStoredAuthTokens();
+
+
+  return (
+    response.data?.ended
+    === true
+  );
 
 }
 
@@ -75,9 +318,7 @@ instance.interceptors.request.use(
   (config) => {
 
     const token =
-      localStorage.getItem(
-        "access"
-      );
+      getAccessToken();
 
 
     if (token) {
@@ -118,18 +359,16 @@ instance.interceptors.response.use(
 
 
     /*
-     * IMPORTANT:
-     *
-     * One UCH provider endpoints can legitimately use HTTP 401
-     * to mean mailbox/provider re-authentication is required.
-     *
-     * Only SimpleJWT's token_not_valid contract means the
-     * One UCH access token itself needs refreshing.
+     * Mailbox provider APIs can legitimately return HTTP 401.
+     * Refresh the One UCH browser session only for the exact
+     * SimpleJWT token_not_valid contract.
      */
     if (
       status !== 401
-      || !originalRequest
-      || !isJwtTokenFailurePayload(
+      ||
+      !originalRequest
+      ||
+      !isJwtTokenFailurePayload(
         payload
       )
     ) {
@@ -141,29 +380,9 @@ instance.interceptors.response.use(
     }
 
 
-    /*
-     * The replayed request is allowed exactly one JWT refresh
-     * cycle. A second JWT authentication failure means the
-     * refreshed session cannot be trusted.
-     */
     if (
       originalRequest
         ._oneUchRefreshRetry
-    ) {
-
-      invalidateSession();
-
-      return Promise.reject(
-        error
-      );
-
-    }
-
-
-    if (
-      !localStorage.getItem(
-        "refresh"
-      )
     ) {
 
       invalidateSession();
@@ -186,7 +405,8 @@ instance.interceptors.response.use(
 
 
       originalRequest.headers =
-        originalRequest.headers || {};
+        originalRequest.headers
+        || {};
 
 
       originalRequest

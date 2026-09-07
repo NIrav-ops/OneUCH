@@ -32,11 +32,9 @@ import {
   X,
 } from "lucide-react";
 
-import axios from "../axiosConfig";
-
-import {
-  clearStoredAuthTokens,
-} from "../authSession";
+import axios, {
+  endBrowserSession,
+} from "../axiosConfig";
 
 
 const NAVIGATION = [
@@ -457,15 +455,27 @@ export default function AppLayout() {
     };
 
 
-  const logout = () => {
+  const logout =
+    async () => {
 
-    clearStoredAuthTokens();
+      try {
 
-    window.location.replace(
-      "/"
-    );
+        await endBrowserSession();
 
-  };
+        window.location.replace(
+          "/login"
+        );
+
+      } catch (error) {
+
+        console.error(
+          "Sign out failed:",
+          error
+        );
+
+      }
+
+    };
 
 
   const navLinkClass =

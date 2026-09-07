@@ -8,6 +8,11 @@ import {
 import { useLocation } from "react-router-dom";
 
 import axios from "../axiosConfig";
+
+import {
+  getAccessToken,
+} from "../authSession";
+
 import ConversationTimeline from "../components/ConversationTimeline";
 
 import RecipientChipInput
@@ -19,7 +24,6 @@ import {
 } from "../components/recipientUtils";
 
 import {
-  API_BASE_URL,
   WS_BASE_URL,
 } from "../runtimeConfig";
 
@@ -870,9 +874,7 @@ export default function Inbox() {
   useEffect(() => {
 
     const token =
-      localStorage.getItem(
-        "access"
-      );
+      getAccessToken();
 
 
     if (!token) {
@@ -2528,37 +2530,24 @@ export default function Inbox() {
 
     try {
 
-      const token =
-        localStorage.getItem(
-          "access"
-        );
-
-
       const response =
-        await fetch(
-          `${API_BASE_URL}/api/inbox/attachments/${messageId}/${attachmentId}/`,
+        await axios.get(
+          (
+            "/api/inbox/attachments/"
+            + messageId
+            + "/"
+            + attachmentId
+            + "/"
+          ),
           {
-            method: "GET",
-
-            headers: {
-              Authorization:
-                `Bearer ${token}`,
-            },
+            responseType:
+              "blob",
           }
         );
 
 
-      if (!response.ok) {
-
-        throw new Error(
-          "Download failed"
-        );
-
-      }
-
-
       const blob =
-        await response.blob();
+        response.data;
 
 
       const url =

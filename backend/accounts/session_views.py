@@ -37,6 +37,7 @@ from accounts.browser_session import (
     browser_origin_allowed,
     browser_session_enabled,
     clear_browser_refresh_cookie,
+    clear_browser_session_cookies,
     get_browser_refresh_cookie,
     new_browser_csrf_token,
     set_browser_csrf_cookie,
@@ -297,6 +298,37 @@ class BrowserSessionIdentityExchangeAPIView(
             set_browser_refresh_cookie(
                 response,
                 refresh,
+            )
+        )
+
+
+class BrowserSessionEndAPIView(
+    BrowserSessionPublicAPIView
+):
+
+    def post(
+        self,
+        request,
+    ):
+        self.require_feature()
+
+        if not (
+            browser_csrf_matches(
+                request
+            )
+        ):
+            return self.csrf_failure()
+
+        response = Response(
+            {
+                "ended":
+                    True,
+            }
+        )
+
+        return (
+            clear_browser_session_cookies(
+                response
             )
         )
 

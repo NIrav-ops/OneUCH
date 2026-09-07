@@ -1,9 +1,17 @@
-import { useState } from "react";
+import {
+  useEffect,
+  useState,
+} from "react";
+
 import {
   Routes,
   Route,
   Navigate,
 } from "react-router-dom";
+
+import {
+  bootstrapBrowserSession,
+} from "./axiosConfig";
 
 import AppLayout from "./layouts/AppLayout";
 
@@ -25,18 +33,123 @@ import Workflows from "./pages/Workflows";
 import WorkflowDetail from "./pages/WorkflowDetail";
 import WorkflowRuntime from "./pages/WorkflowRuntime";
 
+
 export default function App() {
-  const [isAuth, setIsAuth] = useState(
-    !!localStorage.getItem("access")
+
+  const [
+    sessionState,
+    setSessionState,
+  ] = useState(
+    "bootstrapping"
   );
 
-  if (!isAuth) {
+
+  useEffect(
+    () => {
+
+      let active =
+        true;
+
+
+      const timer =
+        window.setTimeout(
+          () => {
+
+            void (
+              bootstrapBrowserSession()
+                .then(
+                  (authenticated) => {
+
+                    if (active) {
+
+                      setSessionState(
+                        authenticated
+                          ? "authenticated"
+                          : "anonymous"
+                      );
+
+                    }
+
+                  }
+                )
+                .catch(
+                  () => {
+
+                    if (active) {
+
+                      setSessionState(
+                        "anonymous"
+                      );
+
+                    }
+
+                  }
+                )
+            );
+
+          },
+          0
+        );
+
+
+      return () => {
+
+        active =
+          false;
+
+        window.clearTimeout(
+          timer
+        );
+
+      };
+
+    },
+    []
+  );
+
+
+  if (
+    sessionState ===
+    "bootstrapping"
+  ) {
+
+    return (
+      <div
+        className="
+          flex
+          min-h-screen
+          items-center
+          justify-center
+          bg-slate-950
+          text-sm
+          font-medium
+          text-slate-300
+        "
+      >
+        Securing your One UCH session...
+      </div>
+    );
+
+  }
+
+
+  if (
+    sessionState !==
+    "authenticated"
+  ) {
+
     return (
       <Login
-        onLogin={() => setIsAuth(true)}
+        onLogin={() =>
+          setSessionState(
+            "authenticated"
+          )
+        }
       />
     );
+
   }
+
 
   return (
     <Routes>
@@ -87,12 +200,6 @@ export default function App() {
           element={<Settings />}
         />
 
-
-
-
-
-
-
         <Route
           path="/actions"
           element={<ActionCenter />}
@@ -141,4 +248,5 @@ export default function App() {
       </Route>
     </Routes>
   );
+
 }

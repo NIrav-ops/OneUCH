@@ -246,6 +246,38 @@ def clear_browser_refresh_cookie(
     )
 
 
+def clear_browser_csrf_cookie(
+    response,
+):
+    response.delete_cookie(
+        key=BROWSER_CSRF_COOKIE,
+        path=(
+            BROWSER_SESSION_COOKIE_PATH
+        ),
+        samesite="Lax",
+    )
+
+    return set_no_store(
+        response
+    )
+
+
+def clear_browser_session_cookies(
+    response,
+):
+    clear_browser_refresh_cookie(
+        response
+    )
+
+    clear_browser_csrf_cookie(
+        response
+    )
+
+    return set_no_store(
+        response
+    )
+
+
 def get_browser_refresh_cookie(
     request,
 ):

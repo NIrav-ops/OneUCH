@@ -11,7 +11,10 @@ import {
   ShieldCheck,
 } from "lucide-react";
 
-import axios from "../axiosConfig";
+import axios, {
+  establishPasswordBrowserSession,
+  exchangeIdentityBrowserSession,
+} from "../axiosConfig";
 
 import {
   API_BASE_URL,
@@ -244,50 +247,8 @@ export default function Login({
               }
 
 
-              const response =
-                await axios.post(
-                  "/api/auth/identity/exchange/",
-                  {
-                    code:
-                      identityCode,
-                  }
-                );
-
-
-              const access =
-                response.data?.access;
-
-              const refresh =
-                response.data?.refresh;
-
-
-              if (
-                !access
-                ||
-                !refresh
-              ) {
-
-                throw new Error(
-                  "Identity exchange did not return a One UCH session."
-                );
-
-              }
-
-
-              /*
-               * Preserve the existing Phase-E JWT storage
-               * behavior exactly. Browser/session hardening
-               * remains Phase F.
-               */
-              localStorage.setItem(
-                "access",
-                access
-              );
-
-
-              localStorage.setItem(
-                "refresh",
-                refresh
+              await exchangeIdentityBrowserSession(
+                identityCode
               );
 
 
@@ -499,29 +460,13 @@ export default function Login({
         );
 
 
-        const response =
-          await axios.post(
-            "/api/auth/token/",
-            {
-              email:
-                email.trim(),
+        await establishPasswordBrowserSession({
+          email:
+            email.trim(),
 
-              password:
-                password,
-            }
-          );
-
-
-        localStorage.setItem(
-          "access",
-          response.data.access
-        );
-
-
-        localStorage.setItem(
-          "refresh",
-          response.data.refresh
-        );
+          password:
+            password,
+        });
 
 
         onLogin();

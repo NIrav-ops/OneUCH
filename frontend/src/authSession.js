@@ -1,3 +1,9 @@
+let accessToken = null;
+
+let sessionCsrfToken = null;
+
+let csrfPromise = null;
+
 let refreshPromise = null;
 
 
@@ -13,7 +19,109 @@ export function isJwtTokenFailurePayload(
 }
 
 
-export function clearStoredAuthTokens(
+export function getAccessToken() {
+
+  return accessToken;
+
+}
+
+
+export function setAccessToken(
+  token
+) {
+
+  const normalized =
+    String(
+      token || ""
+    ).trim();
+
+
+  if (!normalized) {
+
+    throw new Error(
+      "One UCH access token is unavailable."
+    );
+
+  }
+
+
+  accessToken =
+    normalized;
+
+
+  return accessToken;
+
+}
+
+
+export function clearAccessToken() {
+
+  accessToken =
+    null;
+
+}
+
+
+export function getSessionCsrfToken() {
+
+  return sessionCsrfToken;
+
+}
+
+
+export function setSessionCsrfToken(
+  token
+) {
+
+  const normalized =
+    String(
+      token || ""
+    ).trim();
+
+
+  if (!normalized) {
+
+    throw new Error(
+      "One UCH session verification token is unavailable."
+    );
+
+  }
+
+
+  sessionCsrfToken =
+    normalized;
+
+
+  return sessionCsrfToken;
+
+}
+
+
+export function clearSessionCsrfToken() {
+
+  sessionCsrfToken =
+    null;
+
+}
+
+
+export function clearBrowserSessionMemory() {
+
+  clearAccessToken();
+
+  clearSessionCsrfToken();
+
+}
+
+
+/*
+ * Phase-F migration cleanup only.
+ *
+ * F3 never reads access or refresh JWTs from localStorage and
+ * never writes JWTs to localStorage. These deletes remove
+ * credentials left behind by pre-F3 browser sessions.
+ */
+export function purgeLegacyStoredAuthTokens(
   storage = window.localStorage
 ) {
 
@@ -28,87 +136,110 @@ export function clearStoredAuthTokens(
 }
 
 
+export async function ensureSessionCsrfToken({
+  requestCsrf,
+}) {
+
+  if (
+    sessionCsrfToken
+  ) {
+
+    return sessionCsrfToken;
+
+  }
+
+
+  if (
+    typeof requestCsrf !==
+    "function"
+  ) {
+
+    throw new Error(
+      "Session verification request function is unavailable."
+    );
+
+  }
+
+
+  if (!csrfPromise) {
+
+    csrfPromise =
+      Promise.resolve(
+        requestCsrf()
+      )
+        .then(
+          (payload) => {
+
+            return (
+              setSessionCsrfToken(
+                payload?.csrf_token
+              )
+            );
+
+          }
+        )
+        .finally(
+          () => {
+
+            csrfPromise =
+              null;
+
+          }
+        );
+
+  }
+
+
+  return csrfPromise;
+
+}
+
+
 export async function refreshAccessToken({
-  storage = window.localStorage,
   requestRefresh,
 }) {
 
   if (
-    typeof requestRefresh !== "function"
+    typeof requestRefresh !==
+    "function"
   ) {
+
     throw new Error(
       "JWT refresh request function is unavailable."
     );
-  }
 
-
-  const refreshToken =
-    storage.getItem(
-      "refresh"
-    );
-
-
-  if (!refreshToken) {
-    throw new Error(
-      "One UCH refresh token is unavailable."
-    );
   }
 
 
   /*
-   * All requests that discover the same expired access token
-   * share one refresh operation. This prevents a burst of API
-   * 401s from issuing multiple competing refresh requests.
+   * Preserve the F1 positive control: concurrent API failures
+   * share one refresh operation.
    */
   if (!refreshPromise) {
 
-    refreshPromise = Promise.resolve(
-      requestRefresh(
-        refreshToken
+    refreshPromise =
+      Promise.resolve(
+        requestRefresh()
       )
-    )
-      .then((payload) => {
+        .then(
+          (payload) => {
 
-        const accessToken =
-          payload?.access;
+            return (
+              setAccessToken(
+                payload?.access
+              )
+            );
 
+          }
+        )
+        .finally(
+          () => {
 
-        if (!accessToken) {
-          throw new Error(
-            "JWT refresh response did not contain an access token."
-          );
-        }
+            refreshPromise =
+              null;
 
-
-        storage.setItem(
-          "access",
-          accessToken
+          }
         );
-
-
-        /*
-         * SimpleJWT does not rotate refresh tokens by default,
-         * but preserve a rotated token if deployment policy
-         * enables rotation later.
-         */
-        if (payload?.refresh) {
-
-          storage.setItem(
-            "refresh",
-            payload.refresh
-          );
-
-        }
-
-
-        return accessToken;
-
-      })
-      .finally(() => {
-
-        refreshPromise = null;
-
-      });
 
   }
 

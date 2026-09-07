@@ -10,6 +10,7 @@ from .identity_views import (
 from .session_views import (
     BrowserSessionBootstrapAPIView,
     BrowserSessionCsrfAPIView,
+    BrowserSessionEndAPIView,
     BrowserSessionIdentityExchangeAPIView,
     BrowserSessionLoginAPIView,
     BrowserSessionRefreshAPIView,
@@ -38,6 +39,11 @@ urlpatterns = [
         "session/identity/exchange/",
         BrowserSessionIdentityExchangeAPIView.as_view(),
         name="browser-session-identity-exchange",
+    ),
+    path(
+        "session/end/",
+        BrowserSessionEndAPIView.as_view(),
+        name="browser-session-end",
     ),
     path(
         "session/refresh/",

@@ -23,18 +23,7 @@ import {
   useNavigate,
 } from "react-router-dom";
 
-import axios, {
-  invalidateSession,
-  refreshSessionAccessToken,
-} from "../axiosConfig";
-
-import {
-  isJwtTokenFailurePayload,
-} from "../authSession";
-
-import {
-  API_BASE_URL,
-} from "../runtimeConfig";
+import axios from "../axiosConfig";
 
 
 const EMPTY_SUMMARY = {
@@ -889,125 +878,25 @@ export default function Settings() {
       );
 
       try {
-        const accessToken =
-          localStorage.getItem(
-            "access"
-          );
-
-        if (!accessToken) {
-          throw new Error(
-            "Your One UCH session is unavailable. Please sign in again."
-          );
-        }
-
-        const baseURL =
-          API_BASE_URL;
-
         /*
-         * Use the explicit fetch/JWT-refresh path for mailbox
-         * synchronization requests.
+         * Use the authenticated One UCH Axios transport.
          *
-         * The endpoint now queues a governed Celery mailbox
-         * task instead of holding this HTTP request open while
-         * a 90-day provider history import runs.
+         * The interceptor carries the in-memory access JWT and
+         * refreshes only for the exact SimpleJWT token_not_valid
+         * contract. Provider/mailbox HTTP 401 responses remain
+         * ordinary mailbox errors and are not mistaken for a
+         * One UCH browser-session expiry.
          */
-        const performSyncRequest =
-          async (token) => {
-
-            const response =
-              await fetch(
-                `${baseURL}${provider.sync_path}`,
-                {
-                  method: "POST",
-                  headers: {
-                    Authorization:
-                      `Bearer ${token}`,
-                    "Content-Type":
-                      "application/json",
-                  },
-                }
-              );
-
-
-            let payload = {};
-
-
-            try {
-
-              payload =
-                await response.json();
-
-            } catch {
-
-              payload = {};
-
-            }
-
-
-            return {
-              response,
-              payload,
-            };
-
-          };
-
-
-        let {
-          response,
-          payload,
-        } =
-          await performSyncRequest(
-            accessToken
+        const response =
+          await axios.post(
+            provider.sync_path,
+            {}
           );
 
 
-        /*
-         * Distinguish an expired One UCH access token from the
-         * provider's own "reauthenticate mailbox" HTTP 401.
-         */
-        if (
-          response.status === 401
-          && isJwtTokenFailurePayload(
-            payload
-          )
-        ) {
+        const payload =
+          response.data || {};
 
-          let refreshedAccessToken;
-
-
-          try {
-
-            refreshedAccessToken =
-              await refreshSessionAccessToken();
-
-          } catch (refreshError) {
-
-            invalidateSession();
-
-            throw refreshError;
-
-          }
-
-
-          ({
-            response,
-            payload,
-          } =
-            await performSyncRequest(
-              refreshedAccessToken
-            ));
-
-        }
-
-
-        if (!response.ok) {
-          throw new Error(
-            payload.action ||
-            payload.message ||
-            payload.error ||
-            `Mailbox sync failed with status ${response.status}.`
-          );
-        }
 
         if (
           response.status === 202 ||
@@ -1032,7 +921,14 @@ export default function Settings() {
           err
         );
 
+        const payload =
+          err.response?.data || {};
+
+
         setError(
+          payload.action ||
+          payload.message ||
+          payload.error ||
           err.message ||
           `Unable to synchronize ${provider.label}.`
         );
