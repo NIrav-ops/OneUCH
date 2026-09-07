@@ -706,6 +706,7 @@ class MessageProcessor:
             if source_channel in (
                 "gmail",
                 "outlook",
+                "imap",
             ):
 
                 evidence_type = (

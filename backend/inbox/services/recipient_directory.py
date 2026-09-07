@@ -37,6 +37,7 @@ from inbox.models import (
 SUPPORTED_PLATFORMS = (
     "gmail",
     "outlook",
+    "imap",
 )
 
 DEFAULT_BATCH_SIZE = 250
@@ -553,6 +554,139 @@ def _apply_message_to_directory(
         contact.save()
 
 
+def _eligible_directory_messages(
+    *,
+    user,
+    organization,
+):
+    return (
+        InboxMessage.objects
+        .filter(
+            user=user,
+            organization=organization,
+            is_draft=False,
+            platform__in=(
+                SUPPORTED_PLATFORMS
+            ),
+        )
+    )
+
+
+def _reconcile_directory_watermark(
+    *,
+    user,
+    organization,
+    state,
+):
+    """
+    Validate the single recipient-directory watermark against
+    the currently-supported message population.
+
+    This is required when a provider becomes newly eligible.
+    Example:
+
+      IMAP message id=10 existed while the directory supported
+      Gmail/Outlook only.
+
+      Gmail id=20 advanced the historical watermark to 20.
+
+      Once IMAP becomes supported, an ordinary id__gt=20 pass
+      could never discover the older IMAP row.
+
+    If the number of currently-eligible messages at or below
+    the watermark differs from the count recorded by the
+    directory state, rebuild that user's directory
+    transactionally from governed message history.
+
+    Normal incremental refresh remains unchanged when the
+    watermark is internally consistent.
+    """
+
+    with transaction.atomic():
+
+        locked_state = (
+            RecipientDirectoryState.objects
+            .select_for_update()
+            .get(
+                pk=state.pk
+            )
+        )
+
+
+        watermark = (
+            locked_state
+            .last_indexed_message_id
+        )
+
+
+        if not watermark:
+
+            return (
+                locked_state,
+                False,
+            )
+
+
+        eligible_count = (
+            _eligible_directory_messages(
+                user=user,
+                organization=organization,
+            )
+            .filter(
+                id__lte=watermark
+            )
+            .count()
+        )
+
+
+        if (
+            eligible_count
+            ==
+            locked_state
+            .indexed_message_count
+        ):
+
+            return (
+                locked_state,
+                False,
+            )
+
+
+        RecipientContact.objects.filter(
+            user=user,
+            organization=organization,
+        ).delete()
+
+
+        locked_state.last_indexed_message_id = (
+            0
+        )
+
+        locked_state.indexed_message_count = (
+            0
+        )
+
+        locked_state.last_indexed_at = (
+            None
+        )
+
+
+        locked_state.save(
+            update_fields=[
+                "last_indexed_message_id",
+                "indexed_message_count",
+                "last_indexed_at",
+                "updated_at",
+            ]
+        )
+
+
+        return (
+            locked_state,
+            True,
+        )
+
+
 def refresh_recipient_directory(
     *,
     user,
@@ -600,6 +734,20 @@ def refresh_recipient_directory(
             organization=(
                 organization
             ),
+        )
+    )
+
+
+    (
+        state,
+        _directory_rebuilt,
+    ) = (
+        _reconcile_directory_watermark(
+            user=user,
+            organization=(
+                organization
+            ),
+            state=state,
         )
     )
 

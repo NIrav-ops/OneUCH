@@ -396,7 +396,9 @@ class SyncPathUnificationTests(
         )
 
 
-        analyze.assert_called_once()
+        # Provider mock created no InboxMessage rows.
+        # Scoped intelligence therefore queues nothing.
+        analyze.assert_not_called()
 
         release_lock.assert_called_once_with(
             lock
@@ -464,7 +466,9 @@ class SyncPathUnificationTests(
         )
 
 
-        analyze.assert_called_once()
+        # Provider mock created no InboxMessage rows.
+        # Scoped intelligence therefore queues nothing.
+        analyze.assert_not_called()
 
         release_lock.assert_called_once_with(
             lock

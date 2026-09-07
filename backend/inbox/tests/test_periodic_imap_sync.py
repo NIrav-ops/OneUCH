@@ -127,7 +127,9 @@ class PeriodicIMAPSyncTests(
             ),
         )
 
-        analyze_approvals.assert_called_once()
+        # Provider mock created no InboxMessage rows.
+        # C5D therefore has no mailbox-scoped intelligence work.
+        analyze_approvals.assert_not_called()
 
         # Lock-release correctness is a separate
         # MVP-07.3A concern. This test only proves

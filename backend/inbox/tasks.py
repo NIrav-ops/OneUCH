@@ -6,6 +6,10 @@ from celery import shared_task
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 
+from django.db.models import (
+    Q,
+)
+
 from email_accounts.models import EmailAccount
 
 from email_accounts.services.credential_vault import (
@@ -40,13 +44,186 @@ from inbox.services.outbound_idempotency import (
 from googleapis.services.gmail_sync import fetch_gmail_emails
 from microsoftapis.services.outlook_sync import fetch_outlook_emails
 
-from approvals.tasks import analyze_new_approvals
+from actions.tasks import (
+    analyze_new_messages,
+)
+
+from actions.followup_tasks import (
+    analyze_new_followups,
+)
+
+from actions.expected_response_tasks import (
+    analyze_new_expected_responses,
+)
+
+from approvals.tasks import (
+    analyze_new_approvals,
+)
+
 from platform_core.observability.logger import get_logger, log_event
 
 logger = get_logger("oneuch.runtime.scheduler")
 
 User = get_user_model()
 MAX_RETRIES = 3
+
+INTELLIGENCE_HANDOFF_BATCH_SIZE = (
+    500
+)
+
+
+def _pending_mail_intelligence_message_ids(
+    *,
+    account,
+):
+    """
+    Return only pending intelligence work for the mailbox that
+    just synchronized.
+
+    This replaces the historical global Approval scan with an
+    explicit mailbox/user/organization boundary.
+
+    Inbound:
+        Action
+        Approval
+        Follow-up
+        Expected response
+
+    Outbound:
+        Expected response only
+    """
+
+    queryset = (
+        InboxMessage.objects
+        .filter(
+            user=account.user,
+            email_account=account,
+            is_draft=False,
+        )
+    )
+
+
+    if account.organization_id:
+
+        queryset = (
+            queryset.filter(
+                organization_id=(
+                    account.organization_id
+                )
+            )
+        )
+
+
+    queryset = (
+        queryset.filter(
+            Q(
+                direction="inbound",
+                action_analyzed=False,
+            )
+            |
+            Q(
+                direction="inbound",
+                approval_analyzed=False,
+            )
+            |
+            Q(
+                direction="inbound",
+                followup_analyzed=False,
+            )
+            |
+            Q(
+                expected_response_analyzed=False,
+            )
+        )
+        .order_by(
+            "id"
+        )
+    )
+
+
+    return list(
+        queryset.values_list(
+            "id",
+            flat=True,
+        )
+    )
+
+
+def _queue_scoped_mail_intelligence(
+    *,
+    account,
+):
+    message_ids = (
+        _pending_mail_intelligence_message_ids(
+            account=account
+        )
+    )
+
+
+    if not message_ids:
+
+        return {
+            "message_count":
+                0,
+
+            "batch_count":
+                0,
+        }
+
+
+    batch_count = 0
+
+
+    for offset in range(
+        0,
+        len(
+            message_ids
+        ),
+        INTELLIGENCE_HANDOFF_BATCH_SIZE,
+    ):
+
+        batch = (
+            message_ids[
+                offset
+                :
+                (
+                    offset
+                    +
+                    INTELLIGENCE_HANDOFF_BATCH_SIZE
+                )
+            ]
+        )
+
+
+        analyze_new_messages.delay(
+            message_ids=batch
+        )
+
+        analyze_new_approvals.delay(
+            message_ids=batch
+        )
+
+        analyze_new_followups.delay(
+            message_ids=batch
+        )
+
+        analyze_new_expected_responses.delay(
+            message_ids=batch
+        )
+
+
+        batch_count += 1
+
+
+    return {
+        "message_count":
+            len(
+                message_ids
+            ),
+
+        "batch_count":
+            batch_count,
+    }
 
 
 # ============================================
@@ -315,7 +492,34 @@ def sync_email_account(
             )
 
 
-        analyze_new_approvals.delay()
+        intelligence_handoff = (
+            _queue_scoped_mail_intelligence(
+                account=account
+            )
+        )
+
+
+        log_event(
+            logger,
+            "info",
+            "sync.intelligence.queued",
+            account_id=(
+                account.id
+            ),
+            provider=(
+                account.account_type
+            ),
+            message_count=(
+                intelligence_handoff[
+                    "message_count"
+                ]
+            ),
+            batch_count=(
+                intelligence_handoff[
+                    "batch_count"
+                ]
+            ),
+        )
 
 
         log_event(
@@ -337,6 +541,16 @@ def sync_email_account(
 
             "provider":
                 account.account_type,
+
+            "intelligence_messages":
+                intelligence_handoff[
+                    "message_count"
+                ],
+
+            "intelligence_batches":
+                intelligence_handoff[
+                    "batch_count"
+                ],
         }
 
 
