@@ -134,7 +134,7 @@ class PilotUserSmokeTests(
             ][
                 "supported"
             ],
-            2,
+            3,
         )
 
 
