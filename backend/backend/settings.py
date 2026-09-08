@@ -243,10 +243,39 @@ if DB_ENGINE in {
 
 else:
 
+    # Optional explicit SQLite target for isolated local
+    # tooling such as DEMO-RC1 disposable database clones.
+    #
+    # Normal development remains unchanged when unset:
+    # backend/db.sqlite3 remains the default database.
+    sqlite_path_override = os.environ.get(
+        "ONEUCH_SQLITE_PATH",
+        "",
+    ).strip()
+
+
+    if sqlite_path_override:
+
+        sqlite_database_name = (
+            Path(
+                sqlite_path_override
+            )
+            .expanduser()
+            .resolve()
+        )
+
+    else:
+
+        sqlite_database_name = (
+            BASE_DIR
+            / "db.sqlite3"
+        )
+
+
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
-            "NAME": BASE_DIR / "db.sqlite3",
+            "NAME": sqlite_database_name,
         }
     }
 
