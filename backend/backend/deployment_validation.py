@@ -548,4 +548,45 @@ def collect_pilot_configuration_errors(
             )
 
 
+    # --------------------------------------------------------
+    # Browser Session Security
+    # --------------------------------------------------------
+    #
+    # Browser-session authentication is optional/fail-closed
+    # until explicitly enabled. Once enabled, credentialed
+    # cross-origin browser requests must be allowed only from
+    # the already validated explicit HTTPS frontend origins.
+    #
+    # Database migration ordering is enforced by the final
+    # pilot release gate because configuration validation does
+    # not have database-state authority.
+    # --------------------------------------------------------
+
+    browser_session_enabled = bool(
+        getattr(
+            settings_obj,
+            "AUTH_BROWSER_SESSION_ENABLED",
+            False,
+        )
+    )
+
+
+    if browser_session_enabled:
+
+        cors_allow_credentials = bool(
+            getattr(
+                settings_obj,
+                "CORS_ALLOW_CREDENTIALS",
+                False,
+            )
+        )
+
+
+        if not cors_allow_credentials:
+            errors.append(
+                "CORS_ALLOW_CREDENTIALS must be True when "
+                "browser session authentication is enabled."
+            )
+
+
     return errors

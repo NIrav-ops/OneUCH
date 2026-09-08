@@ -27,6 +27,19 @@ EXPECTED_BEAT_SCHEDULER = (
 )
 
 
+BROWSER_SESSION_REQUIRED_MIGRATION = (
+    "accounts",
+    "0005_authsec_rc2_browser_session",
+)
+
+
+BROWSER_SESSION_MIGRATION_ERROR = (
+    "AUTH_BROWSER_SESSION_ENABLED requires Django migration "
+    "accounts.0005_authsec_rc2_browser_session to be applied "
+    "before pilot activation."
+)
+
+
 def _collect_django_deployment_errors(
     *,
     run_checks_fn,
@@ -136,6 +149,7 @@ def _collect_database_errors(
     *,
     connection_obj,
     migration_executor_cls,
+    required_applied_migrations=(),
 ):
     errors = []
 
@@ -205,6 +219,33 @@ def _collect_database_errors(
             errors.append(
                 "Unapplied Django migrations remain."
             )
+
+
+        if required_applied_migrations:
+
+            applied_migrations = set(
+                getattr(
+                    executor.loader,
+                    "applied_migrations",
+                    {},
+                )
+            )
+
+
+            for (
+                required_migration,
+                error_message,
+            ) in required_applied_migrations:
+
+                if (
+                    tuple(
+                        required_migration
+                    )
+                    not in applied_migrations
+                ):
+                    errors.append(
+                        error_message
+                    )
 
     except Exception:
 
@@ -317,11 +358,33 @@ def collect_pilot_release_errors(
     )
 
 
+    required_applied_migrations = []
+
+
+    if bool(
+        getattr(
+            settings_obj,
+            "AUTH_BROWSER_SESSION_ENABLED",
+            False,
+        )
+    ):
+
+        required_applied_migrations.append(
+            (
+                BROWSER_SESSION_REQUIRED_MIGRATION,
+                BROWSER_SESSION_MIGRATION_ERROR,
+            )
+        )
+
+
     errors.extend(
         _collect_database_errors(
             connection_obj=connection_obj,
             migration_executor_cls=(
                 migration_executor_cls
+            ),
+            required_applied_migrations=(
+                required_applied_migrations
             ),
         )
     )
