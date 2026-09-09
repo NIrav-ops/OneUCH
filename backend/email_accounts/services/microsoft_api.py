@@ -131,14 +131,26 @@ def _raise_graph_error(
         )
 
 
-def _send_native_outlook_reply_with_attachments(
+def _send_native_outlook_reply_draft(
     *,
     token,
+    to_email,
+    cc_emails,
+    bcc_emails,
     reply_to_message_id,
     body,
     reply_mode,
     attachments,
 ):
+    """
+    Create a genuine threaded Microsoft reply draft, replace the
+    provider-derived recipients with the exact One UCH recipient
+    set, upload any attachments, then send the draft.
+
+    This prevents the visible/stored One UCH recipient set from
+    diverging from the addresses Microsoft actually receives.
+    """
+
     headers = {
         "Authorization":
             (
@@ -231,7 +243,41 @@ def _send_native_outlook_reply_with_attachments(
 
     try:
 
-        for item in attachments:
+        recipient_response = (
+            requests.patch(
+                draft_url,
+                headers=headers,
+                json={
+                    "toRecipients":
+                        _graph_recipients(
+                            to_email
+                        ),
+
+                    "ccRecipients":
+                        _graph_recipients(
+                            cc_emails
+                        ),
+
+                    "bccRecipients":
+                        _graph_recipients(
+                            bcc_emails
+                        ),
+                },
+                timeout=30,
+            )
+        )
+
+
+        _raise_graph_error(
+            recipient_response,
+            "reply draft recipient update",
+        )
+
+
+        for item in (
+            attachments
+            or []
+        ):
 
             attachment_response = (
                 requests.post(
@@ -278,9 +324,8 @@ def _send_native_outlook_reply_with_attachments(
 
     except Exception:
 
-        # Best-effort cleanup. A failed attachment operation must
-        # not intentionally leave a One UCH-created reply draft
-        # sitting in the user's mailbox.
+        # Best-effort cleanup. A One UCH-created failed reply
+        # draft should not intentionally remain in the mailbox.
         try:
 
             requests.delete(
@@ -297,15 +342,10 @@ def _send_native_outlook_reply_with_attachments(
         raise
 
 
-    # The createReply/createReplyAll id belongs to the draft
-    # lifecycle. Do not persist it as the final Sent message id.
-    #
-    # Returning no provider id intentionally causes the existing
-    # delivery task to use the "sent" reconciliation placeholder.
-    # Outlook Sent synchronization will then replace it with the
-    # provider's real Sent-item identity.
+    # The draft id is not the final Sent message id.
+    # Existing Sent synchronization reconciles the real
+    # provider identity afterwards.
     return {}
-
 
 def send_outlook_reply(
     user,
@@ -314,6 +354,7 @@ def send_outlook_reply(
     body,
     *,
     cc_emails=None,
+    bcc_emails=None,
     reply_to_message_id=None,
     reply_mode="reply",
     attachments=None,
@@ -356,18 +397,22 @@ def send_outlook_reply(
 
 
     # --------------------------------------------------------
-    # True threaded Reply / Reply-All with files
+    # True Microsoft threaded reply.
+    #
+    # Always use createReply/createReplyAll -> PATCH recipients
+    # -> send, even when there are no attachments. Native
+    # one-step reply/replyAll chooses recipients itself and can
+    # therefore diverge from an edited One UCH recipient set.
     # --------------------------------------------------------
 
-    if (
-        native_reply
-        and
-        attachments
-    ):
+    if native_reply:
 
         return (
-            _send_native_outlook_reply_with_attachments(
+            _send_native_outlook_reply_draft(
                 token=token,
+                to_email=to_email,
+                cc_emails=cc_emails,
+                bcc_emails=bcc_emails,
                 reply_to_message_id=(
                     reply_to_message_id
                 ),
@@ -379,103 +424,64 @@ def send_outlook_reply(
 
 
     # --------------------------------------------------------
-    # Existing one-step native Reply / Reply-All
-    # --------------------------------------------------------
-
-    if native_reply:
-
-        operation = (
-            "replyAll"
-            if reply_mode
-            ==
-            "reply_all"
-            else
-            "reply"
-        )
-
-
-        response = (
-            requests.post(
-                (
-                    "https://graph.microsoft.com/"
-                    "v1.0/me/messages/"
-                    +
-                    quote(
-                        reply_to_message_id,
-                        safe="",
-                    )
-                    +
-                    "/"
-                    +
-                    operation
-                ),
-                headers=headers,
-                json={
-                    "comment":
-                        body
-                },
-                timeout=30,
-            )
-        )
-
-
-    # --------------------------------------------------------
     # Safe fallback to new-message delivery
     # --------------------------------------------------------
 
-    else:
+    graph_message = {
+        "subject":
+            subject,
 
-        graph_message = {
-            "subject":
-                subject,
+        "body": {
+            "contentType":
+                "Text",
 
-            "body": {
-                "contentType":
-                    "Text",
+            "content":
+                body,
+        },
 
-                "content":
-                    body,
-            },
+        "toRecipients":
+            _graph_recipients(
+                to_email
+            ),
 
-            "toRecipients":
-                _graph_recipients(
-                    to_email
-                ),
+        "ccRecipients":
+            _graph_recipients(
+                cc_emails
+            ),
 
-            "ccRecipients":
-                _graph_recipients(
-                    cc_emails
-                ),
-        }
-
-
-        if attachments:
-
-            graph_message[
-                "attachments"
-            ] = [
-                _graph_attachment_payload(
-                    item
-                )
-                for item
-                in attachments
-            ]
+        "bccRecipients":
+            _graph_recipients(
+                bcc_emails
+            ),
+    }
 
 
-        response = (
-            requests.post(
-                (
-                    "https://graph.microsoft.com/"
-                    "v1.0/me/sendMail"
-                ),
-                headers=headers,
-                json={
-                    "message":
-                        graph_message
-                },
-                timeout=30,
+    if attachments:
+
+        graph_message[
+            "attachments"
+        ] = [
+            _graph_attachment_payload(
+                item
             )
+            for item in attachments
+        ]
+
+
+    response = (
+        requests.post(
+            (
+                "https://graph.microsoft.com/"
+                "v1.0/me/sendMail"
+            ),
+            headers=headers,
+            json={
+                "message":
+                    graph_message
+            },
+            timeout=30,
         )
+    )
 
 
     if response.status_code >= 400:

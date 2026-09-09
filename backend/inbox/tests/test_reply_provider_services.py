@@ -1,3 +1,4 @@
+
 import base64
 
 from email import (
@@ -201,16 +202,21 @@ class ReplyProviderServiceTests(
 
     @patch(
         "email_accounts.services.microsoft_api."
+        "requests.patch"
+    )
+    @patch(
+        "email_accounts.services.microsoft_api."
         "requests.post"
     )
     @patch(
         "email_accounts.services.microsoft_api."
         "get_valid_oauth_token"
     )
-    def test_outlook_reply_all_uses_native_graph_endpoint(
+    def test_outlook_reply_all_uses_draft_and_exact_recipients(
         self,
         mocked_token,
         mocked_post,
+        mocked_patch,
     ):
         token = (
             MagicMock()
@@ -225,65 +231,165 @@ class ReplyProviderServiceTests(
         )
 
 
-        response = (
+        created = (
             MagicMock()
         )
 
-        response.status_code = 202
+        created.status_code = 201
 
-        response.json.side_effect = (
+        created.json.return_value = {
+            "id":
+                "reply-draft-1"
+        }
+
+
+        sent = (
+            MagicMock()
+        )
+
+        sent.status_code = 202
+
+        sent.json.side_effect = (
             ValueError()
         )
 
-        mocked_post.return_value = (
-            response
+
+        mocked_post.side_effect = [
+            created,
+            sent,
+        ]
+
+
+        patched = (
+            MagicMock()
+        )
+
+        patched.status_code = 200
+
+        mocked_patch.return_value = (
+            patched
         )
 
 
-        send_outlook_reply(
-            user=object(),
-            to_email=(
-                "customer@example.com"
-            ),
-            subject=(
-                "Re: Test"
-            ),
-            body="Reply body",
-            cc_emails=[
-                "finance@example.com"
-            ],
-            reply_to_message_id=(
-                "graph-message-1"
-            ),
-            reply_mode="reply_all",
+        result = (
+            send_outlook_reply(
+                user=object(),
+                to_email=(
+                    "customer@example.com"
+                ),
+                subject=(
+                    "Re: Test"
+                ),
+                body="Reply body",
+                cc_emails=[
+                    "finance@example.com"
+                ],
+                bcc_emails=[
+                    "audit@example.com"
+                ],
+                reply_to_message_id=(
+                    "graph-message-1"
+                ),
+                reply_mode="reply_all",
+            )
         )
 
 
-        call = (
+        create_call = (
             mocked_post
-            .call_args
+            .call_args_list[0]
         )
-
 
         self.assertTrue(
-            call.args[
+            create_call.args[
                 0
             ].endswith(
                 (
                     "/messages/"
                     "graph-message-1/"
-                    "replyAll"
+                    "createReplyAll"
                 )
             )
         )
 
 
         self.assertEqual(
-            call.kwargs[
+            create_call.kwargs[
                 "json"
             ],
             {
                 "comment":
                     "Reply body"
             },
+        )
+
+
+        patch_call = (
+            mocked_patch
+            .call_args
+        )
+
+
+        self.assertTrue(
+            patch_call.args[
+                0
+            ].endswith(
+                "/messages/reply-draft-1"
+            )
+        )
+
+
+        self.assertEqual(
+            patch_call.kwargs[
+                "json"
+            ],
+            {
+                "toRecipients": [
+                    {
+                        "emailAddress": {
+                            "address":
+                                "customer@example.com"
+                        }
+                    }
+                ],
+
+                "ccRecipients": [
+                    {
+                        "emailAddress": {
+                            "address":
+                                "finance@example.com"
+                        }
+                    }
+                ],
+
+                "bccRecipients": [
+                    {
+                        "emailAddress": {
+                            "address":
+                                "audit@example.com"
+                        }
+                    }
+                ],
+            },
+        )
+
+
+        send_call = (
+            mocked_post
+            .call_args_list[1]
+        )
+
+
+        self.assertTrue(
+            send_call.args[
+                0
+            ].endswith(
+                "/messages/reply-draft-1/send"
+            )
+        )
+
+
+        self.assertEqual(
+            result,
+            {},
         )

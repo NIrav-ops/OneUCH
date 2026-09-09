@@ -33,6 +33,7 @@ from inbox.models import (
 
 from inbox.services.reply_recipients import (
     ReplyRecipientError,
+    normalize_reply_recipient_override,
     resolve_reply_recipients,
 )
 
@@ -71,6 +72,211 @@ class ReplyConversationAPIView(
     permission_classes = [
         IsAuthenticated
     ]
+
+
+    def get(
+        self,
+        request,
+        conversation_id,
+    ):
+        """
+        Read-only recipient pre-flight for Reply / Reply All.
+
+        No message is created and no provider operation is
+        performed. The frontend uses this contract to populate
+        editable To / Cc / Bcc fields before the user sends.
+        """
+
+        mode = (
+            request.query_params.get(
+                "mode",
+                "reply",
+            )
+        )
+
+
+        if mode not in {
+            "reply",
+            "reply_all",
+        }:
+
+            return Response(
+                {
+                    "error":
+                        "Unsupported reply mode"
+                },
+                status=400,
+            )
+
+
+        organization = (
+            get_user_organization_or_404(
+                request
+            )
+        )
+
+
+        conversation = (
+            Conversation.objects
+            .select_related(
+                "email_account"
+            )
+            .filter(
+                id=conversation_id,
+                user=request.user,
+                organization=organization,
+            )
+            .first()
+        )
+
+
+        if conversation is None:
+
+            return Response(
+                {
+                    "error":
+                        "Conversation not found"
+                },
+                status=(
+                    status
+                    .HTTP_404_NOT_FOUND
+                ),
+            )
+
+
+        latest_message = (
+            conversation.messages
+            .select_related(
+                "email_account"
+            )
+            .filter(
+                user=request.user,
+                organization=organization,
+                is_draft=False,
+            )
+            .exclude(
+                folder="trash"
+            )
+            .order_by(
+                "-received_at",
+                "-id",
+            )
+            .first()
+        )
+
+
+        if latest_message is None:
+
+            return Response(
+                {
+                    "error":
+                        "No messages in conversation"
+                },
+                status=(
+                    status
+                    .HTTP_400_BAD_REQUEST
+                ),
+            )
+
+
+        email_account = (
+            latest_message.email_account
+            or
+            conversation.email_account
+        )
+
+
+        if (
+            email_account is None
+            or
+            email_account.user_id
+            !=
+            request.user.id
+            or
+            not email_account.is_active
+        ):
+
+            return Response(
+                {
+                    "error":
+                        "No valid email account found"
+                },
+                status=(
+                    status
+                    .HTTP_400_BAD_REQUEST
+                ),
+            )
+
+
+        try:
+
+            (
+                recipient_meta,
+                recipients_flat,
+            ) = (
+                resolve_reply_recipients(
+                    message=latest_message,
+                    user=request.user,
+                    mode=mode,
+                )
+            )
+
+        except ReplyRecipientError as exc:
+
+            return Response(
+                {
+                    "error":
+                        str(exc)
+                },
+                status=400,
+            )
+
+
+        subject = (
+            latest_message.subject
+            or
+            conversation.subject
+            or
+            "No Subject"
+        )
+
+
+        if not subject.lower().startswith(
+            "re:"
+        ):
+
+            subject = (
+                "Re: "
+                +
+                subject
+            )
+
+
+        return Response(
+            {
+                "mode":
+                    mode,
+
+                "email_account_id":
+                    email_account.id,
+
+                "email_account":
+                    email_account.email_address,
+
+                "subject":
+                    subject,
+
+                "recipient_meta":
+                    recipient_meta,
+
+                "recipients":
+                    recipients_flat,
+            },
+            status=(
+                status
+                .HTTP_200_OK
+            ),
+        )
 
 
     def post(
@@ -300,6 +506,58 @@ class ReplyConversationAPIView(
             )
 
 
+        recipient_override = (
+            any(
+                field
+                in request.data
+                for field
+                in (
+                    "to",
+                    "cc",
+                    "bcc",
+                )
+            )
+        )
+
+
+        if recipient_override:
+
+            try:
+
+                (
+                    recipient_meta,
+                    recipients_flat,
+                ) = (
+                    normalize_reply_recipient_override(
+                        to=(
+                            request.data.get(
+                                "to"
+                            )
+                        ),
+                        cc=(
+                            request.data.get(
+                                "cc"
+                            )
+                        ),
+                        bcc=(
+                            request.data.get(
+                                "bcc"
+                            )
+                        ),
+                    )
+                )
+
+            except ReplyRecipientError as exc:
+
+                return Response(
+                    {
+                        "error":
+                            str(exc)
+                    },
+                    status=400,
+                )
+
+
         try:
 
             outbound_attachments = (
@@ -421,6 +679,15 @@ class ReplyConversationAPIView(
                                 )
                                 or ""
                             ),
+
+                        **(
+                            {
+                                "recipient_meta":
+                                    recipient_meta
+                            }
+                            if recipient_override
+                            else {}
+                        ),
                     },
                     attachments=(
                         outbound_attachments

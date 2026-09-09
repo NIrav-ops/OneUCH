@@ -167,6 +167,26 @@ export default function Inbox() {
   ] = useState([]);
 
 
+  const [
+    replyRecipients,
+    setReplyRecipients,
+  ] = useState({
+    to: [],
+    cc: [],
+    bcc: [],
+  });
+
+  const [
+    replyPreflightLoading,
+    setReplyPreflightLoading,
+  ] = useState(false);
+
+  const [
+    replyPreflightError,
+    setReplyPreflightError,
+  ] = useState("");
+
+
   // ==========================================================
   // DRAFT STATE
   // ==========================================================
@@ -1645,6 +1665,232 @@ export default function Inbox() {
   };
 
 
+  const normalizeReplyRecipientBuckets =
+    (
+      current,
+      bucket,
+      value
+    ) => {
+
+      const candidate = {
+        ...current,
+
+        [bucket]:
+          Array.isArray(value)
+            ? value
+            : [],
+      };
+
+
+      const seen = new Set();
+
+      const normalized = {
+        to: [],
+        cc: [],
+        bcc: [],
+      };
+
+
+      for (
+        const role
+        of [
+          "to",
+          "cc",
+          "bcc",
+        ]
+      ) {
+
+        for (
+          const recipient
+          of (
+            candidate[role]
+            || []
+          )
+        ) {
+
+          const email =
+            String(
+              recipient?.email || ""
+            )
+              .trim()
+              .toLowerCase();
+
+
+          if (
+            !email
+            ||
+            seen.has(email)
+          ) {
+            continue;
+          }
+
+
+          seen.add(email);
+
+
+          normalized[
+            role
+          ].push({
+            name:
+              String(
+                recipient?.name || ""
+              ).trim(),
+
+            email,
+          });
+
+        }
+
+      }
+
+
+      return normalized;
+
+    };
+
+
+  const updateReplyRecipientBucket =
+    (
+      bucket,
+      value
+    ) => {
+
+      setReplyRecipients(
+        (current) =>
+          normalizeReplyRecipientBuckets(
+            current,
+            bucket,
+            value
+          )
+      );
+
+    };
+
+
+  const beginReply =
+    async (
+      mode
+    ) => {
+
+      if (!selectedId) {
+
+        setError(
+          "Select a conversation before replying."
+        );
+
+        return;
+      }
+
+
+      const conversationId =
+        selectedId;
+
+
+      setError("");
+
+      setReplyPreflightError("");
+
+      setReplyPreflightLoading(
+        true
+      );
+
+      setReplyMode(
+        mode
+      );
+
+      setReplyBody("");
+
+      setReplyFiles([]);
+
+      setReplyRecipients({
+        to: [],
+        cc: [],
+        bcc: [],
+      });
+
+
+      replyIdempotencyKeyRef.current =
+        "";
+
+
+      setShowReply(
+        true
+      );
+
+
+      try {
+
+        const response =
+          await axios.get(
+            `/api/inbox/conversations/${conversationId}/reply/`,
+            {
+              params: {
+                mode,
+              },
+            }
+          );
+
+
+        const meta =
+          response.data
+            ?.recipient_meta
+          || {};
+
+
+        setReplyRecipients({
+          to:
+            Array.isArray(
+              meta.to
+            )
+              ? meta.to
+              : [],
+
+          cc:
+            Array.isArray(
+              meta.cc
+            )
+              ? meta.cc
+              : [],
+
+          bcc:
+            Array.isArray(
+              meta.bcc
+            )
+              ? meta.bcc
+              : [],
+        });
+
+
+      } catch (err) {
+
+        console.error(
+          "Reply recipient preflight error:",
+          err
+        );
+
+
+        setReplyPreflightError(
+          err.response?.data?.error
+          ||
+          (
+            "Unable to load default recipients. "
+            +
+            "You can enter recipients manually."
+          )
+        );
+
+
+      } finally {
+
+        setReplyPreflightLoading(
+          false
+        );
+
+      }
+
+    };
+
+
   // ==========================================================
   // SEND REPLY
   // ==========================================================
@@ -1662,6 +1908,31 @@ export default function Inbox() {
 
       setError(
         "Select a conversation before replying."
+      );
+
+      return;
+    }
+
+
+    if (
+      replyPreflightLoading
+    ) {
+
+      setError(
+        "Wait for reply recipients to finish loading."
+      );
+
+      return;
+    }
+
+
+    if (
+      replyRecipients.to.length ===
+      0
+    ) {
+
+      setError(
+        "Add at least one To recipient."
       );
 
       return;
@@ -1735,6 +2006,27 @@ export default function Inbox() {
           replyMode
         );
 
+        formData.append(
+          "to",
+          serializeRecipients(
+            replyRecipients.to
+          )
+        );
+
+        formData.append(
+          "cc",
+          serializeRecipients(
+            replyRecipients.cc
+          )
+        );
+
+        formData.append(
+          "bcc",
+          serializeRecipients(
+            replyRecipients.bcc
+          )
+        );
+
 
         for (
           const file
@@ -1756,6 +2048,7 @@ export default function Inbox() {
           requestConfig
         );
 
+
       } else {
 
         await axios.post(
@@ -1766,6 +2059,15 @@ export default function Inbox() {
 
             mode:
               replyMode,
+
+            to:
+              replyRecipients.to,
+
+            cc:
+              replyRecipients.cc,
+
+            bcc:
+              replyRecipients.bcc,
           },
           requestConfig
         );
@@ -1780,6 +2082,14 @@ export default function Inbox() {
       setReplyBody("");
 
       setReplyFiles([]);
+
+      setReplyRecipients({
+        to: [],
+        cc: [],
+        bcc: [],
+      });
+
+      setReplyPreflightError("");
 
       setShowReply(false);
 
@@ -3071,33 +3381,33 @@ export default function Inbox() {
 
   return (
 
-    <div className="min-h-[calc(100vh-118px)] bg-slate-50/70 p-3 sm:p-4 lg:p-5">
+    <div className="min-h-[calc(100vh-104px)] bg-slate-50/70 p-2.5 sm:p-3">
 
-      <div className="mx-auto flex min-h-[720px] max-w-[1680px] flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm lg:h-[calc(100vh-154px)] lg:flex-row">
+      <div className="mx-auto flex min-h-[560px] max-w-[1680px] flex-col overflow-hidden rounded-[22px] border border-slate-200 bg-white shadow-sm lg:h-[calc(100vh-122px)] lg:min-h-0 lg:flex-row">
 
 
         {/* ===================================================
             MAILBOX / CONVERSATION RAIL
         ==================================================== */}
 
-        <aside className="flex min-h-0 w-full shrink-0 flex-col border-b border-slate-200 bg-white lg:w-[390px] lg:border-b-0 lg:border-r">
+        <aside className="flex min-h-0 w-full shrink-0 flex-col border-b border-slate-200 bg-white lg:w-[340px] lg:border-b-0 lg:border-r">
 
           {/* ===============================================
               WORKSPACE CONTROL
           ================================================ */}
 
-          <div className="border-b border-slate-100 px-4 py-4">
+          <div className="border-b border-slate-100 px-3 py-2">
 
             <div className="flex items-center justify-between gap-3">
 
               <div>
 
-                <p className="text-[10px] font-semibold uppercase tracking-[0.17em] text-slate-400">
-                  Connected communication
+                <p className="sr-only">
+                  Unified communication
                 </p>
 
-                <h2 className="mt-1 text-base font-semibold tracking-tight text-slate-950">
-                  Mail workspace
+                <h2 className="text-sm font-semibold tracking-tight text-slate-950">
+                  Unified Inbox
                 </h2>
 
               </div>
@@ -3161,7 +3471,7 @@ export default function Inbox() {
                   );
 
                 }}
-                className="rounded-xl bg-slate-950 px-3.5 py-2.5 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800"
+                className="rounded-lg bg-slate-950 px-2.5 py-1.5 text-[10px] font-semibold text-white shadow-sm transition hover:bg-slate-800"
               >
                 + Compose
               </button>
@@ -3173,9 +3483,9 @@ export default function Inbox() {
                 COMPACT PROVIDER HEALTH
             ============================================== */}
 
-            <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2.5">
+            <div className="mt-1.5 rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
 
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <div className="grid grid-cols-2 gap-2">
 
                 {[
                   {
@@ -3212,7 +3522,10 @@ export default function Inbox() {
                         key={
                           provider.provider
                         }
-                        className="flex min-w-0 items-center gap-2"
+                        title={formatSyncStatus(
+                          provider.provider
+                        )}
+                        className="flex min-w-0 items-center gap-1.5"
                       >
 
                         <span
@@ -3224,12 +3537,12 @@ export default function Inbox() {
                         />
 
 
-                        <span className="text-[11px] font-semibold text-slate-700">
+                        <span className="truncate text-[10px] font-semibold text-slate-700">
                           {provider.label}
                         </span>
 
 
-                        <span className="max-w-[180px] truncate text-[10px] text-slate-400">
+                        <span className="sr-only">
                           {formatSyncStatus(
                             provider.provider
                           )}
@@ -3245,7 +3558,7 @@ export default function Inbox() {
                                 provider.provider
                               )
                             }
-                            className="text-[10px] font-semibold text-slate-600 hover:text-slate-950"
+                            className="ml-auto text-[9px] font-semibold text-slate-600 hover:text-slate-950"
                           >
                             Connect
                           </button>
@@ -3262,7 +3575,7 @@ export default function Inbox() {
                                 provider.provider
                               )
                             }
-                            className="text-[10px] font-semibold text-slate-600 hover:text-slate-950 disabled:cursor-wait disabled:opacity-50"
+                            className="ml-auto text-[9px] font-semibold text-slate-600 hover:text-slate-950 disabled:cursor-wait disabled:opacity-50"
                           >
                             {busy
                               ? "Syncing..."
@@ -3283,7 +3596,7 @@ export default function Inbox() {
 
               {syncNotice && (
 
-                <p className="mt-2 border-t border-slate-200 pt-2 text-[10px] leading-4 text-slate-500">
+                <p className="mt-1 truncate border-t border-slate-200 pt-1 text-[9px] leading-3 text-slate-500">
                   {syncNotice}
                 </p>
 
@@ -3296,9 +3609,9 @@ export default function Inbox() {
                 ACCOUNT FILTER
             ============================================== */}
 
-            <div className="mt-3">
+            <div className="mt-1.5">
 
-              <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-400">
+              <label className="sr-only">
                 View mailbox
               </label>
 
@@ -3311,7 +3624,7 @@ export default function Inbox() {
                     event.target.value
                   )
                 }
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-medium text-slate-700 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
+                className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-slate-700 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
               >
 
                 <option value="">
@@ -3350,9 +3663,9 @@ export default function Inbox() {
               FOLDER NAVIGATION
           ================================================ */}
 
-          <div className="border-b border-slate-100 px-4 py-3">
+          <div className="border-b border-slate-100 px-3 py-2">
 
-            <div className="grid grid-cols-3 rounded-xl bg-slate-100 p-1">
+            <div className="grid grid-cols-3 rounded-lg bg-slate-100 p-0.5">
 
               {[
                 [
@@ -3411,7 +3724,7 @@ export default function Inbox() {
                       }
 
                     }}
-                    className={`rounded-lg px-2 py-2 text-xs font-semibold transition ${
+                    className={`rounded-md px-2 py-1.5 text-[11px] font-semibold transition ${
                       activeTab ===
                       value
                         ? "bg-white text-slate-950 shadow-sm"
@@ -3430,7 +3743,7 @@ export default function Inbox() {
             {activeTab !==
               "draft" && (
 
-              <div className="mt-3">
+              <div className="mt-2">
 
                 <input
                   value={
@@ -3446,7 +3759,7 @@ export default function Inbox() {
                       ? "Search this mailbox..."
                       : "Search all connected mailboxes..."
                   }
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-100"
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-[11px] text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-slate-300 focus:bg-white focus:ring-2 focus:ring-slate-100"
                 />
 
               </div>
@@ -3465,7 +3778,7 @@ export default function Inbox() {
             conversations.length >
               0 && (
 
-              <div className="border-b border-slate-100 px-4 py-2.5">
+              <div className="border-b border-slate-100 px-3 py-1.5">
 
                 <div className="flex flex-wrap items-center gap-2">
 
@@ -3478,7 +3791,7 @@ export default function Inbox() {
                     onClick={
                       toggleSelectAll
                     }
-                    className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-50"
+                    className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[9px] font-semibold text-slate-600 hover:bg-slate-50"
                   >
                     {selectedConversationIds.length ===
                     conversations.length
@@ -3668,7 +3981,7 @@ export default function Inbox() {
                               conversation.conversation_id
                             )
                           }
-                          className="block w-full px-4 py-4 text-left"
+                          className="block w-full px-3 py-2.5 text-left"
                         >
 
                           <div className="flex items-start gap-3">
@@ -3751,7 +4064,7 @@ export default function Inbox() {
 
 
                               <p
-                                className={`mt-1 line-clamp-2 text-xs leading-5 ${
+                                className={`mt-1 line-clamp-1 text-xs leading-5 ${
                                   active
                                     ? "text-slate-300"
                                     : "text-slate-500"
@@ -3901,9 +4214,9 @@ export default function Inbox() {
                   CONVERSATION HEADER
               ============================================== */}
 
-              <div className="border-b border-slate-200 bg-white px-4 py-4 sm:px-5 lg:px-6">
+              <div className="border-b border-slate-200 bg-white px-4 py-3 sm:px-5">
 
-                <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
 
                   <div className="min-w-0">
 
@@ -3928,7 +4241,7 @@ export default function Inbox() {
                     </div>
 
 
-                    <h2 className="mt-2 max-w-4xl truncate text-lg font-semibold tracking-tight text-slate-950 sm:text-xl">
+                    <h2 className="mt-1.5 max-w-4xl truncate text-base font-semibold tracking-tight text-slate-950 sm:text-lg">
                       {conversations.find(
                         (conversation) =>
                           conversation.conversation_id ===
@@ -3953,21 +4266,8 @@ export default function Inbox() {
                         type="button"
                         onClick={() => {
 
-                          setError(
-                            ""
-                          );
-
-                          replyIdempotencyKeyRef.current =
-                            "";
-
-                          setReplyMode(
+                          beginReply(
                             "reply"
-                          );
-
-                          setReplyFiles([]);
-
-                          setShowReply(
-                            true
                           );
 
                         }}
@@ -3981,21 +4281,8 @@ export default function Inbox() {
                         type="button"
                         onClick={() => {
 
-                          setError(
-                            ""
-                          );
-
-                          replyIdempotencyKeyRef.current =
-                            "";
-
-                          setReplyMode(
+                          beginReply(
                             "reply_all"
-                          );
-
-                          setReplyFiles([]);
-
-                          setShowReply(
-                            true
                           );
 
                         }}
@@ -4016,66 +4303,70 @@ export default function Inbox() {
                       </button>
 
 
-                      <button
-                        type="button"
-                        onClick={
-                          markConversationUnread
-                        }
-                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
-                      >
-                        Mark unread
-                      </button>
+                      <details className="relative">
+                        <summary
+                          className="cursor-pointer list-none rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                          title="More conversation actions"
+                        >
+                          More
+                        </summary>
+
+                        <div className="absolute right-0 z-30 mt-2 w-48 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl">
+
+                          <button
+                            type="button"
+                            onClick={
+                              markConversationUnread
+                            }
+                            className="block w-full rounded-lg px-3 py-2 text-left text-xs font-medium text-slate-600 hover:bg-slate-50"
+                          >
+                            Mark unread
+                          </button>
 
 
-                      <button
-                        type="button"
-                        onClick={
-                          toggleSelectedConversationStar
-                        }
-                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
-                      >
-                        {conversations.find(
-                          (conversation) =>
-                            conversation.conversation_id ===
-                            selectedId
-                        )?.is_starred
-                          ? "Unstar"
-                          : "Star"}
-                      </button>
+                          <button
+                            type="button"
+                            onClick={
+                              toggleSelectedConversationStar
+                            }
+                            className="block w-full rounded-lg px-3 py-2 text-left text-xs font-medium text-slate-600 hover:bg-slate-50"
+                          >
+                            {conversations.find(
+                              (conversation) =>
+                                conversation.conversation_id ===
+                                selectedId
+                            )?.is_starred
+                              ? "Unstar"
+                              : "Star"}
+                          </button>
 
 
-                      <button
-                        type="button"
-                        onClick={
-                          openSelectedMessageInProvider
-                        }
-                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
-                      >
-                        {messages[
-                          messages.length -
-                          1
-                        ]?.platform ===
-                        "gmail"
-                          ? "Open Gmail"
-                          : messages[
-                              messages.length -
-                              1
-                            ]?.platform ===
-                            "outlook"
-                          ? "Open Outlook"
-                          : "Open Provider"}
-                      </button>
+                          <button
+                            type="button"
+                            onClick={
+                              openSelectedMessageInProvider
+                            }
+                            className="block w-full rounded-lg px-3 py-2 text-left text-xs font-medium text-slate-600 hover:bg-slate-50"
+                          >
+                            Open Provider
+                          </button>
 
 
-                      <button
-                        type="button"
-                        onClick={
-                          trashSelectedConversation
-                        }
-                        className="rounded-xl border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50"
-                      >
-                        Trash
-                      </button>
+                          <div className="my-1 border-t border-slate-100" />
+
+
+                          <button
+                            type="button"
+                            onClick={
+                              trashSelectedConversation
+                            }
+                            className="block w-full rounded-lg px-3 py-2 text-left text-xs font-semibold text-rose-700 hover:bg-rose-50"
+                          >
+                            Trash
+                          </button>
+
+                        </div>
+                      </details>
 
                     </div>
 
@@ -4859,7 +5150,7 @@ export default function Inbox() {
 
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-[2px]">
 
-          <div className="w-full max-w-xl overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-2xl">
+          <div className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-2xl">
 
             <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
 
@@ -4910,7 +5201,116 @@ export default function Inbox() {
             </div>
 
 
-            <div className="space-y-4 px-5 py-5">
+            <div className="min-h-0 space-y-4 overflow-y-auto px-5 py-5">
+
+              <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3">
+
+                <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+
+                  <div>
+
+                    <p className="text-xs font-semibold text-slate-800">
+                      Recipients
+                    </p>
+
+                    <p className="mt-0.5 text-[10px] leading-4 text-slate-500">
+                      Defaults are derived from the latest message. Edit before sending.
+                    </p>
+
+                  </div>
+
+
+                  <span className="rounded-full bg-white px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                    {replyMode === "reply_all"
+                      ? "Reply All"
+                      : "Reply"}
+                  </span>
+
+                </div>
+
+
+                {replyPreflightLoading && (
+
+                  <div className="mb-3 rounded-xl border border-sky-100 bg-sky-50 px-3 py-2 text-xs text-sky-700">
+                    Loading governed recipients...
+                  </div>
+
+                )}
+
+
+                {replyPreflightError && (
+
+                  <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-700">
+                    {replyPreflightError}
+                  </div>
+
+                )}
+
+
+                <div
+                  className={`space-y-2 ${
+                    replying
+                      ? "pointer-events-none opacity-60"
+                      : ""
+                  }`}
+                  aria-busy={
+                    replying
+                  }
+                >
+
+                  <RecipientChipInput
+                    label="To"
+                    value={
+                      replyRecipients.to
+                    }
+                    onChange={(value) =>
+                      updateReplyRecipientBucket(
+                        "to",
+                        value
+                      )
+                    }
+                    placeholder="Add reply recipients"
+                  />
+
+
+                  <RecipientChipInput
+                    label="Cc"
+                    value={
+                      replyRecipients.cc
+                    }
+                    onChange={(value) =>
+                      updateReplyRecipientBucket(
+                        "cc",
+                        value
+                      )
+                    }
+                    placeholder="Add Cc recipients"
+                  />
+
+
+                  <RecipientChipInput
+                    label="Bcc"
+                    value={
+                      replyRecipients.bcc
+                    }
+                    onChange={(value) =>
+                      updateReplyRecipientBucket(
+                        "bcc",
+                        value
+                      )
+                    }
+                    placeholder="Add Bcc recipients"
+                  />
+
+                </div>
+
+
+                <p className="mt-2 text-[10px] leading-4 text-slate-400">
+                  Bcc from the original message is never inherited automatically.
+                </p>
+
+              </div>
+
 
               <textarea
                 rows={9}
@@ -5064,6 +5464,8 @@ export default function Inbox() {
                 }
                 disabled={
                   replying ||
+                  replyPreflightLoading ||
+                  replyRecipients.to.length === 0 ||
                   !replyBody.trim()
                 }
                 className="rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"

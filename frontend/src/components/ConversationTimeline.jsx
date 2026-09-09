@@ -259,13 +259,13 @@ export default function ConversationTimeline({
       <div className="border-b border-slate-100 px-4 py-4">
 
         <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-          Accountability context
+          Execution trail
         </p>
 
         <div className="mt-1 flex items-center justify-between gap-3">
 
           <h3 className="text-sm font-semibold text-slate-900">
-            Conversation timeline
+            Communication to execution
           </h3>
 
           {!loading && (
@@ -279,7 +279,7 @@ export default function ConversationTimeline({
         </div>
 
         <p className="mt-1.5 text-xs leading-5 text-slate-400">
-          Communication and execution events linked to this thread.
+          Follow this thread from communication through decisions, actions and follow-ups.
         </p>
 
       </div>

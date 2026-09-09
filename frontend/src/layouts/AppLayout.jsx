@@ -15,6 +15,7 @@ import {
   AlertTriangle,
   Bell,
   Briefcase,
+  CircleHelp,
   CheckSquare2,
   Clock3,
   Command,
@@ -24,6 +25,8 @@ import {
   LogOut,
   Mail,
   Menu,
+  PanelLeftClose,
+  PanelLeftOpen,
   Scale,
   Search,
   Settings,
@@ -130,7 +133,7 @@ const PAGE_CONTEXT = [
     eyebrow: "Workspace",
     title: "Dashboard",
     description:
-      "Communication intelligence at a glance.",
+      "Execution priorities, decisions and response obligations at a glance.",
   },
   {
     match: (path) =>
@@ -264,6 +267,179 @@ const PAGE_CONTEXT = [
   },
 ];
 
+const PAGE_GUIDANCE = {
+  "/dashboard": {
+    useWhen:
+      "Start here when you want the fastest view of what requires attention or execution now.",
+    actions: [
+      "Review active Actions and Approvals",
+      "See work due today or already overdue",
+      "Check follow-ups, escalations and SLA health",
+      "Jump into Inbox or Attention Center",
+    ],
+    flow:
+      "Dashboard is the command layer above communication, decisions and execution.",
+  },
+
+  "/inbox": {
+    useWhen:
+      "Use this page when you need the original communication context or need to respond from a connected mailbox.",
+    actions: [
+      "Read communication across connected mailboxes",
+      "Search Inbox, Sent and Drafts",
+      "Reply, Reply All or Forward",
+      "Review the execution trail beside a conversation",
+    ],
+    flow:
+      "Inbox provides communication context. One UCH turns that context into governed Actions, Approvals and follow-ups.",
+  },
+
+  "/attention": {
+    useWhen:
+      "Use this page when work may slip, needs intervention or has crossed a risk boundary.",
+    actions: [
+      "Review overdue or escalated work",
+      "Identify SLA warnings and breaches",
+      "Open the responsible work item",
+    ],
+    flow:
+      "Attention Center highlights exceptions while execution remains in the underlying work page.",
+  },
+
+  "/my-work": {
+    useWhen:
+      "Use this page for execution responsibilities assigned to you.",
+    actions: [
+      "Review assigned work",
+      "Prioritize due and overdue responsibilities",
+      "Open the underlying execution item",
+    ],
+    flow:
+      "My Work is your personal view of the wider One UCH execution model.",
+  },
+
+  "/actions": {
+    useWhen:
+      "Use this page when communication has become owned work requiring a responsible person, due date and lifecycle.",
+    actions: [
+      "Review active Actions",
+      "Assign ownership and due dates",
+      "Complete, ignore, reopen or snooze governed work",
+      "Review suggestions before promoting them",
+    ],
+    flow:
+      "Action Center converts communication into accountable execution while keeping suggestions human governed.",
+  },
+
+  "/approvals": {
+    useWhen:
+      "Use this page when a business request needs an explicit human decision before work proceeds.",
+    actions: [
+      "Review active Approvals",
+      "Assign a reviewer",
+      "Approve, reject or request more information",
+      "Preserve decision rationale",
+    ],
+    flow:
+      "Approval Center is the human-governance gate between communication and execution.",
+  },
+
+  "/commitments": {
+    useWhen:
+      "Use this page to keep communication-backed promises and obligations visible.",
+    actions: [
+      "Review commitments",
+      "Track ownership and expected completion",
+      "Open supporting communication",
+    ],
+    flow:
+      "Commitments keep promises accountable even before they become formal Actions.",
+  },
+
+  "/waiting-for": {
+    useWhen:
+      "Use this page when progress depends on somebody else's response or action.",
+    actions: [
+      "Track expected responses",
+      "Review follow-up obligations",
+      "Open related communication",
+    ],
+    flow:
+      "Waiting For separates external dependencies from work you directly own.",
+  },
+
+  "/decisions": {
+    useWhen:
+      "Use this page when you need the durable record of what was decided and why.",
+    actions: [
+      "Review communication-backed decisions",
+      "Trace decision context",
+      "Use previous decisions as organizational knowledge",
+    ],
+    flow:
+      "Decisions preserve outcomes after immediate approval work is complete.",
+  },
+
+  "/relationships": {
+    useWhen:
+      "Use this page when people, roles and communication patterns matter to understanding work.",
+    actions: [
+      "Review relationship context",
+      "Understand communication patterns",
+      "Connect people to business activity",
+    ],
+    flow:
+      "Relationships provide organizational context around communication and execution.",
+  },
+
+  "/workflows": {
+    useWhen:
+      "Use this page when a repeated business process should become governed execution.",
+    actions: [
+      "Review workflow definitions",
+      "Inspect execution paths",
+      "Review workflow runtime and history",
+    ],
+    flow:
+      "Workflows turn repeated communication-driven processes into deterministic execution.",
+  },
+
+  "/settings": {
+    useWhen:
+      "Use this page to configure the workspace and connected communication accounts.",
+    actions: [
+      "Manage connected mailboxes",
+      "Review workspace configuration",
+      "Control supported communication settings",
+    ],
+    flow:
+      "Settings configures One UCH while operational work remains in execution pages.",
+  },
+
+  "/notifications": {
+    useWhen:
+      "Use this page to review recent One UCH updates that may need your attention.",
+    actions: [
+      "Review notifications",
+      "Open the related work or communication",
+    ],
+    flow:
+      "Notifications point toward activity; the underlying page remains the source of truth.",
+  },
+
+  "/search": {
+    useWhen:
+      "Use this page when you know what you are looking for but not where it lives in One UCH.",
+    actions: [
+      "Search communication and execution records",
+      "Open the matching source item",
+    ],
+    flow:
+      "Search crosses modules while every result remains governed by its source page.",
+  },
+};
+
+
 
 function ProductMark() {
 
@@ -327,6 +503,40 @@ export default function AppLayout() {
   ] = useState(false);
 
 
+  const [
+    desktopSidebarCollapsed,
+    setDesktopSidebarCollapsed,
+  ] = useState(
+    () =>
+      window.localStorage.getItem(
+        "oneuch_sidebar_collapsed"
+      ) === "true"
+  );
+
+
+  const [
+    helpOpen,
+    setHelpOpen,
+  ] = useState(false);
+
+
+  useEffect(
+    () => {
+
+      window.localStorage.setItem(
+        "oneuch_sidebar_collapsed",
+        desktopSidebarCollapsed
+          ? "true"
+          : "false"
+      );
+
+    },
+    [
+      desktopSidebarCollapsed,
+    ]
+  );
+
+
   const pageContext = (
     useMemo(
       () => {
@@ -348,6 +558,48 @@ export default function AppLayout() {
 
             description:
               "Communication, intelligence and execution in one workspace.",
+          }
+        );
+
+      },
+      [
+        location.pathname,
+      ]
+    )
+  );
+
+
+  const pageHelp = (
+    useMemo(
+      () => {
+
+        const match = (
+          Object.entries(
+            PAGE_GUIDANCE
+          ).find(
+            (
+              [
+                path,
+              ]
+            ) =>
+              location.pathname.startsWith(
+                path
+              )
+          )
+        );
+
+        return (
+          match?.[1]
+          ||
+          {
+            useWhen:
+              "Use this page to work with the current One UCH capability.",
+            actions: [
+              "Review the information shown here",
+              "Open the underlying communication or execution item when needed",
+            ],
+            flow:
+              "One UCH connects communication, intelligence, governance and execution in one workspace.",
           }
         );
 
@@ -484,7 +736,15 @@ export default function AppLayout() {
     }) => {
 
       const base =
-        "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors";
+        (
+          "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors"
+          +
+          (
+            desktopSidebarCollapsed
+              ? " lg:justify-center lg:px-2"
+              : ""
+          )
+        );
 
 
       return (
@@ -509,7 +769,7 @@ export default function AppLayout() {
       <div
         className="
           flex
-          h-[72px]
+          h-[60px]
           items-center
           justify-between
           border-b
@@ -526,7 +786,13 @@ export default function AppLayout() {
         >
           <ProductMark />
 
-          <div>
+          <div
+            className={
+              desktopSidebarCollapsed
+                ? "lg:hidden"
+                : ""
+            }
+          >
             <div
               className="
                 text-sm
@@ -597,15 +863,11 @@ export default function AppLayout() {
                 className="mb-5"
               >
                 <div
-                  className="
-                    mb-1.5
-                    px-3
-                    text-[10px]
-                    font-semibold
-                    uppercase
-                    tracking-[0.18em]
-                    text-slate-400
-                  "
+                  className={`mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400 ${
+                    desktopSidebarCollapsed
+                      ? "lg:hidden"
+                      : ""
+                  }`}
                 >
                   {
                     section.label
@@ -635,6 +897,16 @@ export default function AppLayout() {
                             to={
                               item.to
                             }
+                            title={
+                              desktopSidebarCollapsed
+                                ? item.label
+                                : undefined
+                            }
+                            aria-label={
+                              desktopSidebarCollapsed
+                                ? item.label
+                                : undefined
+                            }
                             onClick={() => {
                               setSidebarOpen(
                                 false
@@ -663,7 +935,13 @@ export default function AppLayout() {
                                     }
                                   />
 
-                                  <span>
+                                  <span
+                                    className={
+                                      desktopSidebarCollapsed
+                                        ? "lg:hidden"
+                                        : ""
+                                    }
+                                  >
                                     {
                                       item.label
                                     }
@@ -729,9 +1007,11 @@ export default function AppLayout() {
             </div>
 
             <div
-              className="
-                min-w-0
-              "
+              className={
+                desktopSidebarCollapsed
+                  ? "min-w-0 lg:hidden"
+                  : "min-w-0"
+              }
             >
               <div
                 className="
@@ -785,7 +1065,15 @@ export default function AppLayout() {
               size={15}
             />
 
-            Sign out
+            <span
+              className={
+                desktopSidebarCollapsed
+                  ? "lg:hidden"
+                  : ""
+              }
+            >
+              Sign out
+            </span>
           </button>
         </div>
       </div>
@@ -826,6 +1114,162 @@ export default function AppLayout() {
       }
 
 
+
+
+      {
+        helpOpen && (
+          <>
+            <button
+              type="button"
+              className="
+                fixed
+                inset-0
+                z-50
+                bg-slate-950/25
+                backdrop-blur-[1px]
+              "
+              onClick={() =>
+                setHelpOpen(
+                  false
+                )
+              }
+              aria-label="Close page help"
+            />
+
+            <aside
+              className="
+                fixed
+                inset-y-0
+                right-0
+                z-[60]
+                flex
+                w-full
+                max-w-md
+                flex-col
+                border-l
+                border-slate-200
+                bg-white
+                shadow-2xl
+              "
+              aria-label="Page help"
+            >
+
+              <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-5">
+
+                <div>
+
+                  <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                    <CircleHelp size={15} />
+                    One UCH guide
+                  </div>
+
+                  <h2 className="mt-2 text-xl font-semibold tracking-tight text-slate-950">
+                    {pageContext.title}
+                  </h2>
+
+                </div>
+
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setHelpOpen(
+                      false
+                    )
+                  }
+                  className="rounded-xl border border-slate-200 bg-white p-2 text-slate-500 hover:bg-slate-50 hover:text-slate-950"
+                  aria-label="Close help"
+                >
+                  <X size={18} />
+                </button>
+
+              </div>
+
+
+              <div className="flex-1 space-y-5 overflow-y-auto px-5 py-5">
+
+                <section className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-400">
+                    What is this page for?
+                  </p>
+
+                  <p className="mt-2 text-sm leading-6 text-slate-700">
+                    {pageContext.description}
+                  </p>
+
+                </section>
+
+
+                <section>
+
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-400">
+                    When should I use it?
+                  </p>
+
+                  <p className="mt-2 text-sm leading-6 text-slate-700">
+                    {pageHelp.useWhen}
+                  </p>
+
+                </section>
+
+
+                <section>
+
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-400">
+                    What can I do here?
+                  </p>
+
+                  <div className="mt-3 space-y-2">
+
+                    {pageHelp.actions.map(
+                      (
+                        action,
+                        index
+                      ) => (
+
+                        <div
+                          key={action}
+                          className="flex gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5"
+                        >
+
+                          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-slate-950 text-[9px] font-bold text-white">
+                            {index + 1}
+                          </span>
+
+                          <span className="text-xs leading-5 text-slate-600">
+                            {action}
+                          </span>
+
+                        </div>
+
+                      )
+                    )}
+
+                  </div>
+
+                </section>
+
+
+                <section className="rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4">
+
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-indigo-500">
+                    How it fits into One UCH
+                  </p>
+
+                  <p className="mt-2 text-sm leading-6 text-slate-700">
+                    {pageHelp.flow}
+                  </p>
+
+                </section>
+
+              </div>
+
+            </aside>
+          </>
+        )
+      }
+
       {/* Mobile sidebar */}
       <aside
         className={`
@@ -865,19 +1309,25 @@ export default function AppLayout() {
 
         {/* Desktop sidebar */}
         <aside
-          className="
+          className={`
             sticky
             top-0
             hidden
             h-screen
-            w-72
             shrink-0
             flex-col
             border-r
             border-slate-200
             bg-white
+            transition-[width]
+            duration-200
             lg:flex
-          "
+            ${
+              desktopSidebarCollapsed
+                ? "w-20"
+                : "w-72"
+            }
+          `}
         >
           {
             sidebar
@@ -909,7 +1359,7 @@ export default function AppLayout() {
             <div
               className="
                 flex
-                min-h-[72px]
+                min-h-[60px]
                 items-center
                 gap-3
                 px-4
@@ -940,6 +1390,54 @@ export default function AppLayout() {
                 <Menu
                   size={19}
                 />
+              </button>
+
+
+              <button
+                type="button"
+                onClick={() =>
+                  setDesktopSidebarCollapsed(
+                    (current) =>
+                      !current
+                  )
+                }
+                className="
+                  hidden
+                  rounded-xl
+                  border
+                  border-slate-200
+                  bg-white
+                  p-2
+                  text-slate-600
+                  shadow-sm
+                  hover:bg-slate-50
+                  hover:text-slate-950
+                  lg:inline-flex
+                "
+                aria-label={
+                  desktopSidebarCollapsed
+                    ? "Expand navigation"
+                    : "Collapse navigation"
+                }
+                title={
+                  desktopSidebarCollapsed
+                    ? "Expand navigation"
+                    : "Collapse navigation"
+                }
+              >
+                {
+                  desktopSidebarCollapsed
+                    ? (
+                      <PanelLeftOpen
+                        size={18}
+                      />
+                    )
+                    : (
+                      <PanelLeftClose
+                        size={18}
+                      />
+                    )
+                }
               </button>
 
 
@@ -1098,6 +1596,48 @@ export default function AppLayout() {
               <button
                 type="button"
                 onClick={() =>
+                  setHelpOpen(
+                    true
+                  )
+                }
+                className="
+                  inline-flex
+                  items-center
+                  gap-2
+                  rounded-xl
+                  border
+                  border-slate-200
+                  bg-white
+                  p-2.5
+                  text-slate-600
+                  shadow-sm
+                  hover:bg-slate-50
+                  hover:text-slate-950
+                  xl:px-3
+                "
+                aria-label="Help for this page"
+                title="Help for this page"
+              >
+                <CircleHelp
+                  size={18}
+                />
+
+                <span
+                  className="
+                    hidden
+                    text-xs
+                    font-semibold
+                    xl:inline
+                  "
+                >
+                  Help
+                </span>
+              </button>
+
+
+              <button
+                type="button"
+                onClick={() =>
                   navigate(
                     "/notifications"
                   )
@@ -1217,19 +1757,19 @@ export default function AppLayout() {
             className="
               border-b
               border-slate-100
-              bg-white
+              bg-slate-50/70
               px-4
-              py-3
+              py-1
               sm:px-6
             "
           >
             <p
               className="
-                max-w-4xl
-                text-xs
-                leading-5
+                max-w-5xl
+                text-[11px]
+                leading-4
                 text-slate-500
-                sm:text-sm
+                sm:text-xs
               "
             >
               {

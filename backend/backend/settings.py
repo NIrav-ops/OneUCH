@@ -14,6 +14,10 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
+from corsheaders.defaults import (
+    default_headers,
+)
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
@@ -165,6 +169,20 @@ CORS_ALLOW_CREDENTIALS = os.environ.get(
     "1",
     "true",
     "yes",
+)
+
+
+# Browser-session requests use a dedicated CSRF proof header.
+#
+# django-cors-headers does not include X-OneUCH-CSRF in its
+# default allow-list, so cross-origin browser login would be
+# blocked by the browser preflight before reaching Django.
+#
+# Preserve every package default and add only the One UCH
+# browser-session header required by the frontend.
+CORS_ALLOW_HEADERS = (
+    *default_headers,
+    "x-oneuch-csrf",
 )
 
 ROOT_URLCONF = 'backend.urls'
@@ -457,6 +475,34 @@ AUTH_IDENTITY_SIGNIN_ENABLED = (
         "on",
     }
 )
+
+AUTH_GOVERNED_REGISTRATION_ENABLED = (
+    os.environ.get(
+        "AUTH_GOVERNED_REGISTRATION_ENABLED",
+        "false",
+    ).strip().lower()
+    in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+)
+
+ONEUCH_PRIVACY_NOTICE_VERSION = (
+    os.environ.get(
+        "ONEUCH_PRIVACY_NOTICE_VERSION",
+        "",
+    ).strip()
+)
+
+ONEUCH_TERMS_VERSION = (
+    os.environ.get(
+        "ONEUCH_TERMS_VERSION",
+        "",
+    ).strip()
+)
+
 
 AUTH_IDENTITY_STATE_MAX_AGE_SECONDS = int(
     os.environ.get(

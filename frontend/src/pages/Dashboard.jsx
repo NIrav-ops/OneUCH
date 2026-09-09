@@ -2,6 +2,18 @@ import { useEffect, useMemo, useState } from "react";
 import axios from "../axiosConfig";
 import { useNavigate } from "react-router-dom";
 
+const ACTIVE_ACTION_STATUSES = [
+  "open",
+  "in_progress",
+  "waiting",
+  "blocked",
+];
+
+const ACTIVE_APPROVAL_STATUSES = [
+  "pending",
+  "needs_info",
+];
+
 export default function Dashboard() {
   const navigate = useNavigate();
 
@@ -13,8 +25,6 @@ export default function Dashboard() {
   const [followups, setFollowups] = useState([]);
   const [priorityMessages, setPriorityMessages] = useState([]);
 
-  const [messageCount, setMessageCount] = useState(0);
-  const [unreadCount, setUnreadCount] = useState(0);
   const [priorityCount, setPriorityCount] = useState(0);
   const [escalatedCount, setEscalatedCount] = useState(0);
   const [dashboardStats, setDashboardStats] = useState({});
@@ -27,16 +37,12 @@ export default function Dashboard() {
         actionsRes,
         approvalsRes,
         followupsRes,
-        inboxRes,
-        unreadRes,
         priorityRes,
         dashboardRes,
       ] = await Promise.all([
         axios.get("/api/actions/"),
         axios.get("/api/approvals/"),
         axios.get("/api/actions/followups/"),
-        axios.get("/api/inbox/unified/?page=1"),
-        axios.get("/api/inbox/unified/?unread=true&page=1"),
         axios.get("/api/inbox/unified/?priority=true&page=1"),
         axios.get("/api/dashboard/"),
       ]);
@@ -46,8 +52,6 @@ export default function Dashboard() {
       setFollowups(Array.isArray(followupsRes.data) ? followupsRes.data : []);
       setPriorityMessages(priorityRes.data?.results || []);
 
-      setMessageCount(inboxRes.data?.count || 0);
-      setUnreadCount(unreadRes.data?.count || 0);
       setPriorityCount(priorityRes.data?.count || 0);
 
       const escalatedActions =
@@ -87,13 +91,19 @@ export default function Dashboard() {
     fetchData();
   }, []);
 
-  const openActions = useMemo(
-    () => actions.filter((a) => a.status === "open"),
+  const activeActions = useMemo(
+    () =>
+      actions.filter((a) =>
+        ACTIVE_ACTION_STATUSES.includes(a.status)
+      ),
     [actions]
   );
 
-  const pendingApprovals = useMemo(
-    () => approvals.filter((a) => a.status === "pending"),
+  const activeApprovals = useMemo(
+    () =>
+      approvals.filter((a) =>
+        ACTIVE_APPROVAL_STATUSES.includes(a.status)
+      ),
     [approvals]
   );
 
@@ -111,7 +121,7 @@ export default function Dashboard() {
       now.getDate()
     );
 
-    return openActions.filter((a) => {
+    return activeActions.filter((a) => {
       if (!a.due_date) return false;
 
       const due = new Date(a.due_date);
@@ -121,7 +131,7 @@ export default function Dashboard() {
         due < startOfToday
       );
     });
-  }, [openActions]);
+  }, [activeActions]);
 
   const dueTodayActions = useMemo(() => {
     const now = new Date();
@@ -138,7 +148,7 @@ export default function Dashboard() {
       now.getDate() + 1
     );
 
-    return openActions.filter((a) => {
+    return activeActions.filter((a) => {
       if (!a.due_date) return false;
 
       const due = new Date(a.due_date);
@@ -149,9 +159,12 @@ export default function Dashboard() {
         due < startOfTomorrow
       );
     });
-  }, [openActions]);
+  }, [activeActions]);
 
-  const topApprovals = useMemo(() => pendingApprovals.slice(0, 5), [pendingApprovals]);
+  const topApprovals = useMemo(
+    () => activeApprovals.slice(0, 5),
+    [activeApprovals]
+  );
   const topFollowups = useMemo(() => pendingFollowups.slice(0, 5), [pendingFollowups]);
   const topPriorityMessages = useMemo(() => priorityMessages.slice(0, 5), [priorityMessages]);
 
@@ -165,7 +178,7 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="min-h-full bg-slate-50/70 px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
+    <div className="min-h-full bg-slate-50/70 px-3 py-3 sm:px-4 lg:px-5 lg:py-4">
 
       <div className="mx-auto max-w-[1600px]">
 
@@ -173,13 +186,13 @@ export default function Dashboard() {
             COMMAND HEADER
         ==================================================== */}
 
-        <section className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm">
+        <section className="overflow-hidden rounded-[22px] border border-slate-200 bg-white shadow-sm">
 
-          <div className="flex flex-col gap-5 border-b border-slate-100 px-5 py-5 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-7">
+          <div className="flex flex-col gap-3 border-b border-slate-100 px-4 py-3 sm:px-5 lg:flex-row lg:items-center lg:justify-between lg:px-5 lg:py-4">
 
             <div className="max-w-3xl">
 
-              <div className="mb-2 flex items-center gap-2">
+              <div className="mb-1 flex items-center gap-2">
 
                 <span className="h-2 w-2 rounded-full bg-emerald-500" />
 
@@ -189,11 +202,11 @@ export default function Dashboard() {
 
               </div>
 
-              <h1 className="text-2xl font-semibold tracking-tight text-slate-950 sm:text-3xl">
+              <h1 className="text-xl font-semibold tracking-tight text-slate-950 sm:text-2xl">
                 What needs your attention today
               </h1>
 
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
+              <p className="mt-1 max-w-2xl text-xs leading-5 text-slate-500">
                 Communication, accountable work, approvals and response obligations in one operational view.
               </p>
 
@@ -206,10 +219,22 @@ export default function Dashboard() {
                 type="button"
                 onClick={() =>
                   navigate(
+                    "/inbox"
+                  )
+                }
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
+              >
+                Unified Inbox
+              </button>
+
+              <button
+                type="button"
+                onClick={() =>
+                  navigate(
                     "/attention"
                   )
                 }
-                className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
               >
                 Attention Center
               </button>
@@ -217,7 +242,7 @@ export default function Dashboard() {
               <button
                 type="button"
                 onClick={fetchData}
-                className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800"
+                className="rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800"
               >
                 Refresh workspace
               </button>
@@ -240,28 +265,16 @@ export default function Dashboard() {
               PRIMARY KPIs
           ================================================== */}
 
-          <div className="grid gap-px bg-slate-200 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+                    <div className="grid gap-px bg-slate-200 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
 
             {[
               {
                 label:
-                  "Unread",
+                  "Active actions",
                 value:
-                  unreadCount,
+                  activeActions.length,
                 detail:
-                  "Messages needing review",
-                route:
-                  "/inbox",
-                tone:
-                  "text-sky-700",
-              },
-              {
-                label:
-                  "Open actions",
-                value:
-                  openActions.length,
-                detail:
-                  "Active owned work",
+                  "Owned work requiring execution",
                 route:
                   "/actions",
                 tone:
@@ -293,11 +306,11 @@ export default function Dashboard() {
               },
               {
                 label:
-                  "Approvals",
+                  "Active approvals",
                 value:
-                  pendingApprovals.length,
+                  activeApprovals.length,
                 detail:
-                  "Waiting for a decision",
+                  "Decision or information required",
                 route:
                   "/approvals",
                 tone:
@@ -315,6 +328,18 @@ export default function Dashboard() {
                 tone:
                   "text-emerald-700",
               },
+              {
+                label:
+                  "Escalated",
+                value:
+                  escalatedCount,
+                detail:
+                  "Requires intervention",
+                route:
+                  "/attention",
+                tone:
+                  "text-rose-700",
+              },
             ].map(
               (metric) => (
 
@@ -328,18 +353,18 @@ export default function Dashboard() {
                       metric.route
                     )
                   }
-                  className="bg-white px-5 py-5 text-left transition hover:bg-slate-50"
+                  className="bg-white px-4 py-3 text-left transition hover:bg-slate-50"
                 >
 
-                  <p className="text-xs font-semibold text-slate-500">
+                  <p className="text-[11px] font-semibold text-slate-500">
                     {metric.label}
                   </p>
 
-                  <p className={`mt-2 text-3xl font-semibold tracking-tight ${metric.tone}`}>
+                  <p className={`mt-1.5 text-2xl font-semibold tracking-tight ${metric.tone}`}>
                     {metric.value}
                   </p>
 
-                  <p className="mt-1 text-[11px] leading-4 text-slate-400">
+                  <p className="mt-1 text-[10px] leading-4 text-slate-400">
                     {metric.detail}
                   </p>
 
@@ -357,32 +382,40 @@ export default function Dashboard() {
             SECONDARY HEALTH
         ==================================================== */}
 
-        <section className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+                <section className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
 
           {[
             [
-              "Messages",
-              messageCount,
-            ],
-            [
-              "Priority",
-              priorityCount,
-            ],
-            [
-              "Escalated",
-              escalatedCount,
-            ],
-            [
-              "Assigned",
+              "Open",
               actions.filter(
                 (item) =>
-                  item.owner_email
+                  item.status ===
+                  "open"
               ).length,
             ],
             [
-              "SLA healthy",
-              dashboardStats.sla_healthy ||
-              0,
+              "In progress",
+              actions.filter(
+                (item) =>
+                  item.status ===
+                  "in_progress"
+              ).length,
+            ],
+            [
+              "Pending approval",
+              approvals.filter(
+                (item) =>
+                  item.status ===
+                  "pending"
+              ).length,
+            ],
+            [
+              "Needs info",
+              approvals.filter(
+                (item) =>
+                  item.status ===
+                  "needs_info"
+              ).length,
             ],
             [
               "SLA warning",
@@ -406,15 +439,15 @@ export default function Dashboard() {
                 key={
                   label
                 }
-                className="rounded-2xl border border-slate-200 bg-white px-4 py-3.5 shadow-sm"
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm"
               >
 
-                <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-slate-400">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
                   {label}
                 </p>
 
                 <p
-                  className={`mt-1.5 text-xl font-semibold ${
+                  className={`mt-1 text-lg font-semibold ${
                     label ===
                     "SLA breached"
                       ? "text-rose-700"
@@ -422,8 +455,14 @@ export default function Dashboard() {
                         "SLA warning"
                       ? "text-amber-700"
                       : label ===
-                        "SLA healthy"
-                      ? "text-emerald-700"
+                        "Needs info"
+                      ? "text-violet-700"
+                      : label ===
+                        "Pending approval"
+                      ? "text-violet-700"
+                      : label ===
+                        "In progress"
+                      ? "text-indigo-700"
                       : "text-slate-900"
                   }`}
                 >
@@ -457,7 +496,7 @@ export default function Dashboard() {
                 ATTENTION QUEUES
             ================================================ */}
 
-            <div className="mt-6 grid gap-6 xl:grid-cols-2">
+            <div className="mt-4 grid gap-4 xl:grid-cols-2">
 
               <section className="overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-sm">
 
@@ -685,7 +724,7 @@ export default function Dashboard() {
                 DECISION / RESPONSE / COMMUNICATION
             ================================================ */}
 
-            <div className="mt-6 grid gap-6 lg:grid-cols-3">
+            <div className="mt-4 grid gap-4 lg:grid-cols-3">
 
               <section className="overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-sm">
 
@@ -698,11 +737,11 @@ export default function Dashboard() {
                   <div className="mt-1 flex items-center justify-between gap-3">
 
                     <h2 className="text-base font-semibold text-slate-950">
-                      Pending approvals
+                      Active approvals
                     </h2>
 
                     <span className="text-xs font-semibold text-slate-400">
-                      {pendingApprovals.length}
+                      {activeApprovals.length}
                     </span>
 
                   </div>
@@ -716,7 +755,7 @@ export default function Dashboard() {
                   0 ? (
 
                     <div className="px-5 py-10 text-center text-sm text-slate-400">
-                      No pending approvals.
+                      No active approvals.
                     </div>
 
                   ) : (
@@ -994,6 +1033,70 @@ export default function Dashboard() {
               </section>
 
             </div>
+
+
+            {/* ===============================================
+                SECONDARY COMMUNICATION HEALTH
+            ================================================ */}
+
+            <section className="mt-4 flex flex-col gap-3 rounded-[20px] border border-slate-200 bg-white px-4 py-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+
+              <div className="min-w-0">
+
+                <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-sky-500">
+                  Communication health
+                </p>
+
+                <p className="mt-0.5 text-xs text-slate-500">
+                  Mail volume context, kept secondary to execution priorities.
+                </p>
+
+              </div>
+
+
+              <div className="flex flex-wrap items-center gap-2">
+
+                <div className="min-w-[112px] rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2">
+
+                  <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                    Total messages
+                  </p>
+
+                  <p className="mt-0.5 text-lg font-semibold text-slate-900">
+                    {dashboardStats.total_messages || 0}
+                  </p>
+
+                </div>
+
+
+                <div className="min-w-[112px] rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2">
+
+                  <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                    Unread
+                  </p>
+
+                  <p className="mt-0.5 text-lg font-semibold text-sky-700">
+                    {dashboardStats.unread || 0}
+                  </p>
+
+                </div>
+
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    navigate(
+                      "/inbox"
+                    )
+                  }
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  Open Inbox
+                </button>
+
+              </div>
+
+            </section>
 
           </>
 

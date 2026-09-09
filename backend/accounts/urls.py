@@ -4,7 +4,15 @@ from .identity_views import (
     IdentityCallbackAPIView,
     IdentityExchangeAPIView,
     IdentityProvidersAPIView,
+    IdentityRegistrationConfigAPIView,
+    IdentityRegistrationStartAPIView,
     IdentityStartAPIView,
+)
+
+from .registration_views import (
+    PlatformRegistrationApproveAPIView,
+    PlatformRegistrationRegistryAPIView,
+    PlatformRegistrationRejectAPIView,
 )
 
 from .session_views import (
@@ -66,6 +74,16 @@ urlpatterns = [
         name="identity-exchange",
     ),
     path(
+        "identity/registration/config/",
+        IdentityRegistrationConfigAPIView.as_view(),
+        name="identity-registration-config",
+    ),
+    path(
+        "identity/registration/<str:provider>/start/",
+        IdentityRegistrationStartAPIView.as_view(),
+        name="identity-registration-start",
+    ),
+    path(
         "identity/<str:provider>/start/",
         IdentityStartAPIView.as_view(),
         name="identity-start",
@@ -94,5 +112,20 @@ urlpatterns = [
         "platform/signup-registry/",
         StaffSignupRegistryAPIView.as_view(),
         name="signup-registry",
+    ),
+    path(
+        "platform/registrations/",
+        PlatformRegistrationRegistryAPIView.as_view(),
+        name="platform-registration-registry",
+    ),
+    path(
+        "platform/registrations/<str:registration_id>/approve/",
+        PlatformRegistrationApproveAPIView.as_view(),
+        name="platform-registration-approve",
+    ),
+    path(
+        "platform/registrations/<str:registration_id>/reject/",
+        PlatformRegistrationRejectAPIView.as_view(),
+        name="platform-registration-reject",
     ),
 ]

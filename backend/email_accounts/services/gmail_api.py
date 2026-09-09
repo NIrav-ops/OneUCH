@@ -224,6 +224,7 @@ def send_gmail_reply(
     body,
     *,
     cc_emails=None,
+    bcc_emails=None,
     thread_id=None,
     reply_to_message_id=None,
     attachments=None,
@@ -294,6 +295,22 @@ def send_gmail_reply(
             "Cc"
         ] = (
             cc_header
+        )
+
+
+    bcc_header = (
+        _address_header(
+            bcc_emails
+        )
+    )
+
+
+    if bcc_header:
+
+        message[
+            "Bcc"
+        ] = (
+            bcc_header
         )
 
 

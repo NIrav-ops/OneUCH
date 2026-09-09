@@ -587,6 +587,18 @@ class AuditLog(models.Model):
             "SIGNUP_REGISTRY_VIEW",
             "Signup Registry View",
         ),
+        (
+            "REGISTRATION_REQUESTED",
+            "Registration Requested",
+        ),
+        (
+            "REGISTRATION_APPROVED",
+            "Registration Approved",
+        ),
+        (
+            "REGISTRATION_REJECTED",
+            "Registration Rejected",
+        ),
     )
 
     user = models.ForeignKey(

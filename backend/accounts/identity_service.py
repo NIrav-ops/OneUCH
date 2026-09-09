@@ -3,6 +3,7 @@ from dataclasses import (
     dataclass,
 )
 from datetime import (
+    datetime,
     timedelta,
 )
 import hashlib
@@ -80,6 +81,26 @@ IDENTITY_BROWSER_BINDING_COOKIE_PATH = (
     "/api/auth/identity/"
 )
 
+IDENTITY_REGISTRATION_CONTEXT_COOKIE = (
+    "oneuch_registration_txn"
+)
+
+IDENTITY_REGISTRATION_CONTEXT_COOKIE_PATH = (
+    "/api/auth/identity/"
+)
+
+IDENTITY_REGISTRATION_CONTEXT_SALT = (
+    "accounts.identity.registration.context.v1"
+)
+
+IDENTITY_SIGNIN_PURPOSE = (
+    "identity_signin"
+)
+
+IDENTITY_REGISTRATION_PURPOSE = (
+    "identity_registration"
+)
+
 GENERIC_IDENTITY_ERROR = (
     "Unable to sign in with this identity provider."
 )
@@ -98,6 +119,12 @@ class IdentityConfigurationError(
 
 
 class IdentityAuthenticationError(
+    IdentityError,
+):
+    pass
+
+
+class IdentityRegistrationError(
     IdentityError,
 ):
     pass
@@ -316,159 +343,212 @@ def identity_state_max_age_seconds():
     )
 
 
-def create_identity_state(
-    provider,
-):
-    _require_feature()
 
-    _provider_configuration(
-        provider
-    )
-
-    nonce = secrets.token_urlsafe(
-        32
-    )
-
-    browser_binding = (
-        secrets.token_urlsafe(
-            32
+def registration_feature_enabled():
+    return bool(
+        identity_feature_enabled()
+        and
+        getattr(
+            settings,
+            "AUTH_GOVERNED_REGISTRATION_ENABLED",
+            False,
         )
     )
 
-    state = signing.dumps(
-        {
-            "purpose":
-                "identity_signin",
 
-            "provider":
-                provider,
-
-            "nonce":
-                nonce,
-
-            "browser_binding":
-                browser_binding,
-        },
-        salt=IDENTITY_STATE_SALT,
-        compress=True,
+def _registration_configuration():
+    privacy_notice_version = (
+        _setting(
+            "ONEUCH_PRIVACY_NOTICE_VERSION"
+        )
     )
 
-    return (
-        state,
-        nonce,
-        browser_binding,
+    terms_version = (
+        _setting(
+            "ONEUCH_TERMS_VERSION"
+        )
+    )
+
+    requested_region = (
+        _setting(
+            "ONEUCH_REGION"
+        )
     )
 
 
-def resolve_identity_state(
+    if not _configured_value(
+        privacy_notice_version
+    ):
+        raise IdentityConfigurationError(
+            GENERIC_IDENTITY_ERROR
+        )
+
+
+    if not _configured_value(
+        terms_version
+    ):
+        raise IdentityConfigurationError(
+            GENERIC_IDENTITY_ERROR
+        )
+
+
+    if len(
+        privacy_notice_version
+    ) > 64:
+        raise IdentityConfigurationError(
+            GENERIC_IDENTITY_ERROR
+        )
+
+
+    if len(
+        terms_version
+    ) > 64:
+        raise IdentityConfigurationError(
+            GENERIC_IDENTITY_ERROR
+        )
+
+
+    if len(
+        requested_region
+    ) > 64:
+        raise IdentityConfigurationError(
+            GENERIC_IDENTITY_ERROR
+        )
+
+
+    return {
+        "privacy_notice_version":
+            privacy_notice_version,
+
+        "terms_version":
+            terms_version,
+
+        "requested_region":
+            requested_region,
+    }
+
+
+def configured_registration_providers():
+
+    if not (
+        registration_feature_enabled()
+    ):
+        return []
+
+
+    # This validates the server-controlled compliance
+    # versions before public registration is advertised.
+    _registration_configuration()
+
+
+    providers = []
+
+
+    for provider in IDENTITY_PROVIDERS:
+
+        try:
+
+            _provider_configuration(
+                provider
+            )
+
+        except IdentityConfigurationError:
+
+            continue
+
+
+        providers.append(
+            provider
+        )
+
+
+    return providers
+
+
+def registration_public_configuration():
+    if not (
+        registration_feature_enabled()
+    ):
+        return {
+            "enabled":
+                False,
+
+            "providers":
+                [],
+        }
+
+
+    try:
+
+        registration_config = (
+            _registration_configuration()
+        )
+
+        providers = (
+            configured_registration_providers()
+        )
+
+
+    except IdentityConfigurationError:
+
+        return {
+            "enabled":
+                False,
+
+            "providers":
+                [],
+        }
+
+
+    if not providers:
+
+        return {
+            "enabled":
+                False,
+
+            "providers":
+                [],
+        }
+
+
+    return {
+        "enabled":
+            True,
+
+        "providers":
+            providers,
+
+        "privacy_notice_version":
+            registration_config[
+                "privacy_notice_version"
+            ],
+
+        "terms_version":
+            registration_config[
+                "terms_version"
+            ],
+    }
+
+
+def _require_registration_feature():
+    if not (
+        registration_feature_enabled()
+    ):
+        raise IdentityConfigurationError(
+            GENERIC_IDENTITY_ERROR
+        )
+
+
+def _authorization_url_from_state(
     *,
     provider,
     state,
-    browser_binding,
+    nonce,
 ):
-    if not state:
-        raise IdentityAuthenticationError(
-            GENERIC_IDENTITY_ERROR
-        )
-
-    max_age = (
-        identity_state_max_age_seconds()
-    )
-
-    try:
-        payload = signing.loads(
-            state,
-            salt=IDENTITY_STATE_SALT,
-            max_age=max_age,
-        )
-
-    except signing.BadSignature as exc:
-        raise IdentityAuthenticationError(
-            GENERIC_IDENTITY_ERROR
-        ) from exc
-
-    if not isinstance(
-        payload,
-        dict,
-    ):
-        raise IdentityAuthenticationError(
-            GENERIC_IDENTITY_ERROR
-        )
-
-    if (
-        payload.get(
-            "purpose"
-        )
-        != "identity_signin"
-    ):
-        raise IdentityAuthenticationError(
-            GENERIC_IDENTITY_ERROR
-        )
-
-    if (
-        payload.get(
-            "provider"
-        )
-        != provider
-    ):
-        raise IdentityAuthenticationError(
-            GENERIC_IDENTITY_ERROR
-        )
-
-    nonce = str(
-        payload.get(
-            "nonce"
-        )
-        or ""
-    ).strip()
-
-    signed_browser_binding = str(
-        payload.get(
-            "browser_binding"
-        )
-        or ""
-    ).strip()
-
-    request_browser_binding = str(
-        browser_binding
-        or ""
-    ).strip()
-
-    if (
-        not nonce
-        or
-        not signed_browser_binding
-        or
-        not request_browser_binding
-        or
-        not secrets.compare_digest(
-            signed_browser_binding,
-            request_browser_binding,
-        )
-    ):
-        raise IdentityAuthenticationError(
-            GENERIC_IDENTITY_ERROR
-        )
-
-    return nonce
-
-
-def build_authorization_url(
-    provider,
-):
-    _require_feature()
-
     config = _provider_configuration(
         provider
     )
 
-    (
-        state,
-        nonce,
-        browser_binding,
-    ) = create_identity_state(
-        provider
-    )
 
     params = {
         "client_id":
@@ -499,12 +579,15 @@ def build_authorization_url(
             "select_account",
     }
 
+
     if provider == AUTH_METHOD_MICROSOFT:
+
         params[
             "response_mode"
         ] = "query"
 
-    authorization_url = (
+
+    return (
         config[
             "authorize_url"
         ]
@@ -514,10 +597,676 @@ def build_authorization_url(
         )
     )
 
+
+def create_identity_state(
+    provider,
+):
+    _require_feature()
+
+    _provider_configuration(
+        provider
+    )
+
+
+    nonce = secrets.token_urlsafe(
+        32
+    )
+
+    browser_binding = (
+        secrets.token_urlsafe(
+            32
+        )
+    )
+
+
+    state = signing.dumps(
+        {
+            "purpose":
+                IDENTITY_SIGNIN_PURPOSE,
+
+            "provider":
+                provider,
+
+            "nonce":
+                nonce,
+
+            "browser_binding":
+                browser_binding,
+        },
+        salt=IDENTITY_STATE_SALT,
+        compress=True,
+    )
+
+
+    return (
+        state,
+        nonce,
+        browser_binding,
+    )
+
+
+def _load_identity_state(
+    *,
+    state,
+):
+    if not state:
+        raise IdentityAuthenticationError(
+            GENERIC_IDENTITY_ERROR
+        )
+
+
+    try:
+
+        payload = signing.loads(
+            state,
+            salt=IDENTITY_STATE_SALT,
+            max_age=(
+                identity_state_max_age_seconds()
+            ),
+        )
+
+
+    except signing.BadSignature as exc:
+
+        raise IdentityAuthenticationError(
+            GENERIC_IDENTITY_ERROR
+        ) from exc
+
+
+    if not isinstance(
+        payload,
+        dict,
+    ):
+        raise IdentityAuthenticationError(
+            GENERIC_IDENTITY_ERROR
+        )
+
+
+    return payload
+
+
+def _registration_text(
+    value,
+    *,
+    max_length,
+):
+    normalized = str(
+        value
+        or ""
+    ).strip()
+
+
+    if (
+        not normalized
+        or
+        len(
+            normalized
+        ) > max_length
+    ):
+        raise IdentityRegistrationError(
+            GENERIC_IDENTITY_ERROR
+        )
+
+
+    return normalized
+
+
+def _create_registration_transaction(
+    *,
+    provider,
+    organization_name,
+    acknowledged,
+):
+    _require_registration_feature()
+
+    _provider_configuration(
+        provider
+    )
+
+
+    if acknowledged is not True:
+        raise IdentityRegistrationError(
+            GENERIC_IDENTITY_ERROR
+        )
+
+
+    organization_name = (
+        _registration_text(
+            organization_name,
+            max_length=255,
+        )
+    )
+
+
+    registration_config = (
+        _registration_configuration()
+    )
+
+
+    nonce = secrets.token_urlsafe(
+        32
+    )
+
+    browser_binding = (
+        secrets.token_urlsafe(
+            32
+        )
+    )
+
+
+    state = signing.dumps(
+        {
+            "purpose":
+                IDENTITY_REGISTRATION_PURPOSE,
+
+            "provider":
+                provider,
+
+            "nonce":
+                nonce,
+
+            # Only opaque transaction binding is sent through
+            # the provider authorization round-trip.
+            "browser_binding":
+                browser_binding,
+        },
+        salt=IDENTITY_STATE_SALT,
+        compress=True,
+    )
+
+
+    context_cookie = signing.dumps(
+        {
+            "purpose":
+                (
+                    IDENTITY_REGISTRATION_PURPOSE
+                ),
+
+            "provider":
+                provider,
+
+            "browser_binding":
+                browser_binding,
+
+            "organization_name":
+                organization_name,
+
+            "privacy_notice_version":
+                registration_config[
+                    "privacy_notice_version"
+                ],
+
+            "terms_version":
+                registration_config[
+                    "terms_version"
+                ],
+
+            "consent_recorded_at":
+                (
+                    timezone.now()
+                    .isoformat()
+                ),
+
+            "requested_region":
+                registration_config[
+                    "requested_region"
+                ],
+        },
+        salt=(
+            IDENTITY_REGISTRATION_CONTEXT_SALT
+        ),
+        compress=True,
+    )
+
+
+    return (
+        state,
+        nonce,
+        context_cookie,
+        registration_config,
+    )
+
+
+def build_authorization_url(
+    provider,
+):
+    _require_feature()
+
+
+    (
+        state,
+        nonce,
+        browser_binding,
+    ) = create_identity_state(
+        provider
+    )
+
+
+    authorization_url = (
+        _authorization_url_from_state(
+            provider=provider,
+            state=state,
+            nonce=nonce,
+        )
+    )
+
+
     return (
         authorization_url,
         browser_binding,
     )
+
+
+def build_registration_authorization_url(
+    *,
+    provider,
+    organization_name,
+    acknowledged,
+):
+    (
+        state,
+        nonce,
+        context_cookie,
+        registration_config,
+    ) = _create_registration_transaction(
+        provider=provider,
+        organization_name=(
+            organization_name
+        ),
+        acknowledged=acknowledged,
+    )
+
+
+    authorization_url = (
+        _authorization_url_from_state(
+            provider=provider,
+            state=state,
+            nonce=nonce,
+        )
+    )
+
+
+    return (
+        authorization_url,
+        context_cookie,
+        registration_config,
+    )
+
+
+def _resolve_registration_context(
+    *,
+    provider,
+    browser_binding,
+    context_cookie,
+):
+    if not context_cookie:
+        raise IdentityRegistrationError(
+            GENERIC_IDENTITY_ERROR
+        )
+
+
+    try:
+
+        context = signing.loads(
+            context_cookie,
+            salt=(
+                IDENTITY_REGISTRATION_CONTEXT_SALT
+            ),
+            max_age=(
+                identity_state_max_age_seconds()
+            ),
+        )
+
+
+    except signing.BadSignature as exc:
+
+        raise IdentityRegistrationError(
+            GENERIC_IDENTITY_ERROR
+        ) from exc
+
+
+    if not isinstance(
+        context,
+        dict,
+    ):
+        raise IdentityRegistrationError(
+            GENERIC_IDENTITY_ERROR
+        )
+
+
+    if (
+        context.get(
+            "purpose"
+        )
+        !=
+        IDENTITY_REGISTRATION_PURPOSE
+    ):
+        raise IdentityRegistrationError(
+            GENERIC_IDENTITY_ERROR
+        )
+
+
+    if (
+        context.get(
+            "provider"
+        )
+        != provider
+    ):
+        raise IdentityRegistrationError(
+            GENERIC_IDENTITY_ERROR
+        )
+
+
+    context_binding = str(
+        context.get(
+            "browser_binding"
+        )
+        or ""
+    ).strip()
+
+
+    if (
+        not context_binding
+        or
+        not secrets.compare_digest(
+            context_binding,
+            browser_binding,
+        )
+    ):
+        raise IdentityRegistrationError(
+            GENERIC_IDENTITY_ERROR
+        )
+
+
+    organization_name = (
+        _registration_text(
+            context.get(
+                "organization_name"
+            ),
+            max_length=255,
+        )
+    )
+
+
+    privacy_notice_version = (
+        _registration_text(
+            context.get(
+                "privacy_notice_version"
+            ),
+            max_length=64,
+        )
+    )
+
+
+    terms_version = (
+        _registration_text(
+            context.get(
+                "terms_version"
+            ),
+            max_length=64,
+        )
+    )
+
+
+    requested_region = str(
+        context.get(
+            "requested_region"
+        )
+        or ""
+    ).strip()
+
+
+    if len(
+        requested_region
+    ) > 64:
+        raise IdentityRegistrationError(
+            GENERIC_IDENTITY_ERROR
+        )
+
+
+    consent_raw = str(
+        context.get(
+            "consent_recorded_at"
+        )
+        or ""
+    ).strip()
+
+
+    try:
+
+        consent_recorded_at = (
+            datetime.fromisoformat(
+                consent_raw
+            )
+        )
+
+    except (
+        TypeError,
+        ValueError,
+    ) as exc:
+
+        raise IdentityRegistrationError(
+            GENERIC_IDENTITY_ERROR
+        ) from exc
+
+
+    if timezone.is_naive(
+        consent_recorded_at
+    ):
+        raise IdentityRegistrationError(
+            GENERIC_IDENTITY_ERROR
+        )
+
+
+    return {
+        "organization_name":
+            organization_name,
+
+        "privacy_notice_version":
+            privacy_notice_version,
+
+        "terms_version":
+            terms_version,
+
+        "consent_recorded_at":
+            consent_recorded_at,
+
+        "requested_region":
+            requested_region,
+    }
+
+
+def resolve_identity_callback_state(
+    *,
+    provider,
+    state,
+    signin_browser_binding,
+    registration_context_cookie,
+):
+    payload = (
+        _load_identity_state(
+            state=state
+        )
+    )
+
+
+    purpose = str(
+        payload.get(
+            "purpose"
+        )
+        or ""
+    ).strip()
+
+
+    if (
+        payload.get(
+            "provider"
+        )
+        != provider
+    ):
+        if (
+            purpose
+            ==
+            IDENTITY_REGISTRATION_PURPOSE
+        ):
+            raise IdentityRegistrationError(
+                GENERIC_IDENTITY_ERROR
+            )
+
+        raise IdentityAuthenticationError(
+            GENERIC_IDENTITY_ERROR
+        )
+
+
+    nonce = str(
+        payload.get(
+            "nonce"
+        )
+        or ""
+    ).strip()
+
+
+    browser_binding = str(
+        payload.get(
+            "browser_binding"
+        )
+        or ""
+    ).strip()
+
+
+    if (
+        not nonce
+        or
+        not browser_binding
+    ):
+        if (
+            purpose
+            ==
+            IDENTITY_REGISTRATION_PURPOSE
+        ):
+            raise IdentityRegistrationError(
+                GENERIC_IDENTITY_ERROR
+            )
+
+        raise IdentityAuthenticationError(
+            GENERIC_IDENTITY_ERROR
+        )
+
+
+    if (
+        purpose
+        ==
+        IDENTITY_SIGNIN_PURPOSE
+    ):
+
+        request_binding = str(
+            signin_browser_binding
+            or ""
+        ).strip()
+
+
+        if (
+            not request_binding
+            or
+            not secrets.compare_digest(
+                browser_binding,
+                request_binding,
+            )
+        ):
+            raise IdentityAuthenticationError(
+                GENERIC_IDENTITY_ERROR
+            )
+
+
+        return {
+            "purpose":
+                IDENTITY_SIGNIN_PURPOSE,
+
+            "nonce":
+                nonce,
+
+            "registration":
+                None,
+        }
+
+
+    if (
+        purpose
+        ==
+        IDENTITY_REGISTRATION_PURPOSE
+    ):
+
+        if not (
+            registration_feature_enabled()
+        ):
+            raise IdentityRegistrationError(
+                GENERIC_IDENTITY_ERROR
+            )
+
+
+        registration_context = (
+            _resolve_registration_context(
+                provider=provider,
+                browser_binding=(
+                    browser_binding
+                ),
+                context_cookie=(
+                    registration_context_cookie
+                ),
+            )
+        )
+
+
+        return {
+            "purpose":
+                IDENTITY_REGISTRATION_PURPOSE,
+
+            "nonce":
+                nonce,
+
+            "registration":
+                registration_context,
+        }
+
+
+    raise IdentityAuthenticationError(
+        GENERIC_IDENTITY_ERROR
+    )
+
+
+def resolve_identity_state(
+    *,
+    provider,
+    state,
+    browser_binding,
+):
+    transaction = (
+        resolve_identity_callback_state(
+            provider=provider,
+            state=state,
+            signin_browser_binding=(
+                browser_binding
+            ),
+            registration_context_cookie=None,
+        )
+    )
+
+
+    if (
+        transaction[
+            "purpose"
+        ]
+        !=
+        IDENTITY_SIGNIN_PURPOSE
+    ):
+        raise IdentityAuthenticationError(
+            GENERIC_IDENTITY_ERROR
+        )
+
+
+    return transaction[
+        "nonce"
+    ]
 
 
 def _normalize_email(

@@ -335,3 +335,176 @@ class BrowserSession(
             f"{self.user_id}:"
             f"{self.public_id}"
         )
+
+
+def generate_registration_public_id():
+    return (
+        "REG-"
+        + uuid4().hex[:12].upper()
+    )
+
+
+REGISTRATION_STATUS_PENDING = (
+    "pending"
+)
+
+REGISTRATION_STATUS_APPROVED = (
+    "approved"
+)
+
+REGISTRATION_STATUS_REJECTED = (
+    "rejected"
+)
+
+
+REGISTRATION_STATUS_CHOICES = (
+    (
+        REGISTRATION_STATUS_PENDING,
+        "Pending",
+    ),
+    (
+        REGISTRATION_STATUS_APPROVED,
+        "Approved",
+    ),
+    (
+        REGISTRATION_STATUS_REJECTED,
+        "Rejected",
+    ),
+)
+
+
+class RegistrationRequest(
+    models.Model,
+):
+    """
+    Governed first-time tenant registration.
+
+    A pending request deliberately points to an inactive user
+    and an inactive workspace. Identity proof is held in the
+    existing ExternalIdentity model; provider access/refresh
+    tokens are never stored here.
+    """
+
+    public_id = models.CharField(
+        max_length=20,
+        unique=True,
+        default=(
+            generate_registration_public_id
+        ),
+        editable=False,
+    )
+
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name=(
+            "registration_request"
+        ),
+    )
+
+    organization = models.OneToOneField(
+        "inbox.Organization",
+        on_delete=models.CASCADE,
+        related_name=(
+            "registration_request"
+        ),
+    )
+
+    provider = models.CharField(
+        max_length=20,
+        choices=(
+            IDENTITY_PROVIDER_CHOICES
+        ),
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=(
+            REGISTRATION_STATUS_CHOICES
+        ),
+        default=(
+            REGISTRATION_STATUS_PENDING
+        ),
+        db_index=True,
+    )
+
+    organization_name = models.CharField(
+        max_length=255,
+    )
+
+    privacy_notice_version = (
+        models.CharField(
+            max_length=64,
+        )
+    )
+
+    terms_version = models.CharField(
+        max_length=64,
+    )
+
+    consent_recorded_at = (
+        models.DateTimeField()
+    )
+
+    requested_region = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+    )
+
+    submitted_at = models.DateTimeField(
+        default=timezone.now,
+    )
+
+    reviewed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    reviewed_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name=(
+            "registration_reviews"
+        ),
+    )
+
+    rejection_reason = models.TextField(
+        blank=True,
+        default="",
+    )
+
+    class Meta:
+        ordering = [
+            "-submitted_at",
+        ]
+
+        indexes = [
+            models.Index(
+                fields=[
+                    "status",
+                    "submitted_at",
+                ],
+                name=(
+                    "acct_reg_status_time_idx"
+                ),
+            ),
+            models.Index(
+                fields=[
+                    "provider",
+                    "status",
+                ],
+                name=(
+                    "acct_reg_provider_idx"
+                ),
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            self.public_id
+            + ":"
+            + self.status
+        )

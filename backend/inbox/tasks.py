@@ -699,68 +699,58 @@ def _structured_delivery_addresses(
     )
 
 
-    to_addresses = [
-        str(
-            item.get(
-                "email",
-                "",
+    def addresses(
+        bucket,
+    ):
+        return [
+            str(
+                item.get(
+                    "email",
+                    "",
+                )
             )
-        )
-        .strip()
-        .lower()
+            .strip()
+            .lower()
 
-        for item
-        in (
-            recipient_meta.get(
-                "to",
-                [],
+            for item
+            in (
+                recipient_meta.get(
+                    bucket,
+                    [],
+                )
+                or []
             )
-            or []
-        )
 
-        if (
-            isinstance(
-                item,
-                dict,
+            if (
+                isinstance(
+                    item,
+                    dict,
+                )
+                and
+                item.get(
+                    "email"
+                )
             )
-            and
-            item.get(
-                "email"
-            )
-        )
-    ]
+        ]
 
 
-    cc_addresses = [
-        str(
-            item.get(
-                "email",
-                "",
-            )
+    to_addresses = (
+        addresses(
+            "to"
         )
-        .strip()
-        .lower()
+    )
 
-        for item
-        in (
-            recipient_meta.get(
-                "cc",
-                [],
-            )
-            or []
+    cc_addresses = (
+        addresses(
+            "cc"
         )
+    )
 
-        if (
-            isinstance(
-                item,
-                dict,
-            )
-            and
-            item.get(
-                "email"
-            )
+    bcc_addresses = (
+        addresses(
+            "bcc"
         )
-    ]
+    )
 
 
     to_value = (
@@ -775,8 +765,8 @@ def _structured_delivery_addresses(
     return (
         to_value,
         cc_addresses,
+        bcc_addresses,
     )
-
 
 def _deliver_reply_message(
     *,
@@ -790,6 +780,7 @@ def _deliver_reply_message(
     (
         to_value,
         cc_addresses,
+        bcc_addresses,
     ) = (
         _structured_delivery_addresses(
             inbox_message,
@@ -837,9 +828,15 @@ def _deliver_reply_message(
         }
 
 
-        # Preserve the legacy call signature when there are no
-        # files. Existing provider behavior and tests therefore
-        # remain backward compatible.
+        if bcc_addresses:
+
+            gmail_kwargs[
+                "bcc_emails"
+            ] = (
+                bcc_addresses
+            )
+
+
         if attachments:
 
             gmail_kwargs[
@@ -883,6 +880,15 @@ def _deliver_reply_message(
         }
 
 
+        if bcc_addresses:
+
+            outlook_kwargs[
+                "bcc_emails"
+            ] = (
+                bcc_addresses
+            )
+
+
         if attachments:
 
             outlook_kwargs[
@@ -914,7 +920,6 @@ def _deliver_reply_message(
                 email_account
                 .get_credential()
             )
-
 
         except CredentialVaultError as exc:
 
@@ -960,8 +965,19 @@ def _deliver_reply_message(
         )
 
 
-        # Keep this compatibility string for older callers/tests,
-        # while actual SMTP role semantics are carried separately.
+        smtp_bcc_identities = (
+            recipient_meta.get(
+                "bcc",
+                [],
+            )
+            or
+            bcc_addresses
+        )
+
+
+        # Keep the historical compatibility string for older
+        # callers/tests. Actual SMTP role semantics are supplied
+        # separately through to_emails / cc_emails / bcc_emails.
         smtp_to = (
             to_value
         )
@@ -978,9 +994,6 @@ def _deliver_reply_message(
             )
 
 
-        # C5B stores the raw RFC thread root in
-        # external_conversation_id. The external_message_id is a
-        # stable hash and must never be emitted as In-Reply-To.
         thread_reference = (
             inbox_message
             .external_conversation_id
@@ -1002,7 +1015,9 @@ def _deliver_reply_message(
                 cc_emails=(
                     smtp_cc_identities
                 ),
-                bcc_emails=[],
+                bcc_emails=(
+                    smtp_bcc_identities
+                ),
                 subject=subject,
                 body=body,
                 attachments=(
@@ -1025,7 +1040,6 @@ def _deliver_reply_message(
         "Unsupported email account type: "
         f"{email_account.account_type}"
     )
-
 
 def _mark_delivery_success(
     *,

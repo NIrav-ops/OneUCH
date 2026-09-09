@@ -317,3 +317,39 @@ def resolve_reply_recipients(
         recipient_meta,
         recipients_flat,
     )
+
+
+def normalize_reply_recipient_override(
+    *,
+    to=None,
+    cc=None,
+    bcc=None,
+):
+    """
+    Validate an explicit user-edited reply recipient set.
+
+    Unlike automatically derived Reply / Reply-All defaults,
+    explicit recipients are preserved as entered after the
+    standard One UCH normalization and cross-bucket
+    de-duplication rules are applied.
+
+    Source-message Bcc is never inherited automatically.
+    Bcc exists here only when the user explicitly supplies it.
+    """
+
+    try:
+
+        return (
+            normalize_recipient_buckets(
+                to=to,
+                cc=cc,
+                bcc=bcc,
+                require_to=True,
+            )
+        )
+
+    except ValueError as exc:
+
+        raise ReplyRecipientError(
+            "At least one valid To recipient is required."
+        ) from exc
