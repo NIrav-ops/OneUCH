@@ -272,7 +272,7 @@ class PromoteAIApprovalCandidateAPIView(APIView):
 
         candidate = (
             AIApprovalCandidate.objects
-            .select_for_update()
+            .select_for_update(of=("self",))
             .select_related(
                 "message",
                 "message__conversation",

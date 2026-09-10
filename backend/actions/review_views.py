@@ -271,7 +271,7 @@ class PromoteAIActionCandidateAPIView(APIView):
 
         candidate = (
             AIActionCandidate.objects
-            .select_for_update()
+            .select_for_update(of=("self",))
             .select_related(
                 "message",
                 "message__conversation",
