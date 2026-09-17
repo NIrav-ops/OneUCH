@@ -1315,7 +1315,239 @@ class MailRC1C5BIngestionTests(
 
 
     # ========================================================
-    # 11. Legacy folder_UID rows are upgraded in place instead
+    # 11. A provider Inbox copy authored by the connected
+    # mailbox for external recipients is logically Sent.
+    #
+    # The physical provider folder remains embedded in the
+    # attachment locator so retrieval still targets INBOX.
+    # ========================================================
+
+    def test_inbox_copy_from_mailbox_to_external_recipient_is_semantic_sent(
+        self,
+    ):
+        outbound_copy = (
+            self.build_message(
+                message_id=(
+                    "<inbox-outbound-copy@example.net>"
+                ),
+                sender=(
+                    "Owner "
+                    "<owner@example.com>"
+                ),
+                to=(
+                    "External "
+                    "<external@example.net>"
+                ),
+                subject=(
+                    "Provider Inbox outbound copy"
+                ),
+                date=(
+                    "Sun, 06 Sep 2026 "
+                    "14:00:00 +0000"
+                ),
+            )
+        )
+
+        outbound_copy.add_attachment(
+            b"attachment-payload",
+            maintype="application",
+            subtype="octet-stream",
+            filename="proof.bin",
+        )
+
+
+        fake = (
+            FakeIMAP(
+                folder_messages={
+                    "INBOX": {
+                        "10": {
+                            "raw":
+                                outbound_copy
+                                .as_bytes(),
+
+                            "flags":
+                                "\\Seen",
+                        },
+                    },
+
+                    "Sent Items":
+                        {},
+                }
+            )
+        )
+
+
+        result, _ = (
+            self.sync_with_fake(
+                fake
+            )
+        )
+
+
+        message = (
+            InboxMessage.objects
+            .get(
+                email_account=(
+                    self.account
+                )
+            )
+        )
+
+
+        self.assertEqual(
+            message.folder,
+            "sent",
+        )
+
+        self.assertEqual(
+            message.direction,
+            "outbound",
+        )
+
+        self.assertEqual(
+            message.status,
+            "sent",
+        )
+
+        self.assertTrue(
+            message.is_read
+        )
+
+        self.assertEqual(
+            result[
+                "created"
+            ],
+            1,
+        )
+
+        self.assertEqual(
+            result[
+                "failed"
+            ],
+            0,
+        )
+
+
+        self.assertEqual(
+            len(
+                message
+                .attachment_meta
+            ),
+            1,
+        )
+
+        self.assertTrue(
+            message
+            .attachment_meta[0][
+                "attachment_id"
+            ]
+            .startswith(
+                "imap:inbox:"
+            )
+        )
+
+
+    # ========================================================
+    # 12. A real self-send delivered to Inbox remains inbound.
+    # ========================================================
+
+    def test_inbox_self_send_remains_inbound(
+        self,
+    ):
+        self_send = (
+            self.build_message(
+                message_id=(
+                    "<self-send@example.net>"
+                ),
+                sender=(
+                    "Owner "
+                    "<owner@example.com>"
+                ),
+                to=(
+                    "Owner "
+                    "<owner@example.com>"
+                ),
+                subject=(
+                    "Self send"
+                ),
+                date=(
+                    "Sun, 06 Sep 2026 "
+                    "15:00:00 +0000"
+                ),
+            )
+        )
+
+
+        fake = (
+            FakeIMAP(
+                folder_messages={
+                    "INBOX": {
+                        "10": {
+                            "raw":
+                                self_send
+                                .as_bytes(),
+
+                            "flags":
+                                "\\Seen",
+                        },
+                    },
+
+                    "Sent Items":
+                        {},
+                }
+            )
+        )
+
+
+        result, _ = (
+            self.sync_with_fake(
+                fake
+            )
+        )
+
+
+        message = (
+            InboxMessage.objects
+            .get(
+                email_account=(
+                    self.account
+                )
+            )
+        )
+
+
+        self.assertEqual(
+            message.folder,
+            "inbox",
+        )
+
+        self.assertEqual(
+            message.direction,
+            "inbound",
+        )
+
+        self.assertEqual(
+            message.status,
+            "queued",
+        )
+
+        self.assertEqual(
+            result[
+                "created"
+            ],
+            1,
+        )
+
+        self.assertEqual(
+            result[
+                "failed"
+            ],
+            0,
+        )
+
+
+    # ========================================================
+    # 13. Legacy folder_UID rows are upgraded in place instead
     # of duplicated by the new stable Message-ID identity.
     # ========================================================
 
@@ -1464,7 +1696,7 @@ class MailRC1C5BIngestionTests(
 
 
     # ========================================================
-    # 12. A failed message must not advance the folder cursor or
+    # 14. A failed message must not advance the folder cursor or
     # falsely mark initial history complete.
     # ========================================================
 

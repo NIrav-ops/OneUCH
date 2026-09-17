@@ -444,6 +444,88 @@ def _flatten_recipient_emails(
     )
 
 
+def _resolve_imap_semantic_role(
+    *,
+    provider_folder,
+    provider_direction,
+    account_email,
+    sender,
+    recipient_meta,
+):
+    """
+    Resolve One UCH logical mail placement independently
+    from the physical IMAP folder.
+
+    Some IMAP providers can expose a mailbox-authored copy
+    in INBOX even when the mailbox is not a recipient.
+
+    In that narrow case the message is semantically Sent,
+    while attachment locators and provider identity continue
+    to retain the physical IMAP folder.
+    """
+
+    mailbox = (
+        str(
+            account_email
+            or ""
+        )
+        .strip()
+        .lower()
+    )
+
+    sender_email = (
+        str(
+            sender
+            or ""
+        )
+        .strip()
+        .lower()
+    )
+
+    recipient_values = {
+        value.strip().lower()
+        for value in (
+            _flatten_recipient_emails(
+                recipient_meta
+            )
+            .split(",")
+        )
+        if value.strip()
+    }
+
+
+    if (
+        provider_folder
+        ==
+        "inbox"
+        and
+        provider_direction
+        ==
+        "inbound"
+        and
+        mailbox
+        and
+        sender_email
+        ==
+        mailbox
+        and
+        mailbox
+        not in
+        recipient_values
+    ):
+
+        return (
+            "sent",
+            "outbound",
+        )
+
+
+    return (
+        provider_folder,
+        provider_direction,
+    )
+
+
 def _decode_payload(
     part,
 ):
@@ -2583,6 +2665,29 @@ def fetch_imap_emails(
                         )
 
 
+                    (
+                        message_folder,
+                        message_direction,
+                    ) = (
+                        _resolve_imap_semantic_role(
+                            provider_folder=(
+                                folder_key
+                            ),
+                            provider_direction=(
+                                direction
+                            ),
+                            account_email=(
+                                email_account
+                                .email_address
+                            ),
+                            sender=sender,
+                            recipient_meta=(
+                                recipient_meta
+                            ),
+                        )
+                    )
+
+
                     body = (
                         _extract_imap_body(
                             message
@@ -2750,7 +2855,7 @@ def fetch_imap_emails(
                     is_read = (
                         True
                         if (
-                            direction
+                            message_direction
                             ==
                             "outbound"
                         )
@@ -2790,10 +2895,10 @@ def fetch_imap_emails(
                                 ),
                                 platform="imap",
                                 folder=(
-                                    folder_key
+                                    message_folder
                                 ),
                                 direction=(
-                                    direction
+                                    message_direction
                                 ),
                                 external_message_id=(
                                     stable_external_id
@@ -2840,7 +2945,7 @@ def fetch_imap_emails(
                                 status=(
                                     "sent"
                                     if (
-                                        direction
+                                        message_direction
                                         ==
                                         "outbound"
                                     )
@@ -2880,11 +2985,11 @@ def fetch_imap_emails(
                         )
 
                         message_obj.folder = (
-                            folder_key
+                            message_folder
                         )
 
                         message_obj.direction = (
-                            direction
+                            message_direction
                         )
 
                         message_obj.external_message_id = (
@@ -2953,7 +3058,7 @@ def fetch_imap_emails(
 
 
                         if (
-                            direction
+                            message_direction
                             ==
                             "outbound"
                         ):
