@@ -59,6 +59,302 @@ const createOutboundIdempotencyKey = () => {
 };
 
 
+const splitQuotedMessageBody = (
+  value
+) => {
+
+  const source =
+    String(
+      value || ""
+    )
+      .replace(
+        /\r\n/g,
+        "\n"
+      )
+      .replace(
+        /\r/g,
+        "\n"
+      );
+
+
+  if (!source.trim()) {
+
+    return {
+      current:
+        "",
+      quoted:
+        "",
+    };
+
+  }
+
+
+  const lines =
+    source.split(
+      "\n"
+    );
+
+
+  const candidates =
+    [];
+
+
+  const isHeader = (
+    line,
+    name
+  ) => {
+
+    return new RegExp(
+      `^\\s*${name}:\\s+`,
+      "i"
+    ).test(
+      line || ""
+    );
+
+  };
+
+
+  for (
+    let index = 1;
+    index < lines.length;
+    index += 1
+  ) {
+
+    const line =
+      String(
+        lines[index] || ""
+      ).trim();
+
+
+    // Gmail / generic reply marker:
+    // On ... wrote:
+    if (
+      /^On .+ wrote:\s*$/i
+        .test(line)
+    ) {
+
+      candidates.push(
+        index
+      );
+
+      continue;
+
+    }
+
+
+    // Common RFC / mail-client separator.
+    if (
+      /^-{2,}\s*Original Message\s*-{2,}$/i
+        .test(line)
+    ) {
+
+      candidates.push(
+        index
+      );
+
+      continue;
+
+    }
+
+
+    // Outlook commonly places a long underscore
+    // separator immediately before its quoted headers.
+    if (
+      /^_{5,}$/
+        .test(line)
+    ) {
+
+      for (
+        let offset = 1;
+        offset <= 4;
+        offset += 1
+      ) {
+
+        const next =
+          lines[
+            index + offset
+          ];
+
+
+        if (
+          typeof next !==
+          "string"
+        ) {
+          break;
+        }
+
+
+        if (
+          !next.trim()
+        ) {
+          continue;
+        }
+
+
+        if (
+          isHeader(
+            next,
+            "From"
+          )
+        ) {
+
+          candidates.push(
+            index
+          );
+
+        }
+
+        break;
+
+      }
+
+      continue;
+
+    }
+
+
+    // Outlook quoted block:
+    //
+    // From:
+    // Sent:
+    // To:
+    // Subject:
+    //
+    // Require multiple companion headers so an ordinary
+    // "From:" sentence is not treated as quoted history.
+    if (
+      isHeader(
+        line,
+        "From"
+      )
+    ) {
+
+      const windowLines =
+        lines.slice(
+          index,
+          Math.min(
+            lines.length,
+            index + 12
+          )
+        );
+
+
+      const sentFound =
+        windowLines.some(
+          (item) =>
+            isHeader(
+              item,
+              "Sent"
+            )
+        );
+
+
+      const toFound =
+        windowLines.some(
+          (item) =>
+            isHeader(
+              item,
+              "To"
+            )
+        );
+
+
+      const subjectFound =
+        windowLines.some(
+          (item) =>
+            isHeader(
+              item,
+              "Subject"
+            )
+        );
+
+
+      const companionCount =
+        Number(sentFound) +
+        Number(toFound) +
+        Number(subjectFound);
+
+
+      if (
+        companionCount >= 2
+      ) {
+
+        candidates.push(
+          index
+        );
+
+      }
+
+    }
+
+  }
+
+
+  if (
+    candidates.length === 0
+  ) {
+
+    return {
+      current:
+        source.trim(),
+      quoted:
+        "",
+    };
+
+  }
+
+
+  const splitAt =
+    Math.min(
+      ...candidates
+    );
+
+
+  const current =
+    lines
+      .slice(
+        0,
+        splitAt
+      )
+      .join(
+        "\n"
+      )
+      .trim();
+
+
+  const quoted =
+    lines
+      .slice(
+        splitAt
+      )
+      .join(
+        "\n"
+      )
+      .trim();
+
+
+  // Never hide the whole message if a provider produced
+  // an unusual body beginning with reply metadata.
+  if (!current) {
+
+    return {
+      current:
+        source.trim(),
+      quoted:
+        "",
+    };
+
+  }
+
+
+  return {
+    current,
+    quoted,
+  };
+
+};
+
+
 export default function Inbox() {
 
   // ==========================================================
@@ -878,6 +1174,9 @@ export default function Inbox() {
   const loadConversationsRef =
     useRef(loadConversations);
 
+  const threadScrollRef =
+    useRef(null);
+
 
   useEffect(() => {
 
@@ -1025,6 +1324,96 @@ export default function Inbox() {
   }, [
     selectedId,
     activeTab,
+  ]);
+
+
+  // ==========================================================
+  // FOLDER-AWARE LATEST MESSAGE AUTO-SCROLL
+  // ==========================================================
+
+  useEffect(() => {
+
+    if (
+      !selectedId ||
+      messages.length === 0
+    ) {
+      return undefined;
+    }
+
+
+    const frame =
+      window.requestAnimationFrame(
+        () => {
+
+          const container =
+            threadScrollRef.current;
+
+          if (!container) {
+            return;
+          }
+
+
+          const preferredFolder =
+            activeTab === "sent"
+              ? "sent"
+              : "inbox";
+
+
+          const preferredCards =
+            container.querySelectorAll(
+              `[data-message-folder="${preferredFolder}"]`
+            );
+
+
+          const allCards =
+            container.querySelectorAll(
+              "[data-message-card='true']"
+            );
+
+
+          const target =
+            preferredCards.length > 0
+              ? preferredCards[
+                  preferredCards.length - 1
+                ]
+              : allCards[
+                  allCards.length - 1
+                ];
+
+
+          if (!target) {
+            return;
+          }
+
+
+          const containerRect =
+            container.getBoundingClientRect();
+
+          const targetRect =
+            target.getBoundingClientRect();
+
+
+          container.scrollTop +=
+            targetRect.top -
+            containerRect.top -
+            8;
+
+        }
+      );
+
+
+    return () => {
+
+      window.cancelAnimationFrame(
+        frame
+      );
+
+    };
+
+  }, [
+    activeTab,
+    selectedId,
+    messages.length,
   ]);
 
 
@@ -4383,7 +4772,10 @@ export default function Inbox() {
                     MESSAGE THREAD
                 ============================================ */}
 
-                <div className="min-h-0 overflow-y-auto px-4 py-5 sm:px-5 lg:px-6">
+                <div
+                  ref={threadScrollRef}
+                  className="min-h-0 overflow-y-auto px-4 py-5 sm:px-5 lg:px-6"
+                >
 
                   {messages.length ===
                   0 ? (
@@ -4404,11 +4796,28 @@ export default function Inbox() {
                             "outbound";
 
 
+                          const {
+                            current:
+                              currentBody,
+
+                            quoted:
+                              quotedBody,
+                          } =
+                            splitQuotedMessageBody(
+                              message.body
+                            );
+
+
                           return (
 
                             <article
                               key={
                                 message.id
+                              }
+                              data-message-card="true"
+                              data-message-folder={
+                                message.folder ||
+                                ""
                               }
                               className={`overflow-hidden rounded-[24px] border shadow-sm ${
                                 outbound
@@ -4485,9 +4894,27 @@ export default function Inbox() {
 
 
                               <div className="whitespace-pre-wrap break-words px-5 py-5 text-sm leading-7 text-slate-700">
-                                {message.body ||
+                                {currentBody ||
                                   "(No content)"}
                               </div>
+
+
+                              {quotedBody && (
+
+                                <details className="border-t border-slate-100 bg-slate-50/60">
+
+                                  <summary className="cursor-pointer select-none px-5 py-2.5 text-[11px] font-semibold text-slate-500 hover:bg-slate-100/70">
+                                    Show previous quoted content
+                                  </summary>
+
+
+                                  <div className="whitespace-pre-wrap break-words border-t border-slate-100 px-5 py-4 text-xs leading-6 text-slate-500">
+                                    {quotedBody}
+                                  </div>
+
+                                </details>
+
+                              )}
 
                             </article>
 

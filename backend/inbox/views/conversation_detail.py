@@ -146,6 +146,9 @@ class ConversationDetailAPIView(
                         "direction":
                             message.direction,
 
+                        "folder":
+                            message.folder,
+
                         "platform":
                             message.platform,
 

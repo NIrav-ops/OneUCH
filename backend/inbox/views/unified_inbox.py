@@ -1,6 +1,5 @@
 from django.core.paginator import Paginator
 from django.db.models import Max
-from django.db.models.functions import Coalesce
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -159,23 +158,40 @@ class UnifiedConversationInboxAPIView(APIView):
                     Q(is_starred=True) | Q(messages__is_starred=True)
                 ).distinct()
 
+            if folder == "sent":
+
+                folder_message_filter = Q(
+                    messages__folder="sent",
+                    messages__is_draft=False,
+                )
+
+            elif folder == "draft":
+
+                folder_message_filter = Q(
+                    messages__is_draft=True
+                )
+
+            else:
+
+                folder_message_filter = Q(
+                    messages__folder="inbox",
+                    messages__is_draft=False,
+                )
+
+
             conversations = (
                 conversations.select_related(
                     "last_message",
                     "email_account",
                 )
                 .annotate(
-                    latest_message_at=Max(
-                        "messages__received_at"
-                    ),
-                    effective_message_at=Coalesce(
-                        "last_message_at",
-                        Max("messages__received_at"),
-                        "created_at",
+                    folder_message_at=Max(
+                        "messages__received_at",
+                        filter=folder_message_filter,
                     ),
                 )
                 .order_by(
-                    "-effective_message_at",
+                    "-folder_message_at",
                     "-created_at",
                 )
                 .distinct()
@@ -188,13 +204,52 @@ class UnifiedConversationInboxAPIView(APIView):
 
             for conv in page_obj:
 
-                last = conv.last_message if conv.last_message else None
-                if last is None:
-                    last = (
-                        conv.messages.filter(user=user)
-                        .order_by("-received_at")
-                        .first()
+                message_scope = (
+                    conv.messages
+                    .filter(
+                        user=user
                     )
+                )
+
+
+                if folder == "sent":
+
+                    message_scope = (
+                        message_scope
+                        .filter(
+                            folder="sent",
+                            is_draft=False,
+                        )
+                    )
+
+                elif folder == "draft":
+
+                    message_scope = (
+                        message_scope
+                        .filter(
+                            is_draft=True
+                        )
+                    )
+
+                else:
+
+                    message_scope = (
+                        message_scope
+                        .filter(
+                            folder="inbox",
+                            is_draft=False,
+                        )
+                    )
+
+
+                last = (
+                    message_scope
+                    .order_by(
+                        "-received_at",
+                        "-id",
+                    )
+                    .first()
+                )
 
                 subject = (
                     last.subject
@@ -212,9 +267,17 @@ class UnifiedConversationInboxAPIView(APIView):
                     else last.platform if last else ""
                 )
                 last_message_time = (
-                    conv.last_message_at
-                    or getattr(conv, "latest_message_at", None)
-                    or (last.received_at if last else None)
+                    getattr(
+                        conv,
+                        "folder_message_at",
+                        None,
+                    )
+                    or
+                    (
+                        last.received_at
+                        if last
+                        else None
+                    )
                 )
 
                 results.append({

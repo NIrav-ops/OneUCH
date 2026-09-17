@@ -183,6 +183,7 @@ CORS_ALLOW_CREDENTIALS = os.environ.get(
 CORS_ALLOW_HEADERS = (
     *default_headers,
     "x-oneuch-csrf",
+    "idempotency-key",
 )
 
 ROOT_URLCONF = 'backend.urls'

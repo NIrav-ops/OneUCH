@@ -92,7 +92,7 @@ export default function RecipientChipInput({
                       term || ""
                     ).trim(),
 
-                  limit: 8,
+                  limit: 20,
                 },
               }
             );
