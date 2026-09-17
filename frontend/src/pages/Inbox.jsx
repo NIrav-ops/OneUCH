@@ -387,6 +387,11 @@ export default function Inbox() {
 
   const [syncStatuses, setSyncStatuses] = useState([]);
 
+  const [mailAdoption, setMailAdoption] = useState({
+    summary: {},
+    providers: [],
+  });
+
   const [
     selectedAccountId,
     setSelectedAccountId,
@@ -614,6 +619,50 @@ export default function Inbox() {
 
 
   // ==========================================================
+  // LOAD MAILBOX HEALTH
+  // ==========================================================
+
+  const loadMailAdoption = useCallback(async () => {
+
+    try {
+
+      const response =
+        await axios.get(
+          "/api/mail-adoption/"
+        );
+
+      const data =
+        response.data || {};
+
+      setMailAdoption({
+        summary:
+          data.summary || {},
+
+        providers:
+          Array.isArray(
+            data.providers
+          )
+            ? data.providers
+            : [],
+      });
+
+      return data;
+
+    } catch (err) {
+
+      console.error(
+        "Mailbox health error:",
+        err
+      );
+
+      return null;
+
+    }
+
+  }, []);
+
+
+  // ==========================================================
   // LOAD DRAFTS
   // ==========================================================
 
@@ -653,10 +702,12 @@ export default function Inbox() {
 
     loadAccounts();
     loadSyncStatus();
+    loadMailAdoption();
 
   }, [
     loadAccounts,
     loadSyncStatus,
+    loadMailAdoption,
   ]);
 
 
@@ -686,51 +737,78 @@ export default function Inbox() {
   };
 
 
-  const formatSyncStatus = (platform) => {
+  const getAdoptionProviderForAccount = (
+    accountId
+  ) => {
 
-    const item =
-      getSyncStatus(
-        platform
-      );
+    if (!accountId) {
+      return null;
+    }
+
+    return (
+      mailAdoption.providers || []
+    ).find(
+      (item) =>
+        String(
+          item.account_id || ""
+        ) ===
+        String(accountId)
+    ) || null;
+
+  };
+
+
+  const getMailboxHealthLabel = (
+    item
+  ) => {
 
     if (!item) {
-      return "Not synced";
+      return "";
     }
 
     if (
-      item.status ===
+      item.attention_required
+    ) {
+
+      return (
+        item.connection_status ===
+        "admin_disabled"
+          ? "Disabled"
+          : "Reconnect"
+      );
+
+    }
+
+
+    const syncItem =
+      getSyncStatus(
+        item.account_type
+      );
+
+
+    if (
+      syncItem?.status ===
       "syncing"
     ) {
 
       return (
-        `Syncing ${item.progress || 0}%`
+        `Syncing ${
+          syncItem.progress || 0
+        }%`
       );
 
     }
 
+
     if (
-      item.status ===
+      syncItem?.status ===
       "failed"
     ) {
       return "Sync failed";
     }
 
-    if (
-      item.last_synced_at
-    ) {
 
-      return (
-        `Synced ${new Date(
-          item.last_synced_at
-        ).toLocaleString()}`
-      );
-
-    }
-
-    return (
-      item.status ||
-      "Not synced"
-    );
+    return "";
 
   };
 
@@ -3764,6 +3842,34 @@ export default function Inbox() {
   };
 
 
+  const selectedMailboxHealth =
+    getAdoptionProviderForAccount(
+      selectedAccountId
+    );
+
+
+  const selectedMailboxStatus =
+    getMailboxHealthLabel(
+      selectedMailboxHealth
+    );
+
+
+  const attentionMailboxCount =
+    Number(
+      mailAdoption.summary
+        ?.attention_required ||
+      0
+    );
+
+
+  const syncingMailboxCount =
+    syncStatuses.filter(
+      (item) =>
+        item.status ===
+        "syncing"
+    ).length;
+
+
   // ==========================================================
   // RENDER
   // ==========================================================
@@ -3869,118 +3975,196 @@ export default function Inbox() {
 
 
             {/* =============================================
-                COMPACT PROVIDER HEALTH
+                MAILBOX HEALTH / FILTER
             ============================================== */}
 
             <div className="mt-1.5 rounded-lg border border-slate-200 bg-slate-50/70 px-2 py-1.5">
 
-              <div className="grid grid-cols-2 gap-2">
+              {(attentionMailboxCount > 0 ||
+                syncingMailboxCount > 0) && (
 
-                {[
-                  {
-                    provider:
-                      "gmail",
-                    label:
-                      "Gmail",
-                  },
-                  {
-                    provider:
-                      "outlook",
-                    label:
-                      "Microsoft 365",
-                  },
-                ].map(
-                  (provider) => {
+                <div className="mb-1.5 flex justify-end">
 
-                    const connected =
-                      accounts.some(
-                        (account) =>
-                          account.account_type ===
-                          provider.provider
+                  {attentionMailboxCount > 0 ? (
+
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-semibold text-amber-800">
+                      {attentionMailboxCount}
+                      {" "}
+                      needs attention
+                    </span>
+
+                  ) : (
+
+                    <span className="text-[9px] font-semibold text-slate-500">
+                      Syncing
+                    </span>
+
+                  )}
+
+                </div>
+
+              )}
+
+
+              <div>
+
+                <label className="sr-only">
+                  View mailbox
+                </label>
+
+                <select
+                  value={
+                    selectedAccountId
+                  }
+                  onChange={(event) =>
+                    setSelectedAccountId(
+                      event.target.value
+                    )
+                  }
+                  className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-slate-700 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
+                >
+
+                  <option value="">
+                    All mailboxes ({accounts.length})
+                  </option>
+
+
+                  {accounts.map(
+                    (account) => {
+
+                      const health =
+                        getAdoptionProviderForAccount(
+                          account.id
+                        );
+
+                      const healthLabel =
+                        getMailboxHealthLabel(
+                          health
+                        );
+
+                      return (
+
+                        <option
+                          key={
+                            account.id
+                          }
+                          value={
+                            account.id
+                          }
+                        >
+                          {account.email_address}
+                          {" · "}
+                          {account.account_type
+                            ?.toUpperCase()}
+                          {healthLabel
+                            ? ` · ${healthLabel}`
+                            : ""}
+                        </option>
+
                       );
 
+                    }
+                  )}
 
-                    const busy =
-                      syncing ===
-                      provider.provider;
-
-
-                    return (
-
-                      <div
-                        key={
-                          provider.provider
-                        }
-                        title={formatSyncStatus(
-                          provider.provider
-                        )}
-                        className="flex min-w-0 items-center gap-1.5"
-                      >
-
-                        <span
-                          className={`h-2 w-2 shrink-0 rounded-full ${
-                            connected
-                              ? "bg-emerald-500"
-                              : "bg-slate-300"
-                          }`}
-                        />
-
-
-                        <span className="truncate text-[10px] font-semibold text-slate-700">
-                          {provider.label}
-                        </span>
-
-
-                        <span className="sr-only">
-                          {formatSyncStatus(
-                            provider.provider
-                          )}
-                        </span>
-
-
-                        {!connected ? (
-
-                          <button
-                            type="button"
-                            onClick={() =>
-                              connectProvider(
-                                provider.provider
-                              )
-                            }
-                            className="ml-auto text-[9px] font-semibold text-slate-600 hover:text-slate-950"
-                          >
-                            Connect
-                          </button>
-
-                        ) : (
-
-                          <button
-                            type="button"
-                            disabled={
-                              busy
-                            }
-                            onClick={() =>
-                              syncProvider(
-                                provider.provider
-                              )
-                            }
-                            className="ml-auto text-[9px] font-semibold text-slate-600 hover:text-slate-950 disabled:cursor-wait disabled:opacity-50"
-                          >
-                            {busy
-                              ? "Syncing..."
-                              : "Sync"}
-                          </button>
-
-                        )}
-
-                      </div>
-
-                    );
-
-                  }
-                )}
+                </select>
 
               </div>
+
+
+              {selectedMailboxHealth && (
+                selectedMailboxStatus ||
+                (
+                  selectedMailboxHealth.connected
+                  &&
+                  [
+                    "gmail",
+                    "outlook",
+                  ].includes(
+                    selectedMailboxHealth
+                      .account_type
+                  )
+                )
+              ) && (
+
+                <div className="mt-1.5 flex items-center gap-2 border-t border-slate-200 pt-1.5">
+
+                  {selectedMailboxStatus && (
+
+                    <span
+                      className={`text-[9px] font-semibold ${
+                        selectedMailboxHealth
+                          .attention_required
+                          ? "text-amber-700"
+                          : selectedMailboxStatus ===
+                            "Sync failed"
+                            ? "text-rose-700"
+                            : "text-slate-500"
+                      }`}
+                    >
+                      {selectedMailboxStatus}
+                    </span>
+
+                  )}
+
+
+                  {selectedMailboxHealth
+                    .attention_required
+                    &&
+                    selectedMailboxHealth
+                      .auth_mode ===
+                      "oauth" ? (
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        connectProvider(
+                          selectedMailboxHealth
+                            .account_type
+                        )
+                      }
+                      className="ml-auto text-[9px] font-semibold text-amber-700 hover:text-amber-900"
+                    >
+                      Reconnect
+                    </button>
+
+                  ) : selectedMailboxHealth
+                      .connected
+                    &&
+                    [
+                      "gmail",
+                      "outlook",
+                    ].includes(
+                      selectedMailboxHealth
+                        .account_type
+                    ) ? (
+
+                    <button
+                      type="button"
+                      disabled={
+                        syncing ===
+                        selectedMailboxHealth
+                          .account_type
+                      }
+                      onClick={() =>
+                        syncProvider(
+                          selectedMailboxHealth
+                            .account_type
+                        )
+                      }
+                      className="ml-auto text-[9px] font-semibold text-slate-600 hover:text-slate-950 disabled:cursor-wait disabled:opacity-50"
+                    >
+                      {syncing ===
+                      selectedMailboxHealth
+                        .account_type
+                        ? "Syncing..."
+                        : "Sync"}
+                    </button>
+
+                  ) : null}
+
+                </div>
+
+              )}
 
 
               {syncNotice && (
@@ -3990,58 +4174,6 @@ export default function Inbox() {
                 </p>
 
               )}
-
-            </div>
-
-
-            {/* =============================================
-                ACCOUNT FILTER
-            ============================================== */}
-
-            <div className="mt-1.5">
-
-              <label className="sr-only">
-                View mailbox
-              </label>
-
-              <select
-                value={
-                  selectedAccountId
-                }
-                onChange={(event) =>
-                  setSelectedAccountId(
-                    event.target.value
-                  )
-                }
-                className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-slate-700 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
-              >
-
-                <option value="">
-                  All connected mailboxes
-                </option>
-
-
-                {accounts.map(
-                  (account) => (
-
-                    <option
-                      key={
-                        account.id
-                      }
-                      value={
-                        account.id
-                      }
-                    >
-                      {account.email_address}
-                      {" ? "}
-                      {account.account_type
-                        ?.toUpperCase()}
-                    </option>
-
-                  )
-                )}
-
-              </select>
 
             </div>
 

@@ -26,6 +26,10 @@ from googleapis.utils import (
     get_gmail_credentials,
 )
 
+from email_accounts.services.imap_smtp import (
+    load_imap_attachment_content,
+)
+
 from inbox.models import (
     InboxMessage,
 )
@@ -482,6 +486,60 @@ class DownloadAttachmentAPIView(
                             or
                             content_type
                         ),
+                    )
+                )
+
+
+            # =================================================
+            # IMAP / OTHER WORK EMAIL
+            # =================================================
+
+            if message.platform == "imap":
+
+                email_account = (
+                    message.email_account
+                )
+
+
+                if (
+                    email_account is None
+                    or
+                    email_account.user_id
+                    !=
+                    request.user.id
+                    or
+                    (
+                        message.organization_id
+                        and
+                        email_account.organization_id
+                        !=
+                        message.organization_id
+                    )
+                ):
+
+                    return HttpResponse(
+                        "Attachment download failed",
+                        status=404,
+                    )
+
+
+                file_data = (
+                    load_imap_attachment_content(
+                        email_account=(
+                            email_account
+                        ),
+                        attachment_id=(
+                            attachment_id
+                        ),
+                    )
+                )
+
+
+                return (
+                    self._build_response(
+                        file_data,
+                        filename,
+                        content_type,
                     )
                 )
 

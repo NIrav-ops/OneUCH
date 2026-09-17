@@ -594,6 +594,161 @@ class MailExperienceTests(
 
 
     @patch(
+        "inbox.views_attachment."
+        "load_imap_attachment_content"
+    )
+    def test_known_imap_attachment_download_uses_governed_loader(
+        self,
+        mocked_loader,
+    ):
+        imap_account = (
+            EmailAccount.objects.create(
+                user=self.user,
+                organization=(
+                    self.organization
+                ),
+                email_address=(
+                    "work@oneuch.test"
+                ),
+                account_type="imap",
+                credential_status="active",
+                is_active=True,
+            )
+        )
+
+
+        conversation = (
+            Conversation.objects.create(
+                user=self.user,
+                organization=(
+                    self.organization
+                ),
+                email_account=(
+                    imap_account
+                ),
+                subject="IMAP attachment",
+                conversation_key=(
+                    "p3c-imap-attachment"
+                ),
+                external_conversation_id=(
+                    "imap-thread"
+                ),
+            )
+        )
+
+
+        locator = (
+            "imap:inbox:12345:100:2"
+        )
+
+
+        message = (
+            InboxMessage.objects.create(
+                user=self.user,
+                organization=(
+                    self.organization
+                ),
+                email_account=(
+                    imap_account
+                ),
+                conversation=(
+                    conversation
+                ),
+                platform="imap",
+                folder="inbox",
+                direction="inbound",
+                external_message_id=(
+                    "imap-rfc822-test"
+                ),
+                external_conversation_id=(
+                    "imap-thread"
+                ),
+                sender=(
+                    "sender@example.com"
+                ),
+                recipients=(
+                    imap_account.email_address
+                ),
+                subject=(
+                    "IMAP attachment"
+                ),
+                body="Body",
+                attachment_meta=[
+                    {
+                        "filename":
+                            "work-file.pdf",
+
+                        "attachment_id":
+                            locator,
+
+                        "mime_type":
+                            "application/pdf",
+                    }
+                ],
+                received_at=(
+                    timezone.now()
+                ),
+                status="sent",
+            )
+        )
+
+
+        mocked_loader.return_value = (
+            b"imap-attachment-data"
+        )
+
+
+        self.client.force_authenticate(
+            user=self.user
+        )
+
+
+        response = (
+            self.client.get(
+                (
+                    "/api/inbox/attachments/"
+                    + str(
+                        message.id
+                    )
+                    + "/"
+                    + locator
+                    + "/"
+                )
+            )
+        )
+
+
+        self.assertEqual(
+            response.status_code,
+            200,
+        )
+
+
+        self.assertEqual(
+            response.content,
+            b"imap-attachment-data",
+        )
+
+
+        self.assertIn(
+            "work-file.pdf",
+            response[
+                "Content-Disposition"
+            ],
+        )
+
+
+        mocked_loader.assert_called_once_with(
+            email_account=(
+                imap_account
+            ),
+            attachment_id=(
+                locator
+            ),
+        )
+
+
+    @patch(
         "inbox.views_attachment.build"
     )
     def test_unknown_attachment_id_is_rejected_before_provider_fetch(
