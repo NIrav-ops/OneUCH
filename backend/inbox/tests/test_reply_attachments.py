@@ -850,11 +850,16 @@ class ReplyAttachmentProviderTests(
     )
     @patch(
         "email_accounts.services.microsoft_api."
+        "requests.patch"
+    )
+    @patch(
+        "email_accounts.services.microsoft_api."
         "get_valid_oauth_token"
     )
     def test_outlook_reply_attachment_uses_reply_draft_pipeline(
         self,
         mocked_token,
+        mocked_patch,
         mocked_post,
         mocked_delete,
     ):
@@ -867,6 +872,19 @@ class ReplyAttachmentProviderTests(
         mocked_token.return_value = (
             token
         )
+
+
+        recipient_updated = MagicMock()
+
+        recipient_updated.status_code = (
+            200
+        )
+
+        mocked_patch.return_value = (
+            recipient_updated
+        )
+
+
 
 
         created = MagicMock()
@@ -1035,11 +1053,16 @@ class ReplyAttachmentProviderTests(
     )
     @patch(
         "email_accounts.services.microsoft_api."
+        "requests.patch"
+    )
+    @patch(
+        "email_accounts.services.microsoft_api."
         "get_valid_oauth_token"
     )
     def test_outlook_reply_all_attachment_uses_create_reply_all(
         self,
         mocked_token,
+        mocked_patch,
         mocked_post,
         mocked_delete,
     ):
@@ -1052,6 +1075,19 @@ class ReplyAttachmentProviderTests(
         mocked_token.return_value = (
             token
         )
+
+
+        recipient_updated = MagicMock()
+
+        recipient_updated.status_code = (
+            200
+        )
+
+        mocked_patch.return_value = (
+            recipient_updated
+        )
+
+
 
 
         created = MagicMock()

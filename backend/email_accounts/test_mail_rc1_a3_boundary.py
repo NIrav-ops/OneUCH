@@ -56,8 +56,10 @@ from inbox.tasks import (
 )
 
 
-ROOT = Path(
-    r"D:\UnifiedMessenger\unified-comm-hub"
+ROOT = (
+    Path(__file__)
+    .resolve()
+    .parents[2]
 )
 
 

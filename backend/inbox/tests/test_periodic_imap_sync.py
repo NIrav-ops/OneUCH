@@ -89,6 +89,9 @@ class PeriodicIMAPSyncTests(
         )
 
     @patch(
+        "inbox.tasks.reconcile_imap_trash"
+    )
+    @patch(
         "inbox.tasks.release_sync_lock"
     )
     @patch(
@@ -106,6 +109,7 @@ class PeriodicIMAPSyncTests(
         fetch_imap_emails,
         analyze_approvals,
         release_sync_lock,
+        reconcile_trash,
     ):
         account = self.create_account(
             password="temporary-app-password",

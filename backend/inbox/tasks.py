@@ -6,6 +6,14 @@ from celery import shared_task
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 
+from channels.layers import (
+    get_channel_layer,
+)
+
+from asgiref.sync import (
+    async_to_sync,
+)
+
 from django.db.models import (
     Q,
 )
@@ -20,13 +28,27 @@ from oauth_tokens.models import OAuthToken
 
 from inbox.models import InboxMessage
 from inbox.models import Conversation
-from inbox.utils.sync_lock import acquire_sync_lock, release_sync_lock
+from inbox.utils.sync_lock import (
+    BACKGROUND_MAILBOX_SYNC_LOCK_TIMEOUT_SECONDS,
+    acquire_sync_lock,
+    release_sync_lock,
+)
+
+from inbox.utils.sync_lock import (
+    reserve_sync_dispatch,
+    release_sync_dispatch,
+)
 
 from notifications.services import create_notification
 
 from email_accounts.services.gmail_api import send_gmail_reply
 from email_accounts.services.microsoft_api import send_outlook_reply
 from email_accounts.services.imap_smtp import send_via_smtp, fetch_imap_emails
+
+from email_accounts.services.imap_convergence import (
+    IMAPConvergenceError,
+    reconcile_imap_trash,
+)
 
 from inbox.services.persistent_outbound_attachments import (
     load_persisted_outbound_attachments,
@@ -76,6 +98,68 @@ INTELLIGENCE_HANDOFF_BATCH_SIZE = (
 )
 
 
+def _broadcast_inbox_sync_event(
+    *,
+    account,
+    event,
+):
+    try:
+
+        channel_layer = (
+            get_channel_layer()
+        )
+
+
+        if channel_layer is None:
+            return False
+
+
+        async_to_sync(
+            channel_layer.group_send
+        )(
+            f"inbox_{account.user_id}",
+            {
+                "type":
+                    "inbox_update",
+
+                "data": {
+                    "event":
+                        event,
+
+                    "account_id":
+                        account.id,
+
+                    "provider":
+                        account.account_type,
+                },
+            },
+        )
+
+
+        return True
+
+
+    except Exception as exc:
+
+        log_event(
+            logger,
+            "warning",
+            "sync.realtime.broadcast_failed",
+            account_id=(
+                account.id
+            ),
+            provider=(
+                account.account_type
+            ),
+            error_type=(
+                type(exc).__name__
+            ),
+        )
+
+
+        return False
+
+
 def _pending_mail_intelligence_message_ids(
     *,
     account,
@@ -103,6 +187,9 @@ def _pending_mail_intelligence_message_ids(
             user=account.user,
             email_account=account,
             is_draft=False,
+        )
+        .exclude(
+            folder="trash"
         )
     )
 
@@ -237,6 +324,7 @@ def _queue_scoped_mail_intelligence(
 @shared_task
 def sync_email_account(
     email_account_id,
+    dispatch_token=None,
 ):
     """
     Governed single-mailbox synchronization task.
@@ -269,6 +357,12 @@ def sync_email_account(
 
     if account is None:
 
+        if dispatch_token:
+            release_sync_dispatch(
+                email_account_id,
+                dispatch_token,
+            )
+
         log_event(
             logger,
             "warning",
@@ -289,9 +383,19 @@ def sync_email_account(
 
     lock = (
         acquire_sync_lock(
-            account.id
+            account.id,
+            timeout=(
+                BACKGROUND_MAILBOX_SYNC_LOCK_TIMEOUT_SECONDS
+            ),
         )
     )
+
+
+    if dispatch_token:
+        release_sync_dispatch(
+            account.id,
+            dispatch_token,
+        )
 
 
     if not lock:
@@ -489,6 +593,32 @@ def sync_email_account(
             )
 
 
+            try:
+                reconcile_imap_trash(
+                    user=account.user,
+                    email_account=(
+                        account
+                    ),
+                )
+
+            except IMAPConvergenceError as exc:
+                log_event(
+                    logger,
+                    "warning",
+                    (
+                        "sync.imap_trash_"
+                        "reconciliation.failed"
+                    ),
+                    account_id=(
+                        account.id
+                    ),
+                    provider="imap",
+                    error_type=(
+                        type(exc).__name__
+                    ),
+                )
+
+
         else:
 
             raise ValueError(
@@ -523,6 +653,12 @@ def sync_email_account(
                     "batch_count"
                 ]
             ),
+        )
+
+
+        _broadcast_inbox_sync_event(
+            account=account,
+            event="sync_completed",
         )
 
 
@@ -613,6 +749,8 @@ def periodic_sync_all_users():
 
     queued_count = 0
 
+    skipped_count = 0
+
     failed_count = 0
 
 
@@ -620,16 +758,54 @@ def periodic_sync_all_users():
         account_ids
     ):
 
+        dispatch_token = None
+
         try:
 
+            dispatch_token = (
+                reserve_sync_dispatch(
+                    account_id
+                )
+            )
+
+
+            if not dispatch_token:
+
+                skipped_count += 1
+
+                log_event(
+                    logger,
+                    "info",
+                    "sync.account.queue_skipped",
+                    account_id=(
+                        account_id
+                    ),
+                    reason=(
+                        "already_running_or_queued"
+                    ),
+                )
+
+                continue
+
+
             sync_email_account.delay(
-                account_id
+                account_id,
+                dispatch_token=(
+                    dispatch_token
+                ),
             )
 
             queued_count += 1
 
 
         except Exception as exc:
+
+            if dispatch_token:
+
+                release_sync_dispatch(
+                    account_id,
+                    dispatch_token,
+                )
 
             failed_count += 1
 
@@ -657,6 +833,9 @@ def periodic_sync_all_users():
         queued_count=(
             queued_count
         ),
+        skipped_count=(
+            skipped_count
+        ),
         failed_count=(
             failed_count
         ),
@@ -674,6 +853,9 @@ def periodic_sync_all_users():
     return {
         "queued":
             queued_count,
+
+        "skipped":
+            skipped_count,
 
         "failed":
             failed_count,

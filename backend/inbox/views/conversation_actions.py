@@ -1,5 +1,3 @@
-import imaplib
-
 from rest_framework.permissions import (
     IsAuthenticated,
 )
@@ -14,6 +12,11 @@ from rest_framework.views import (
 
 from inbox.models import (
     Conversation,
+)
+
+from email_accounts.services.imap_convergence import (
+    IMAPConvergenceError,
+    trash_imap_conversation,
 )
 
 from inbox.services.mail_mutations import (
@@ -471,102 +474,24 @@ class DeleteConversationAPIView(
             "imap"
         ):
 
-            password = (
-                request.data.get(
-                    "password"
+            try:
+
+                trash_imap_conversation(
+                    conversation=(
+                        conversation
+                    ),
+                    user=request.user,
                 )
-            )
 
-
-            if not password:
+            except IMAPConvergenceError as exc:
 
                 return Response(
                     {
                         "error":
-                            "Password required"
+                            str(exc)
                     },
-                    status=400,
+                    status=502,
                 )
-
-
-            mail = (
-                imaplib.IMAP4_SSL(
-                    account.imap_server,
-                    account.imap_port,
-                )
-            )
-
-
-            try:
-
-                mail.login(
-                    account.email_address,
-                    password,
-                )
-
-                mail.select(
-                    '"[Gmail]/All Mail"'
-                )
-
-
-                for message in (
-                    conversation.messages
-                    .filter(
-                        user=request.user,
-                        is_draft=False,
-                    )
-                    .exclude(
-                        folder="trash"
-                    )
-                ):
-
-                    uid = (
-                        message
-                        .external_message_id
-                        .split(
-                            "_"
-                        )[
-                            -1
-                        ]
-                    )
-
-
-                    mail.uid(
-                        "STORE",
-                        uid,
-                        "+X-GM-LABELS",
-                        "(\\Trash)",
-                    )
-
-                    mail.uid(
-                        "STORE",
-                        uid,
-                        "-X-GM-LABELS",
-                        "(\\Inbox)",
-                    )
-
-
-                    message.folder = (
-                        "trash"
-                    )
-
-                    message.save(
-                        update_fields=[
-                            "folder"
-                        ]
-                    )
-
-            finally:
-
-                try:
-                    mail.logout()
-                except Exception:
-                    pass
-
-
-            refresh_conversation_local_state(
-                conversation
-            )
 
 
         else:

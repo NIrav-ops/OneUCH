@@ -275,11 +275,20 @@ class SyncPathUnificationTests(
 
     @patch(
         "inbox.tasks."
+        "reserve_sync_dispatch",
+        side_effect=[
+            "dispatch-gmail",
+            "dispatch-outlook",
+        ],
+    )
+    @patch(
+        "inbox.tasks."
         "sync_email_account.delay"
     )
     def test_scheduler_fans_out_through_same_account_task(
         self,
         queue_sync,
+        reserve_dispatch,
     ):
 
         gmail = (
@@ -333,6 +342,72 @@ class SyncPathUnificationTests(
                 outlook.id,
             ],
         )
+
+
+        self.assertCountEqual(
+            [
+                item.kwargs[
+                    "dispatch_token"
+                ]
+                for item
+                in queue_sync.call_args_list
+            ],
+            [
+                "dispatch-gmail",
+                "dispatch-outlook",
+            ],
+        )
+
+        self.assertEqual(
+            reserve_dispatch.call_count,
+            2,
+        )
+
+
+    @patch(
+        "inbox.tasks."
+        "reserve_sync_dispatch",
+        return_value=None,
+    )
+    @patch(
+        "inbox.tasks."
+        "sync_email_account.delay"
+    )
+    def test_scheduler_skips_mailbox_already_running_or_reserved(
+        self,
+        queue_sync,
+        reserve_dispatch,
+    ):
+        account = (
+            self.account(
+                "gmail"
+            )
+        )
+
+        result = (
+            periodic_sync_all_users.run()
+        )
+
+        self.assertEqual(
+            result["queued"],
+            0,
+        )
+
+        self.assertEqual(
+            result["skipped"],
+            1,
+        )
+
+        self.assertEqual(
+            result["failed"],
+            0,
+        )
+
+        reserve_dispatch.assert_called_once_with(
+            account.id
+        )
+
+        queue_sync.assert_not_called()
 
 
     @patch(

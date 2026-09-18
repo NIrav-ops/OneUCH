@@ -941,6 +941,9 @@ class MailRC1C5DRecipientIntelligenceTests(
     # ========================================================
 
     @patch(
+        "inbox.tasks.reconcile_imap_trash"
+    )
+    @patch(
         "inbox.tasks.release_sync_lock"
     )
     @patch(
@@ -970,6 +973,7 @@ class MailRC1C5DRecipientIntelligenceTests(
         followup_delay,
         expected_delay,
         release_lock,
+        reconcile_trash,
     ):
         own_message = (
             self.message(
@@ -1137,6 +1141,9 @@ class MailRC1C5DRecipientIntelligenceTests(
     # ========================================================
 
     @patch(
+        "inbox.tasks.reconcile_imap_trash"
+    )
+    @patch(
         "inbox.tasks.release_sync_lock"
     )
     @patch(
@@ -1166,6 +1173,7 @@ class MailRC1C5DRecipientIntelligenceTests(
         followup_delay,
         expected_delay,
         release_lock,
+        reconcile_trash,
     ):
         self.message(
             action_analyzed=True,

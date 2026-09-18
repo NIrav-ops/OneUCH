@@ -1246,11 +1246,17 @@ export default function Inbox() {
 
 
   // ==========================================================
-  // REALTIME REF
+  // REALTIME REFS
   // ==========================================================
 
   const loadConversationsRef =
     useRef(loadConversations);
+
+  const selectedIdRef =
+    useRef(selectedId);
+
+  const activeTabRef =
+    useRef(activeTab);
 
   const threadScrollRef =
     useRef(null);
@@ -1264,100 +1270,53 @@ export default function Inbox() {
   }, [loadConversations]);
 
 
-  // ==========================================================
-  // REALTIME WEBSOCKET
-  // ==========================================================
+  useEffect(() => {
+
+    selectedIdRef.current =
+      selectedId;
+
+  }, [selectedId]);
+
 
   useEffect(() => {
 
-    const token =
-      getAccessToken();
+    activeTabRef.current =
+      activeTab;
 
-
-    if (!token) {
-      return undefined;
-    }
-
-
-    const socket =
-      createInboxWebSocket({
-        baseUrl:
-          WS_BASE_URL,
-        accessToken:
-          token,
-      });
-
-
-    socket.onopen = () => {
-
-      console.log(
-        "WS Connected"
-      );
-
-    };
-
-
-    socket.onmessage = (event) => {
-
-      console.log(
-        "Realtime update:",
-        event.data
-      );
-
-      loadConversationsRef.current();
-
-    };
-
-
-    socket.onerror = (err) => {
-
-      console.error(
-        "WS Error:",
-        err
-      );
-
-    };
-
-
-    socket.onclose = () => {
-
-      console.log(
-        "WS Closed"
-      );
-
-    };
-
-
-    return () => {
-
-      socket.close();
-
-    };
-
-  }, []);
+  }, [activeTab]);
 
 
   // ==========================================================
   // LOAD CONVERSATION THREAD
   // ==========================================================
 
-  useEffect(() => {
+  const loadConversationThread =
+    useCallback(async (
+      conversationId
+    ) => {
 
-    if (!selectedId) {
-      return;
-    }
-
-
-    if (activeTab === "draft") {
-      return;
-    }
+      if (!conversationId) {
+        return;
+      }
 
 
-    axios
-      .get(
-        `/api/inbox/conversations/${selectedId}/`
-      )
-      .then((response) => {
+      try {
+
+        const response =
+          await axios.get(
+            `/api/inbox/conversations/${conversationId}/`
+          );
+
+
+        if (
+          String(
+            selectedIdRef.current || ""
+          ) !==
+          String(conversationId)
+        ) {
+          return;
+        }
+
 
         setMessages(
           response.data?.messages || []
@@ -1368,19 +1327,29 @@ export default function Inbox() {
         );
 
 
-        return axios.post(
-          `/api/inbox/conversation/${selectedId}/mark-read/`
+        await axios.post(
+          `/api/inbox/conversation/${conversationId}/mark-read/`
         );
 
-      })
-      .then(() => {
+
+        if (
+          String(
+            selectedIdRef.current || ""
+          ) !==
+          String(conversationId)
+        ) {
+          return;
+        }
+
 
         setConversations(
           (items) =>
             items.map(
               (item) =>
-                item.conversation_id ===
-                selectedId
+                String(
+                  item.conversation_id
+                ) ===
+                String(conversationId)
                   ? {
                       ...item,
                       unread_count: 0,
@@ -1389,19 +1358,205 @@ export default function Inbox() {
             )
         );
 
-      })
-      .catch((err) => {
+
+      } catch (err) {
 
         console.error(
           "Thread load error:",
           err
         );
 
-      });
+      }
+
+    }, []);
+
+
+  // ==========================================================
+  // REALTIME WEBSOCKET
+  // ==========================================================
+
+  useEffect(() => {
+
+    let socket = null;
+
+    let reconnectTimer = null;
+
+    let stopped = false;
+
+    let reconnectAttempt = 0;
+
+
+    const connect = () => {
+
+      if (stopped) {
+        return;
+      }
+
+
+      const token =
+        getAccessToken();
+
+
+      if (!token) {
+        return;
+      }
+
+
+      socket =
+        createInboxWebSocket({
+          baseUrl:
+            WS_BASE_URL,
+          accessToken:
+            token,
+        });
+
+
+      socket.onopen = () => {
+
+        reconnectAttempt = 0;
+
+        console.log(
+          "WS Connected"
+        );
+
+      };
+
+
+      socket.onmessage = (event) => {
+
+        console.log(
+          "Realtime update:",
+          event.data
+        );
+
+
+        loadConversationsRef.current();
+
+
+        const currentSelectedId =
+          selectedIdRef.current;
+
+
+        if (
+          currentSelectedId &&
+          activeTabRef.current !==
+            "draft"
+        ) {
+
+          loadConversationThread(
+            currentSelectedId
+          );
+
+        }
+
+      };
+
+
+      socket.onerror = (err) => {
+
+        console.error(
+          "WS Error:",
+          err
+        );
+
+      };
+
+
+      socket.onclose = () => {
+
+        console.log(
+          "WS Closed"
+        );
+
+
+        if (stopped) {
+          return;
+        }
+
+
+        const delay =
+          Math.min(
+            1000 * (
+              2 ** reconnectAttempt
+            ),
+            30000
+          );
+
+
+        reconnectAttempt += 1;
+
+
+        reconnectTimer =
+          window.setTimeout(
+            connect,
+            delay
+          );
+
+      };
+
+    };
+
+
+    connect();
+
+
+    return () => {
+
+      stopped = true;
+
+
+      if (
+        reconnectTimer !== null
+      ) {
+
+        window.clearTimeout(
+          reconnectTimer
+        );
+
+      }
+
+
+      if (
+        socket &&
+        socket.readyState < 2
+      ) {
+
+        socket.close();
+
+      }
+
+    };
+
+  }, [loadConversationThread]);
+
+
+  // ==========================================================
+  // LOAD SELECTED THREAD
+  // ==========================================================
+
+  useEffect(() => {
+
+    if (!selectedId) {
+      return;
+    }
+
+
+    if (
+      activeTab ===
+      "draft"
+    ) {
+      return;
+    }
+
+
+    loadConversationThread(
+      selectedId
+    );
 
   }, [
     selectedId,
     activeTab,
+    loadConversationThread,
   ]);
 
 
@@ -4824,7 +4979,7 @@ export default function Inbox() {
                       </button>
 
 
-                      <details className="relative">
+                      <details key={selectedId} className="relative">
                         <summary
                           className="cursor-pointer list-none rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
                           title="More conversation actions"
@@ -4836,9 +4991,15 @@ export default function Inbox() {
 
                           <button
                             type="button"
-                            onClick={
-                              markConversationUnread
-                            }
+                            onClick={(event) => {
+                              event.currentTarget
+                                .closest("details")
+                                ?.removeAttribute(
+                                  "open"
+                                );
+
+                              markConversationUnread();
+                            }}
                             className="block w-full rounded-lg px-3 py-2 text-left text-xs font-medium text-slate-600 hover:bg-slate-50"
                           >
                             Mark unread
@@ -4847,9 +5008,15 @@ export default function Inbox() {
 
                           <button
                             type="button"
-                            onClick={
-                              toggleSelectedConversationStar
-                            }
+                            onClick={(event) => {
+                              event.currentTarget
+                                .closest("details")
+                                ?.removeAttribute(
+                                  "open"
+                                );
+
+                              toggleSelectedConversationStar();
+                            }}
                             className="block w-full rounded-lg px-3 py-2 text-left text-xs font-medium text-slate-600 hover:bg-slate-50"
                           >
                             {conversations.find(
@@ -4864,9 +5031,15 @@ export default function Inbox() {
 
                           <button
                             type="button"
-                            onClick={
-                              openSelectedMessageInProvider
-                            }
+                            onClick={(event) => {
+                              event.currentTarget
+                                .closest("details")
+                                ?.removeAttribute(
+                                  "open"
+                                );
+
+                              openSelectedMessageInProvider();
+                            }}
                             className="block w-full rounded-lg px-3 py-2 text-left text-xs font-medium text-slate-600 hover:bg-slate-50"
                           >
                             Open Provider
@@ -4878,9 +5051,15 @@ export default function Inbox() {
 
                           <button
                             type="button"
-                            onClick={
-                              trashSelectedConversation
-                            }
+                            onClick={(event) => {
+                              event.currentTarget
+                                .closest("details")
+                                ?.removeAttribute(
+                                  "open"
+                                );
+
+                              trashSelectedConversation();
+                            }}
                             className="block w-full rounded-lg px-3 py-2 text-left text-xs font-semibold text-rose-700 hover:bg-rose-50"
                           >
                             Trash
