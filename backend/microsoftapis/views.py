@@ -141,7 +141,7 @@ class MicrosoftOAuthCallback(APIView):
             membership.organization
         )
 
-        token_response = requests.post(
+        token_http_response = requests.post(
             "https://login.microsoftonline.com/common/oauth2/v2.0/token",
             data={
                 "client_id": settings.MICROSOFT_CLIENT_ID,
@@ -150,17 +150,99 @@ class MicrosoftOAuthCallback(APIView):
                 "redirect_uri": settings.MICROSOFT_REDIRECT_URI,
                 "grant_type": "authorization_code",
             },
-        ).json()
+            timeout=30,
+        )
+
+        try:
+            token_response = (
+                token_http_response.json()
+            )
+
+        except ValueError:
+            return Response(
+                {
+                    "error":
+                        "Microsoft token exchange returned "
+                        "an invalid response.",
+                },
+                status=502,
+            )
+
+        access_token = (
+            token_response.get(
+                "access_token"
+            )
+        )
+
+        if (
+            token_http_response.status_code
+            >= 400
+            or
+            not access_token
+        ):
+            provider_error = str(
+                token_response.get(
+                    "error"
+                )
+                or
+                "token_exchange_failed"
+            )
+
+            provider_error_codes = (
+                token_response.get(
+                    "error_codes"
+                )
+                or
+                []
+            )
+
+            if not isinstance(
+                provider_error_codes,
+                list,
+            ):
+                provider_error_codes = []
+
+            return Response(
+                {
+                    "error":
+                        "Microsoft authorization could "
+                        "not be completed.",
+
+                    "provider_error":
+                        provider_error,
+
+                    "provider_error_codes":
+                        provider_error_codes,
+                },
+                status=400,
+            )
 
         OAuthToken.objects.update_or_create(
             user=user,
             provider="microsoft",
             defaults={
-                "access_token": token_response["access_token"],
-                "refresh_token": token_response.get("refresh_token"),
-                "expires_at": timezone.now()
-                + timedelta(seconds=token_response.get("expires_in", 3600)),
-                "is_active": True,
+                "access_token":
+                    access_token,
+
+                "refresh_token":
+                    token_response.get(
+                        "refresh_token"
+                    ),
+
+                "expires_at":
+                    timezone.now()
+                    +
+                    timedelta(
+                        seconds=(
+                            token_response.get(
+                                "expires_in",
+                                3600,
+                            )
+                        )
+                    ),
+
+                "is_active":
+                    True,
             },
         )
 
