@@ -4686,6 +4686,17 @@ export default function Inbox() {
                               <div className="flex items-start justify-between gap-2">
 
                                 <p
+                                  title={
+                                    activeTab === "sent"
+                                      ? (
+                                          conversation.recipients ||
+                                          ""
+                                        )
+                                      : (
+                                          conversation.sender ||
+                                          ""
+                                        )
+                                  }
                                   className={`truncate text-sm ${
                                     unread
                                       ? "font-bold"
@@ -4699,8 +4710,17 @@ export default function Inbox() {
                                   {conversation.is_starred
                                     ? "? "
                                     : ""}
-                                  {conversation.subject ||
-                                    "No Subject"}
+                                  {activeTab === "sent"
+                                    ? (
+                                        conversation.recipient_display ||
+                                        conversation.recipients ||
+                                        "Unknown recipient"
+                                      )
+                                    : (
+                                        conversation.sender_display ||
+                                        conversation.sender ||
+                                        "Unknown sender"
+                                      )}
                                 </p>
 
 
@@ -4721,34 +4741,19 @@ export default function Inbox() {
                               </div>
 
 
-                              {activeTab ===
-                                "sent" && (
-
-                                <p
-                                  className={`mt-1 truncate text-xs ${
-                                    active
-                                      ? "text-slate-300"
-                                      : "text-slate-500"
-                                  }`}
-                                >
-                                  To:{" "}
-                                  {conversation.recipients ||
-                                    "Unknown recipient"}
-                                </p>
-
-                              )}
-
-
                               <p
-                                className={`mt-1 line-clamp-1 text-xs leading-5 ${
+                                className={`mt-1 truncate text-xs ${
                                   active
                                     ? "text-slate-300"
                                     : "text-slate-500"
                                 }`}
                               >
-                                {conversation.preview ||
-                                  "No preview available"}
+                                {conversation.subject ||
+                                  "No Subject"}
                               </p>
+
+
+
 
 
                               <div className="mt-2 flex items-center justify-between gap-2">

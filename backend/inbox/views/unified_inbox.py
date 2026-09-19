@@ -1,3 +1,5 @@
+from email.utils import getaddresses
+
 from django.core.paginator import Paginator
 from django.db.models import Max
 from rest_framework.views import APIView
@@ -13,6 +15,119 @@ from inbox.serializers import InboxMessageSerializer
 from platform_core.api.tenant import (
     get_user_organization_or_404,
 )
+
+
+def _identity_label(identity):
+    if not isinstance(identity, dict):
+        return ""
+
+    name = str(
+        identity.get("name") or ""
+    ).strip()
+
+    email = str(
+        identity.get("email") or ""
+    ).strip()
+
+    return name or email
+
+
+def _sender_display(message):
+    if message is None:
+        return ""
+
+    metadata = (
+        message.sender_meta
+        if isinstance(
+            message.sender_meta,
+            dict,
+        )
+        else {}
+    )
+
+    return (
+        _identity_label(metadata)
+        or
+        str(message.sender or "").strip()
+    )
+
+
+def _recipient_display(message):
+    if message is None:
+        return ""
+
+    metadata = (
+        message.recipient_meta
+        if isinstance(
+            message.recipient_meta,
+            dict,
+        )
+        else {}
+    )
+
+    to_items = (
+        metadata.get("to")
+        or []
+    )
+
+    labels = [
+        label
+        for label in (
+            _identity_label(item)
+            for item in to_items
+            if isinstance(item, dict)
+        )
+        if label
+    ]
+
+    if labels:
+        first = labels[0]
+
+        if len(labels) > 1:
+            return (
+                first
+                + " +"
+                + str(len(labels) - 1)
+            )
+
+        return first
+
+    raw = str(
+        message.recipients
+        or ""
+    ).strip()
+
+    if not raw:
+        return ""
+
+    parsed = [
+        (
+            str(name or "").strip(),
+            str(address or "").strip(),
+        )
+        for name, address
+        in getaddresses([raw])
+        if address
+    ]
+
+    if parsed:
+        name, address = parsed[0]
+
+        first = (
+            name
+            or address
+        )
+
+        if len(parsed) > 1:
+            return (
+                first
+                + " +"
+                + str(len(parsed) - 1)
+            )
+
+        return first
+
+    return raw
 
 
 class UnifiedInboxAPIView(APIView):
@@ -294,10 +409,16 @@ class UnifiedConversationInboxAPIView(APIView):
                         if last
                         else ""
                     ),
+                    "sender_display": (
+                        _sender_display(last)
+                    ),
                     "recipients": (
                         last.recipients
                         if last
                         else ""
+                    ),
+                    "recipient_display": (
+                        _recipient_display(last)
                     ),
                 })
 
