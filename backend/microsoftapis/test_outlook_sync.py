@@ -247,9 +247,84 @@ class OutlookInboundOutboundSyncTests(
                     ),
                 )
 
+            if (
+                (
+                    "/mailFolders/deleteditems/"
+                    "messages/delta"
+                )
+                in url
+                or
+                url
+                ==
+                (
+                    "https://graph.microsoft.com/"
+                    "v1.0/delta/default"
+                )
+            ):
+                response = self.response(
+                    []
+                )
+
+                response.json.return_value = {
+                    "value": [],
+                    "@odata.deltaLink":
+                        (
+                            "https://graph.microsoft.com/"
+                            "v1.0/delta/default"
+                        ),
+                }
+
+                return response
+
             raise AssertionError(
                 f"Unexpected Graph URL: {url}"
             )
+
+        def graph_post(
+            url,
+            **kwargs,
+        ):
+            if (
+                "/translateExchangeIds"
+                not in url
+            ):
+                raise AssertionError(
+                    f"Unexpected Graph POST URL: {url}"
+                )
+
+            response = Mock()
+
+            response.status_code = 200
+            response.text = ""
+
+            response.json.return_value = {
+                "value": [
+                    {
+                        "sourceId":
+                            source_id,
+
+                        "targetId":
+                            (
+                                "immutable-"
+                                +
+                                source_id
+                            ),
+                    }
+                    for source_id
+                    in (
+                        kwargs.get(
+                            "json",
+                            {},
+                        ).get(
+                            "inputIds",
+                            [],
+                        )
+                    )
+                ],
+            }
+
+            return response
+
 
         with (
             patch(
@@ -262,6 +337,11 @@ class OutlookInboundOutboundSyncTests(
                 "requests.get",
                 side_effect=graph_get,
             ) as graph_request,
+            patch(
+                "microsoftapis.services.outlook_sync."
+                "requests.post",
+                side_effect=graph_post,
+            ),
             patch(
                 "microsoftapis.services.outlook_sync."
                 "MessageProcessor"
@@ -315,7 +395,7 @@ class OutlookInboundOutboundSyncTests(
 
         self.assertEqual(
             graph_request.call_count,
-            2,
+            3,
         )
 
         messages = (
@@ -376,6 +456,16 @@ class OutlookInboundOutboundSyncTests(
         self.assertEqual(
             inbound.recipients,
             self.account.email_address,
+        )
+
+        self.assertEqual(
+            inbound.outlook_immutable_id,
+            "immutable-in-1",
+        )
+
+        self.assertEqual(
+            outbound.outlook_immutable_id,
+            "immutable-out-1",
         )
 
         self.assertEqual(
@@ -941,6 +1031,99 @@ class OutlookHistoryCorrectnessTests(
         graph_get,
     ):
 
+        def graph_post(
+            url,
+            **kwargs,
+        ):
+
+            if (
+                "/translateExchangeIds"
+                not in url
+            ):
+                raise AssertionError(
+                    f"Unexpected Graph POST URL: {url}"
+                )
+
+            response = Mock()
+
+            response.status_code = 200
+            response.text = ""
+
+            response.json.return_value = {
+                "value": [
+                    {
+                        "sourceId":
+                            source_id,
+
+                        "targetId":
+                            (
+                                "immutable-"
+                                +
+                                source_id
+                            ),
+                    }
+                    for source_id
+                    in (
+                        kwargs.get(
+                            "json",
+                            {},
+                        ).get(
+                            "inputIds",
+                            [],
+                        )
+                    )
+                ],
+            }
+
+            return response
+
+
+        delta_link = (
+            "https://graph.microsoft.com/"
+            "v1.0/delta/history-default"
+        )
+
+
+        def wrapped_graph_get(
+            url,
+            **kwargs,
+        ):
+
+            if (
+                (
+                    "/mailFolders/deleteditems/"
+                    "messages/delta"
+                )
+                in url
+                or
+                url
+                ==
+                delta_link
+            ):
+
+                response = Mock()
+
+                response.status_code = 200
+
+                response.text = ""
+
+                response.json.return_value = {
+                    "value":
+                        [],
+
+                    "@odata.deltaLink":
+                        delta_link,
+                }
+
+                return response
+
+
+            return graph_get(
+                url,
+                **kwargs,
+            )
+
+
         with (
             patch(
                 (
@@ -959,9 +1142,19 @@ class OutlookHistoryCorrectnessTests(
                     "requests.get"
                 ),
                 side_effect=(
-                    graph_get
+                    wrapped_graph_get
                 ),
             ) as request_mock,
+            patch(
+                (
+                    "microsoftapis.services."
+                    "outlook_sync."
+                    "requests.post"
+                ),
+                side_effect=(
+                    graph_post
+                ),
+            ),
             patch(
                 (
                     "microsoftapis.services."
@@ -1258,7 +1451,14 @@ class OutlookHistoryCorrectnessTests(
 
         self.assertEqual(
             request_mock.call_count,
-            3,
+            4,
+        )
+
+
+        self.assertFalse(
+            result[
+                "trash_reconcile_failed"
+            ]
         )
 
 
@@ -1957,4 +2157,607 @@ class OutlookHistoryCorrectnessTests(
         self.assertIsNotNone(
             self.account
             .history_sync_completed_at
+        )
+class OutlookDeletedItemsDeltaTests(
+    TestCase
+):
+
+    def setUp(self):
+        self.user = (
+            User.objects.create_user(
+                email=(
+                    "outlook-trash@oneuch.test"
+                ),
+                password="pass123",
+            )
+        )
+
+        self.organization = (
+            Organization.objects.create(
+                name="Outlook Trash Org",
+                slug="outlook-trash-org",
+            )
+        )
+
+        OrganizationUser.objects.create(
+            user=self.user,
+            organization=(
+                self.organization
+            ),
+            role="member",
+        )
+
+        self.account = (
+            EmailAccount.objects.create(
+                user=self.user,
+                account_type="outlook",
+                email_address=(
+                    "trash@contoso.example"
+                ),
+                credential_status="active",
+                is_active=True,
+            )
+        )
+
+        self.conversation = (
+            Conversation.objects.create(
+                user=self.user,
+                organization=(
+                    self.organization
+                ),
+                email_account=(
+                    self.account
+                ),
+                conversation_key=(
+                    "outlook_trash-conv"
+                ),
+                external_conversation_id=(
+                    "trash-conv"
+                ),
+                subject="Trash test",
+            )
+        )
+
+        self.message = (
+            InboxMessage.objects.create(
+                user=self.user,
+                organization=(
+                    self.organization
+                ),
+                email_account=(
+                    self.account
+                ),
+                conversation=(
+                    self.conversation
+                ),
+                folder="inbox",
+                platform="outlook",
+                direction="inbound",
+                external_message_id=(
+                    "rest-message-1"
+                ),
+                outlook_immutable_id=(
+                    "immutable-message-1"
+                ),
+                external_conversation_id=(
+                    "trash-conv"
+                ),
+                sender=(
+                    "sender@example.com"
+                ),
+                recipients=(
+                    self.account.email_address
+                ),
+                subject="Trash test",
+                body="Disposable",
+                received_at=(
+                    timezone.now()
+                ),
+                is_read=False,
+                is_draft=False,
+            )
+        )
+
+
+    def _response(
+        self,
+        payload,
+        *,
+        status=200,
+    ):
+        response = Mock()
+
+        response.status_code = (
+            status
+        )
+
+        response.json.return_value = (
+            payload
+        )
+
+        response.text = ""
+
+        return response
+
+
+    def _graph_get(
+        self,
+        *,
+        delta_values,
+        delta_link,
+        delta_status=200,
+        expected_delta_url=None,
+    ):
+        def graph_get(
+            url,
+            **kwargs,
+        ):
+            if (
+                "/mailFolders/inbox/"
+                in url
+            ):
+                return self._response(
+                    {
+                        "value": [],
+                    }
+                )
+
+            if (
+                "/mailFolders/sentitems/"
+                in url
+            ):
+                return self._response(
+                    {
+                        "value": [],
+                    }
+                )
+
+            if (
+                (
+                    "/mailFolders/deleteditems/"
+                    "messages/delta"
+                )
+                in url
+                or
+                (
+                    expected_delta_url
+                    and
+                    url
+                    ==
+                    expected_delta_url
+                )
+            ):
+                return self._response(
+                    {
+                        "value":
+                            delta_values,
+
+                        "@odata.deltaLink":
+                            delta_link,
+                    },
+                    status=(
+                        delta_status
+                    ),
+                )
+
+            raise AssertionError(
+                f"Unexpected Graph URL: {url}"
+            )
+
+        return graph_get
+
+
+    def _translation_response(
+        self,
+        *,
+        target_id="immutable-message-1",
+    ):
+        return self._response(
+            {
+                "value": [
+                    {
+                        "sourceId":
+                            "rest-message-1",
+
+                        "targetId":
+                            target_id,
+                    },
+                ],
+            }
+        )
+
+
+    def _run(
+        self,
+        *,
+        graph_get,
+        graph_post=None,
+    ):
+        patches = [
+            patch(
+                "microsoftapis.services.outlook_sync."
+                "get_microsoft_access_token",
+                return_value="access-token",
+            ),
+            patch(
+                "microsoftapis.services.outlook_sync."
+                "requests.get",
+                side_effect=graph_get,
+            ),
+            patch(
+                "microsoftapis.services.outlook_sync."
+                "MessageProcessor"
+            ),
+            patch(
+                "microsoftapis.services.outlook_sync."
+                "invalidate_conversation_cache"
+            ),
+            patch(
+                "microsoftapis.services.outlook_sync."
+                "get_channel_layer"
+            ),
+            patch(
+                "microsoftapis.services.outlook_sync."
+                "async_to_sync"
+            ),
+        ]
+
+        if graph_post is not None:
+            patches.append(
+                patch(
+                    "microsoftapis.services.outlook_sync."
+                    "requests.post",
+                    side_effect=graph_post,
+                )
+            )
+
+        entered = []
+
+        try:
+            for item in patches:
+                entered.append(
+                    item.__enter__()
+                )
+
+            return fetch_outlook_emails(
+                user=self.user,
+                email_account=(
+                    self.account
+                ),
+            )
+
+        finally:
+            for item in reversed(
+                patches
+            ):
+                item.__exit__(
+                    None,
+                    None,
+                    None,
+                )
+
+
+    def test_known_deleted_item_moves_existing_local_message_to_trash(
+        self,
+    ):
+        graph_get = self._graph_get(
+            delta_values=[
+                {
+                    "id":
+                        "immutable-message-1",
+                }
+            ],
+            delta_link=(
+                "https://graph.microsoft.com/"
+                "v1.0/delta/trash-1"
+            ),
+        )
+
+        result = self._run(
+            graph_get=graph_get,
+            graph_post=lambda *args, **kwargs:
+                self._translation_response(),
+        )
+
+        self.message.refresh_from_db()
+        self.account.refresh_from_db()
+
+        self.assertEqual(
+            self.message.folder,
+            "trash",
+        )
+
+        self.assertEqual(
+            self.message.external_message_id,
+            "rest-message-1",
+        )
+
+        self.assertEqual(
+            InboxMessage.objects.filter(
+                email_account=(
+                    self.account
+                )
+            ).count(),
+            1,
+        )
+
+        self.assertEqual(
+            result[
+                "trash_reconciled"
+            ],
+            1,
+        )
+
+        self.assertFalse(
+            result[
+                "trash_reconcile_failed"
+            ]
+        )
+
+        self.assertEqual(
+            self.account.last_synced_uids.get(
+                "_outlook_deleted_items_delta_link"
+            ),
+            (
+                "https://graph.microsoft.com/"
+                "v1.0/delta/trash-1"
+            ),
+        )
+
+
+    def test_unknown_deleted_item_is_not_imported(
+        self,
+    ):
+        self.message.delete()
+
+        graph_get = self._graph_get(
+            delta_values=[
+                {
+                    "id":
+                        "immutable-unrelated",
+                }
+            ],
+            delta_link=(
+                "https://graph.microsoft.com/"
+                "v1.0/delta/trash-2"
+            ),
+        )
+
+        result = self._run(
+            graph_get=graph_get,
+        )
+
+        self.account.refresh_from_db()
+
+        self.assertEqual(
+            InboxMessage.objects.filter(
+                email_account=(
+                    self.account
+                )
+            ).count(),
+            0,
+        )
+
+        self.assertEqual(
+            result[
+                "trash_reconciled"
+            ],
+            0,
+        )
+
+        self.assertEqual(
+            self.account.last_synced_uids.get(
+                "_outlook_deleted_items_delta_link"
+            ),
+            (
+                "https://graph.microsoft.com/"
+                "v1.0/delta/trash-2"
+            ),
+        )
+
+
+    def test_saved_delta_link_is_used_incrementally(
+        self,
+    ):
+        existing_delta = (
+            "https://graph.microsoft.com/"
+            "v1.0/delta/existing"
+        )
+
+        self.account.last_synced_uids = {
+            "_outlook_deleted_items_delta_link":
+                existing_delta,
+        }
+
+        self.account.save(
+            update_fields=[
+                "last_synced_uids",
+            ]
+        )
+
+        graph_get = self._graph_get(
+            delta_values=[
+                {
+                    "id":
+                        "immutable-message-1",
+                }
+            ],
+            delta_link=(
+                "https://graph.microsoft.com/"
+                "v1.0/delta/next"
+            ),
+            expected_delta_url=(
+                existing_delta
+            ),
+        )
+
+        self._run(
+            graph_get=graph_get,
+            graph_post=lambda *args, **kwargs:
+                self._translation_response(),
+        )
+
+        self.account.refresh_from_db()
+        self.message.refresh_from_db()
+
+        self.assertEqual(
+            self.message.folder,
+            "trash",
+        )
+
+        self.assertEqual(
+            self.account.last_synced_uids.get(
+                "_outlook_deleted_items_delta_link"
+            ),
+            (
+                "https://graph.microsoft.com/"
+                "v1.0/delta/next"
+            ),
+        )
+
+
+    def test_legacy_row_without_immutable_identity_does_not_false_match(
+        self,
+    ):
+        old_delta = (
+            "https://graph.microsoft.com/"
+            "v1.0/delta/old"
+        )
+
+        self.account.last_synced_uids = {
+            "_outlook_deleted_items_delta_link":
+                old_delta,
+        }
+
+        self.account.save(
+            update_fields=[
+                "last_synced_uids",
+            ]
+        )
+
+        self.message.outlook_immutable_id = (
+            None
+        )
+
+        self.message.save(
+            update_fields=[
+                "outlook_immutable_id",
+            ]
+        )
+
+        graph_get = self._graph_get(
+            delta_values=[
+                {
+                    "id":
+                        "immutable-message-1",
+                }
+            ],
+            delta_link=(
+                "https://graph.microsoft.com/"
+                "v1.0/delta/new"
+            ),
+            expected_delta_url=(
+                old_delta
+            ),
+        )
+
+        result = self._run(
+            graph_get=graph_get,
+        )
+
+        self.account.refresh_from_db()
+        self.message.refresh_from_db()
+
+        self.assertEqual(
+            self.message.folder,
+            "inbox",
+        )
+
+        self.assertEqual(
+            result[
+                "trash_reconciled"
+            ],
+            0,
+        )
+
+        self.assertFalse(
+            result[
+                "trash_reconcile_failed"
+            ]
+        )
+
+        self.assertEqual(
+            self.account.last_synced_uids.get(
+                "_outlook_deleted_items_delta_link"
+            ),
+            (
+                "https://graph.microsoft.com/"
+                "v1.0/delta/new"
+            ),
+        )
+
+
+    def test_deleted_delta_failure_does_not_break_inbox_sent_sync(
+        self,
+    ):
+        old_delta = (
+            "https://graph.microsoft.com/"
+            "v1.0/delta/retry"
+        )
+
+        self.account.last_synced_uids = {
+            "_outlook_deleted_items_delta_link":
+                old_delta,
+        }
+
+        self.account.save(
+            update_fields=[
+                "last_synced_uids",
+            ]
+        )
+
+        graph_get = self._graph_get(
+            delta_values=[],
+            delta_link=old_delta,
+            delta_status=503,
+            expected_delta_url=(
+                old_delta
+            ),
+        )
+
+        result = self._run(
+            graph_get=graph_get,
+        )
+
+        self.account.refresh_from_db()
+        self.message.refresh_from_db()
+
+        self.assertEqual(
+            self.message.folder,
+            "inbox",
+        )
+
+        self.assertEqual(
+            self.account.last_synced_uids.get(
+                "_outlook_deleted_items_delta_link"
+            ),
+            old_delta,
+        )
+
+        self.assertTrue(
+            result[
+                "trash_reconcile_failed"
+            ]
+        )
+
+        sync = (
+            InboxSyncStatus.objects.get(
+                user=self.user,
+                platform="outlook",
+            )
+        )
+
+        self.assertEqual(
+            sync.status,
+            "success",
         )

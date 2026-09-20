@@ -63,6 +63,15 @@ logger = get_logger(
 )
 
 
+OUTLOOK_DELETED_DELTA_STATE_KEY = (
+    "_outlook_deleted_items_delta_link"
+)
+
+OUTLOOK_DELETED_PAGE_SIZE = 100
+
+OUTLOOK_TRANSLATE_BATCH_SIZE = 1000
+
+
 OUTLOOK_FOLDER_CONFIG = (
     {
         "graph_folder": "inbox",
@@ -799,6 +808,541 @@ def _fetch_folder(
 
     return messages
 
+def _deleted_delta_link(
+    email_account,
+):
+    state = (
+        email_account.last_synced_uids
+        if isinstance(
+            email_account.last_synced_uids,
+            dict,
+        )
+        else {}
+    )
+
+    return str(
+        state.get(
+            OUTLOOK_DELETED_DELTA_STATE_KEY,
+            "",
+        )
+        or ""
+    ).strip()
+
+
+def _save_deleted_delta_link(
+    *,
+    email_account,
+    delta_link,
+):
+    value = str(
+        delta_link
+        or ""
+    ).strip()
+
+    if not value:
+        raise RuntimeError(
+            "Microsoft Graph Deleted Items delta "
+            "did not return a delta link."
+        )
+
+    state = (
+        dict(
+            email_account.last_synced_uids
+        )
+        if isinstance(
+            email_account.last_synced_uids,
+            dict,
+        )
+        else {}
+    )
+
+    state[
+        OUTLOOK_DELETED_DELTA_STATE_KEY
+    ] = value
+
+    email_account.last_synced_uids = (
+        state
+    )
+
+    email_account.save(
+        update_fields=[
+            "last_synced_uids",
+        ]
+    )
+
+
+def _fetch_deleted_item_delta(
+    *,
+    access_token,
+    email_account,
+):
+    saved_delta_link = (
+        _deleted_delta_link(
+            email_account
+        )
+    )
+
+    url = (
+        saved_delta_link
+        or
+        (
+            "https://graph.microsoft.com/"
+            "v1.0/me/mailFolders/"
+            "deleteditems/messages/delta"
+        )
+    )
+
+    headers = {
+        "Authorization":
+            f"Bearer {access_token}",
+
+        "Prefer":
+            (
+                'IdType="ImmutableId", '
+                f"odata.maxpagesize={OUTLOOK_DELETED_PAGE_SIZE}"
+            ),
+    }
+
+    params = (
+        None
+        if saved_delta_link
+        else {
+            "$select":
+                "id",
+        }
+    )
+
+    changed_ids = set()
+
+    change_count = 0
+
+    page_index = 0
+
+    seen_next_links = set()
+
+    final_delta_link = None
+
+
+    while url:
+
+        page_index += 1
+
+        response = requests.get(
+            url,
+            headers=headers,
+            params=(
+                params
+                if page_index == 1
+                else None
+            ),
+            timeout=30,
+        )
+
+        log_event(
+            logger,
+            "info",
+            "outlook.deleted.delta.response",
+            provider="outlook",
+            account_id=(
+                email_account.id
+            ),
+            page=page_index,
+            status_code=(
+                response.status_code
+            ),
+            incremental=bool(
+                saved_delta_link
+            ),
+        )
+
+        if response.status_code != 200:
+            raise RuntimeError(
+                "Microsoft Graph Deleted Items delta "
+                "failed with status "
+                f"{response.status_code}."
+            )
+
+        payload = response.json()
+
+        if not isinstance(
+            payload,
+            dict,
+        ):
+            raise RuntimeError(
+                "Microsoft Graph Deleted Items delta "
+                "returned an invalid response."
+            )
+
+        values = (
+            payload.get(
+                "value",
+                [],
+            )
+            or []
+        )
+
+        change_count += len(
+            values
+        )
+
+        for item in values:
+
+            if not isinstance(
+                item,
+                dict,
+            ):
+                continue
+
+            # @removed means an item left Deleted Items
+            # (restore/permanent deletion). That is not an
+            # inbound trash event and is deliberately ignored.
+            if item.get(
+                "@removed"
+            ):
+                continue
+
+            immutable_id = str(
+                item.get(
+                    "id"
+                )
+                or ""
+            ).strip()
+
+            if immutable_id:
+                changed_ids.add(
+                    immutable_id
+                )
+
+        next_link = str(
+            payload.get(
+                "@odata.nextLink"
+            )
+            or ""
+        ).strip()
+
+        if next_link:
+
+            if next_link in seen_next_links:
+                raise RuntimeError(
+                    "Microsoft Graph Deleted Items delta "
+                    "repeated a pagination link."
+                )
+
+            seen_next_links.add(
+                next_link
+            )
+
+            url = next_link
+            params = None
+            continue
+
+        final_delta_link = str(
+            payload.get(
+                "@odata.deltaLink"
+            )
+            or ""
+        ).strip()
+
+        url = None
+
+
+    if not final_delta_link:
+        raise RuntimeError(
+            "Microsoft Graph Deleted Items delta "
+            "did not return a delta link."
+        )
+
+
+    return {
+        "changed_ids":
+            changed_ids,
+
+        "change_count":
+            change_count,
+
+        "delta_link":
+            final_delta_link,
+
+        "initial_delta":
+            not bool(
+                saved_delta_link
+            ),
+    }
+
+
+def _translate_rest_ids_to_immutable(
+    *,
+    access_token,
+    source_ids,
+):
+    normalized_ids = []
+
+    seen = set()
+
+
+    for value in source_ids:
+
+        source_id = str(
+            value
+            or ""
+        ).strip()
+
+        if (
+            not source_id
+            or
+            source_id in seen
+        ):
+            continue
+
+        seen.add(
+            source_id
+        )
+
+        normalized_ids.append(
+            source_id
+        )
+
+
+    translated = {}
+
+
+    for start in range(
+        0,
+        len(normalized_ids),
+        OUTLOOK_TRANSLATE_BATCH_SIZE,
+    ):
+
+        batch = normalized_ids[
+            start:
+            start
+            +
+            OUTLOOK_TRANSLATE_BATCH_SIZE
+        ]
+
+        response = requests.post(
+            (
+                "https://graph.microsoft.com/"
+                "v1.0/me/translateExchangeIds"
+            ),
+            headers={
+                "Authorization":
+                    f"Bearer {access_token}",
+
+                "Content-Type":
+                    "application/json",
+            },
+            json={
+                "inputIds":
+                    batch,
+
+                "sourceIdType":
+                    "restId",
+
+                "targetIdType":
+                    "restImmutableEntryId",
+            },
+            timeout=30,
+        )
+
+        if response.status_code != 200:
+            raise RuntimeError(
+                "Microsoft Graph ID translation "
+                "failed with status "
+                f"{response.status_code}."
+            )
+
+        payload = response.json()
+
+        if not isinstance(
+            payload,
+            dict,
+        ):
+            raise RuntimeError(
+                "Microsoft Graph ID translation "
+                "returned an invalid response."
+            )
+
+
+        for item in (
+            payload.get(
+                "value",
+                [],
+            )
+            or []
+        ):
+
+            if not isinstance(
+                item,
+                dict,
+            ):
+                continue
+
+            source_id = str(
+                item.get(
+                    "sourceId"
+                )
+                or ""
+            ).strip()
+
+            target_id = str(
+                item.get(
+                    "targetId"
+                )
+                or ""
+            ).strip()
+
+            if (
+                source_id
+                and
+                target_id
+            ):
+                translated[
+                    source_id
+                ] = target_id
+
+
+    return translated
+
+
+def _reconcile_deleted_items(
+    *,
+    user,
+    email_account,
+    access_token,
+):
+    delta = (
+        _fetch_deleted_item_delta(
+            access_token=(
+                access_token
+            ),
+            email_account=(
+                email_account
+            ),
+        )
+    )
+
+    changed_ids = (
+        delta[
+            "changed_ids"
+        ]
+    )
+
+    reconciled = 0
+
+    touched_conversations = set()
+
+
+    if changed_ids:
+
+        messages = (
+            InboxMessage.objects
+            .filter(
+                user=user,
+                email_account=(
+                    email_account
+                ),
+                platform="outlook",
+                is_draft=False,
+                outlook_immutable_id__in=(
+                    changed_ids
+                ),
+            )
+            .exclude(
+                folder="trash"
+            )
+            .select_related(
+                "conversation"
+            )
+            .order_by(
+                "id"
+            )
+        )
+
+
+        for message in messages:
+
+            message.folder = (
+                "trash"
+            )
+
+            message.save(
+                update_fields=[
+                    "folder",
+                ]
+            )
+
+            if (
+                message.conversation_id
+            ):
+                touched_conversations.add(
+                    message.conversation_id
+                )
+
+                refresh_conversation_local_state(
+                    message.conversation
+                )
+
+            reconciled += 1
+
+
+        if reconciled:
+            invalidate_conversation_cache(
+                user.id
+            )
+
+
+    # Cursor advances only after local reconciliation has
+    # completed successfully.
+    _save_deleted_delta_link(
+        email_account=(
+            email_account
+        ),
+        delta_link=(
+            delta[
+                "delta_link"
+            ]
+        ),
+    )
+
+
+    log_event(
+        logger,
+        "info",
+        "outlook.deleted.delta.completed",
+        provider="outlook",
+        account_id=(
+            email_account.id
+        ),
+        provider_change_count=(
+            delta[
+                "change_count"
+            ]
+        ),
+        reconciled_count=(
+            reconciled
+        ),
+        initial_delta=(
+            delta[
+                "initial_delta"
+            ]
+        ),
+    )
+
+
+    return {
+        "changes":
+            delta[
+                "change_count"
+            ],
+
+        "reconciled":
+            reconciled,
+
+        "conversation_ids":
+            touched_conversations,
+    }
+
+
 def _normalized_reconciliation_text(
     value,
 ):
@@ -1229,6 +1773,14 @@ def fetch_outlook_emails(
 
     reconciled_count = 0
 
+    trash_change_count = 0
+
+    trash_reconciled_count = 0
+
+    trash_reconcile_failed = False
+
+    immutable_identity_failed = False
+
     failed_count = 0
 
 
@@ -1266,10 +1818,103 @@ def fetch_outlook_emails(
             )
 
 
+            source_ids = [
+                message.get(
+                    "id"
+                )
+                for message in messages
+                if message.get(
+                    "id"
+                )
+            ]
+
+
+            immutable_ids = {}
+
+
+            try:
+
+                immutable_ids = (
+                    _translate_rest_ids_to_immutable(
+                        access_token=(
+                            access_token
+                        ),
+                        source_ids=(
+                            source_ids
+                        ),
+                    )
+                )
+
+
+                if (
+                    len(
+                        immutable_ids
+                    )
+                    !=
+                    len(
+                        set(
+                            source_ids
+                        )
+                    )
+                ):
+
+                    immutable_identity_failed = (
+                        True
+                    )
+
+                    log_event(
+                        logger,
+                        "warning",
+                        (
+                            "outlook.immutable_identity."
+                            "incomplete"
+                        ),
+                        provider="outlook",
+                        account_id=(
+                            email_account.id
+                        ),
+                        expected_count=(
+                            len(
+                                set(
+                                    source_ids
+                                )
+                            )
+                        ),
+                        translated_count=(
+                            len(
+                                immutable_ids
+                            )
+                        ),
+                    )
+
+
+            except Exception as exc:
+
+                immutable_identity_failed = (
+                    True
+                )
+
+                immutable_ids = {}
+
+                log_event(
+                    logger,
+                    "warning",
+                    "outlook.immutable_identity.failed",
+                    provider="outlook",
+                    account_id=(
+                        email_account.id
+                    ),
+                    error_type=(
+                        type(exc).__name__
+                    ),
+                )
+
+
             folder_batches.append(
                 (
                     config,
                     messages,
+                    immutable_ids,
                 )
             )
 
@@ -1284,6 +1929,7 @@ def fetch_outlook_emails(
         for (
             config,
             messages,
+            immutable_ids,
         ) in folder_batches:
 
             log_event(
@@ -1331,6 +1977,17 @@ def fetch_outlook_emails(
                             "is missing id or "
                             "conversationId."
                         )
+
+
+                    immutable_id = str(
+                        immutable_ids.get(
+                            str(
+                                external_id
+                            ).strip(),
+                            "",
+                        )
+                        or ""
+                    ).strip()
 
 
                     direction = (
@@ -1435,6 +2092,25 @@ def fetch_outlook_emails(
                                 "is_starred",
                             ]
                         )
+
+
+                        if (
+                            immutable_id
+                            and
+                            existing.outlook_immutable_id
+                            !=
+                            immutable_id
+                        ):
+
+                            existing.outlook_immutable_id = (
+                                immutable_id
+                            )
+
+                            existing.save(
+                                update_fields=[
+                                    "outlook_immutable_id",
+                                ]
+                            )
 
 
                         refresh_conversation_local_state(
@@ -1984,6 +2660,25 @@ def fetch_outlook_emails(
                         created_count += 1
 
 
+                    if (
+                        immutable_id
+                        and
+                        message_obj.outlook_immutable_id
+                        !=
+                        immutable_id
+                    ):
+
+                        message_obj.outlook_immutable_id = (
+                            immutable_id
+                        )
+
+                        message_obj.save(
+                            update_fields=[
+                                "outlook_immutable_id",
+                            ]
+                        )
+
+
                     try:
 
                         processor = (
@@ -2096,6 +2791,67 @@ def fetch_outlook_emails(
             )
 
 
+        if immutable_identity_failed:
+
+            trash_reconcile_failed = True
+
+            log_event(
+                logger,
+                "warning",
+                "outlook.deleted.delta.deferred_identity",
+                provider="outlook",
+                account_id=(
+                    email_account.id
+                ),
+            )
+
+
+        else:
+
+            try:
+
+                trash_result = (
+                    _reconcile_deleted_items(
+                        user=user,
+                        email_account=(
+                            email_account
+                        ),
+                        access_token=(
+                            access_token
+                        ),
+                    )
+                )
+
+                trash_change_count = (
+                    trash_result[
+                        "changes"
+                    ]
+                )
+
+                trash_reconciled_count = (
+                    trash_result[
+                        "reconciled"
+                    ]
+                )
+
+            except Exception as exc:
+
+                trash_reconcile_failed = True
+
+                log_event(
+                    logger,
+                    "warning",
+                    "outlook.deleted.delta.failed",
+                    provider="outlook",
+                    account_id=(
+                        email_account.id
+                    ),
+                    error_type=(
+                        type(exc).__name__
+                    ),
+                )
+
+
         if window.initial_history:
 
             mark_initial_history_complete(
@@ -2202,6 +2958,41 @@ def fetch_outlook_emails(
         )
 
 
+    if (
+        trash_reconciled_count
+        and
+        not window.initial_history
+    ):
+
+        channel_layer = (
+            get_channel_layer()
+        )
+
+        async_to_sync(
+            channel_layer.group_send
+        )(
+            f"inbox_{user.id}",
+            {
+                "type":
+                    "inbox_update",
+
+                "data": {
+                    "event":
+                        "mailbox_changed",
+
+                    "reason":
+                        "trash_reconciled",
+
+                    "platform":
+                        "outlook",
+
+                    "reconciled":
+                        trash_reconciled_count,
+                },
+            },
+        )
+
+
     log_event(
         logger,
         "info",
@@ -2230,6 +3021,15 @@ def fetch_outlook_emails(
         reconciled_count=(
             reconciled_count
         ),
+        trash_change_count=(
+            trash_change_count
+        ),
+        trash_reconciled_count=(
+            trash_reconciled_count
+        ),
+        trash_reconcile_failed=(
+            trash_reconcile_failed
+        ),
     )
 
 
@@ -2251,6 +3051,15 @@ def fetch_outlook_emails(
 
         "reconciled":
             reconciled_count,
+
+        "trash_changes":
+            trash_change_count,
+
+        "trash_reconciled":
+            trash_reconciled_count,
+
+        "trash_reconcile_failed":
+            trash_reconcile_failed,
 
         "failed":
             failed_count,

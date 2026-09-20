@@ -139,6 +139,20 @@ class InboxMessage(models.Model):
         db_index=True,
         help_text="Message ID from external platform",
     )
+
+    # Stable Microsoft Graph identity used only for Outlook
+    # folder-move convergence. The normal external_message_id
+    # remains untouched for existing provider operations.
+    outlook_immutable_id = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text=(
+            "Stable Microsoft Graph message identity "
+            "for Outlook folder moves"
+        ),
+    )
     
     external_conversation_id = models.CharField(
         max_length=255,
