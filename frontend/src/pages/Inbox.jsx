@@ -1385,6 +1385,81 @@ export default function Inbox() {
 
     let reconnectAttempt = 0;
 
+    let realtimeRefreshTimer = null;
+
+
+    const scheduleRealtimeRefresh = () => {
+
+      if (
+        stopped ||
+        realtimeRefreshTimer !== null
+      ) {
+        return;
+      }
+
+
+      // Coalesce closely-spaced provider + scheduler events
+      // into one authoritative Inbox refresh.
+      realtimeRefreshTimer =
+        window.setTimeout(
+          () => {
+
+            realtimeRefreshTimer = null;
+
+
+            loadConversationsRef.current();
+
+
+            const currentSelectedId =
+              selectedIdRef.current;
+
+
+            if (
+              currentSelectedId &&
+              activeTabRef.current !==
+                "draft"
+            ) {
+
+              loadConversationThread(
+                currentSelectedId
+              );
+
+            }
+
+          },
+          100
+        );
+
+    };
+
+
+    const handleVisibilityChange = () => {
+
+      if (
+        document.visibilityState ===
+        "visible"
+      ) {
+
+        scheduleRealtimeRefresh();
+
+      }
+
+    };
+
+
+    const handleWindowFocus = () => {
+
+      scheduleRealtimeRefresh();
+
+    };
+
+
+    const handleNetworkOnline = () => {
+
+      scheduleRealtimeRefresh();
+
+    };
+
 
     const connect = () => {
 
@@ -1419,6 +1494,13 @@ export default function Inbox() {
           "WS Connected"
         );
 
+
+        // A reconnect may happen after one or more provider
+        // events were emitted while this browser was offline.
+        // Reconcile immediately instead of waiting for the
+        // next WebSocket event.
+        scheduleRealtimeRefresh();
+
       };
 
 
@@ -1430,24 +1512,7 @@ export default function Inbox() {
         );
 
 
-        loadConversationsRef.current();
-
-
-        const currentSelectedId =
-          selectedIdRef.current;
-
-
-        if (
-          currentSelectedId &&
-          activeTabRef.current !==
-            "draft"
-        ) {
-
-          loadConversationThread(
-            currentSelectedId
-          );
-
-        }
+        scheduleRealtimeRefresh();
 
       };
 
@@ -1497,12 +1562,57 @@ export default function Inbox() {
     };
 
 
+    document.addEventListener(
+      "visibilitychange",
+      handleVisibilityChange
+    );
+
+    window.addEventListener(
+      "focus",
+      handleWindowFocus
+    );
+
+    window.addEventListener(
+      "online",
+      handleNetworkOnline
+    );
+
+
     connect();
 
 
     return () => {
 
       stopped = true;
+
+
+      document.removeEventListener(
+        "visibilitychange",
+        handleVisibilityChange
+      );
+
+      window.removeEventListener(
+        "focus",
+        handleWindowFocus
+      );
+
+      window.removeEventListener(
+        "online",
+        handleNetworkOnline
+      );
+
+
+      if (
+        realtimeRefreshTimer !== null
+      ) {
+
+        window.clearTimeout(
+          realtimeRefreshTimer
+        );
+
+        realtimeRefreshTimer = null;
+
+      }
 
 
       if (
