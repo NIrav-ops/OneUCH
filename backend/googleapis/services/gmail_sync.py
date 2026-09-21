@@ -1,4 +1,7 @@
 import base64
+import json
+import random
+import time
 
 from datetime import (
     datetime,
@@ -37,6 +40,10 @@ from channels.layers import (
 
 from googleapiclient.discovery import (
     build,
+)
+
+from googleapiclient.errors import (
+    HttpError,
 )
 
 
@@ -80,6 +87,264 @@ from platform_core.observability.logger import (
 logger = get_logger(
     "oneuch.runtime.gmail"
 )
+
+
+GMAIL_API_MAX_RETRIES = 6
+GMAIL_API_MAX_BACKOFF_SECONDS = 32
+
+GMAIL_RETRYABLE_HTTP_STATUSES = {
+    429,
+    500,
+    502,
+    503,
+    504,
+}
+
+GMAIL_RETRYABLE_403_REASONS = {
+    "rateLimitExceeded",
+    "userRateLimitExceeded",
+}
+
+
+def _gmail_http_error_reasons(
+    exc,
+):
+    content = getattr(
+        exc,
+        "content",
+        b"",
+    )
+
+    try:
+        if isinstance(
+            content,
+            bytes,
+        ):
+            content = content.decode(
+                "utf-8",
+                errors="replace",
+            )
+
+        payload = json.loads(
+            content or "{}"
+        )
+
+    except (
+        TypeError,
+        ValueError,
+        UnicodeDecodeError,
+    ):
+        return set()
+
+
+    error = payload.get(
+        "error",
+        {},
+    )
+
+    if not isinstance(
+        error,
+        dict,
+    ):
+        return set()
+
+
+    errors = error.get(
+        "errors",
+        [],
+    )
+
+    if not isinstance(
+        errors,
+        list,
+    ):
+        return set()
+
+
+    return {
+        str(
+            item.get(
+                "reason",
+                "",
+            )
+        ).strip()
+
+        for item in errors
+
+        if isinstance(
+            item,
+            dict,
+        )
+        and
+        item.get(
+            "reason"
+        )
+    }
+
+
+def _gmail_http_status(
+    exc,
+):
+    try:
+        return int(
+            getattr(
+                getattr(
+                    exc,
+                    "resp",
+                    None,
+                ),
+                "status",
+                0,
+            )
+            or 0
+        )
+
+    except (
+        TypeError,
+        ValueError,
+    ):
+        return 0
+
+
+def _is_retryable_gmail_http_error(
+    exc,
+):
+    if not isinstance(
+        exc,
+        HttpError,
+    ):
+        return False
+
+
+    status = (
+        _gmail_http_status(
+            exc
+        )
+    )
+
+
+    if (
+        status
+        in
+        GMAIL_RETRYABLE_HTTP_STATUSES
+    ):
+        return True
+
+
+    if status != 403:
+        return False
+
+
+    return bool(
+        _gmail_http_error_reasons(
+            exc
+        )
+        &
+        GMAIL_RETRYABLE_403_REASONS
+    )
+
+
+def _gmail_sync_user_error(
+    exc,
+):
+    if (
+        isinstance(
+            exc,
+            HttpError,
+        )
+        and
+        _is_retryable_gmail_http_error(
+            exc
+        )
+    ):
+        return (
+            "Gmail temporarily rate limited synchronization. "
+            "One UCH will retry automatically."
+        )
+
+
+    return (
+        "Gmail synchronization failed. "
+        "Retry or reconnect the mailbox if the issue continues."
+    )
+
+
+def _execute_gmail_request(
+    request,
+    *,
+    operation,
+    account_id,
+):
+    retry_count = 0
+
+
+    while True:
+
+        try:
+            return (
+                request.execute()
+            )
+
+        except HttpError as exc:
+
+            if (
+                not
+                _is_retryable_gmail_http_error(
+                    exc
+                )
+                or
+                retry_count
+                >=
+                GMAIL_API_MAX_RETRIES
+            ):
+                raise
+
+
+            delay = (
+                min(
+                    2 ** retry_count,
+                    GMAIL_API_MAX_BACKOFF_SECONDS,
+                )
+                +
+                random.uniform(
+                    0,
+                    1,
+                )
+            )
+
+
+            log_event(
+                logger,
+                "warning",
+                "gmail.api.retry",
+                provider="gmail",
+                account_id=(
+                    account_id
+                ),
+                operation=operation,
+                status_code=(
+                    _gmail_http_status(
+                        exc
+                    )
+                ),
+                retry_attempt=(
+                    retry_count
+                    + 1
+                ),
+                retry_delay_seconds=(
+                    round(
+                        delay,
+                        3,
+                    )
+                ),
+            )
+
+
+            time.sleep(
+                delay
+            )
+
+            retry_count += 1
 
 
 # ============================================================
@@ -730,6 +995,7 @@ def _iter_gmail_message_references(
     *,
     service,
     cutoff,
+    account_id,
 ):
     page_token = None
 
@@ -757,14 +1023,22 @@ def _iter_gmail_message_references(
             ] = page_token
 
 
-        result = (
+        request = (
             service
             .users()
             .messages()
             .list(
                 **kwargs
             )
-            .execute()
+        )
+
+
+        result = (
+            _execute_gmail_request(
+                request,
+                operation="messages.list",
+                account_id=account_id,
+            )
         )
 
 
@@ -1037,6 +1311,9 @@ def _fetch_gmail_emails_impl(
         _iter_gmail_message_references(
             service=service,
             cutoff=window.cutoff,
+            account_id=(
+                email_account.id
+            ),
         )
     ):
 
@@ -1071,7 +1348,7 @@ def _fetch_gmail_emails_impl(
             )
 
 
-            message = (
+            request = (
                 service
                 .users()
                 .messages()
@@ -1080,7 +1357,17 @@ def _fetch_gmail_emails_impl(
                     id=provider_id,
                     format="full",
                 )
-                .execute()
+            )
+
+
+            message = (
+                _execute_gmail_request(
+                    request,
+                    operation="messages.get",
+                    account_id=(
+                        email_account.id
+                    ),
+                )
             )
 
 
@@ -1755,7 +2042,9 @@ def fetch_gmail_emails(
             status="failed",
             progress=0,
             error_message=(
-                str(exc)
+                _gmail_sync_user_error(
+                    exc
+                )
             ),
         )
 
