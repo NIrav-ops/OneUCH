@@ -41,6 +41,7 @@ import Login from "./pages/Login";
 import Workflows from "./pages/Workflows";
 import WorkflowDetail from "./pages/WorkflowDetail";
 import WorkflowRuntime from "./pages/WorkflowRuntime";
+import PlatformAccessReview from "./pages/PlatformAccessReview";
 
 
 export default function App() {
@@ -198,6 +199,11 @@ export default function App() {
 
   return (
     <Routes>
+      <Route
+        path="/platform-access-review"
+        element={<PlatformAccessReview />}
+      />
+
       <Route element={<AppLayout />}>
 
         <Route
