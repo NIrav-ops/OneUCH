@@ -29,6 +29,11 @@ export default function Dashboard() {
   const [escalatedCount, setEscalatedCount] = useState(0);
   const [dashboardStats, setDashboardStats] = useState({});
 
+  const [
+    mailboxSummary,
+    setMailboxSummary,
+  ] = useState(null);
+
   const fetchData = async () => {
     try {
       setError("");
@@ -78,7 +83,28 @@ export default function Dashboard() {
       setDashboardStats(
         dashboardRes.data || {}
       );
-      
+
+      /*
+       * Mailbox onboarding is advisory rather than a hard
+       * dashboard dependency. A temporary mail-adoption status
+       * failure must not make the operational Dashboard fail.
+       */
+      try {
+        const mailboxRes =
+          await axios.get(
+            "/api/mail-adoption/"
+          );
+
+        setMailboxSummary(
+          mailboxRes.data?.summary ||
+          null
+        );
+      } catch {
+        setMailboxSummary(
+          null
+        );
+      }
+
     } catch (err) {
       console.error("Dashboard load error:", err);
       setError("Unable to load dashboard data.");
@@ -256,6 +282,44 @@ export default function Dashboard() {
 
             <div className="mx-5 mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 sm:mx-6 lg:mx-7">
               {error}
+            </div>
+
+          )}
+
+
+          {(
+            mailboxSummary &&
+            Number(
+              mailboxSummary.connected || 0
+            ) === 0
+          ) && (
+
+            <div className="mx-4 my-4 flex flex-col gap-4 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-4 sm:mx-5 sm:flex-row sm:items-center sm:justify-between">
+
+              <div className="max-w-3xl">
+
+                <p className="text-sm font-semibold text-slate-950">
+                  Connect your first work mailbox
+                </p>
+
+                <p className="mt-1 text-xs leading-5 text-slate-600">
+                  Bring Gmail, Microsoft 365 or another work mailbox into One UCH so communication can flow into your unified workspace.
+                </p>
+
+              </div>
+
+              <button
+                type="button"
+                onClick={() =>
+                  navigate(
+                    "/settings"
+                  )
+                }
+                className="shrink-0 rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800"
+              >
+                Connect mailbox
+              </button>
+
             </div>
 
           )}
