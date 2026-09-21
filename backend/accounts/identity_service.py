@@ -52,6 +52,10 @@ from rest_framework_simplejwt.tokens import (
 from accounts.authentication import (
     get_active_membership,
 )
+
+from accounts.registration_notifications import (
+    registration_approval_email_available,
+)
 from accounts.authentication_events import (
     record_authentication_success,
 )
@@ -475,6 +479,9 @@ def registration_public_configuration():
 
             "providers":
                 [],
+
+            "approval_email_enabled":
+                False,
         }
 
 
@@ -497,6 +504,9 @@ def registration_public_configuration():
 
             "providers":
                 [],
+
+            "approval_email_enabled":
+                False,
         }
 
 
@@ -508,6 +518,9 @@ def registration_public_configuration():
 
             "providers":
                 [],
+
+            "approval_email_enabled":
+                False,
         }
 
 
@@ -517,6 +530,9 @@ def registration_public_configuration():
 
         "providers":
             providers,
+
+        "approval_email_enabled":
+            registration_approval_email_available(),
 
         "privacy_notice_version":
             registration_config[

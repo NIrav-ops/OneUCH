@@ -197,6 +197,7 @@ export default function Login({
   ] = useState({
     enabled: false,
     providers: [],
+    approval_email_enabled: false,
     privacy_notice_version: "",
     terms_version: "",
   });
@@ -521,6 +522,11 @@ export default function Login({
 
                 providers,
 
+                approval_email_enabled:
+                  response.data
+                    ?.approval_email_enabled
+                  === true,
+
                 privacy_notice_version:
                   String(
                     response.data
@@ -561,6 +567,7 @@ export default function Login({
               setRegistrationConfig({
                 enabled: false,
                 providers: [],
+                approval_email_enabled: false,
                 privacy_notice_version: "",
                 terms_version: "",
               });
@@ -1481,7 +1488,18 @@ export default function Login({
                         : outcomeStatus ===
                             "pending"
                           ? (
-                              "Your identity is verified. Your account is awaiting One UCH platform approval before sign in is enabled."
+                              (
+                                "Your identity is verified. Your account is awaiting One UCH platform approval before sign in is enabled."
+                                +
+                                (
+                                  registrationConfig
+                                    .approval_email_enabled
+                                    ? (
+                                        " We’ll email you at your verified email once your account is approved."
+                                      )
+                                    : ""
+                                )
+                              )
                             )
                           : outcomeStatus ===
                               "rejected"

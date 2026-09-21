@@ -531,6 +531,92 @@ ONEUCH_FRONTEND_LOGIN_URL = os.environ.get(
     "http://localhost:5173/login",
 ).strip()
 
+
+# ==================================================
+# Governed registration approval notification
+# ==================================================
+
+REGISTRATION_APPROVAL_EMAIL_ENABLED = (
+    os.environ.get(
+        "REGISTRATION_APPROVAL_EMAIL_ENABLED",
+        "false",
+    ).strip().lower()
+    in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+)
+
+ONEUCH_APPROVAL_EMAIL_FROM = (
+    os.environ.get(
+        "ONEUCH_APPROVAL_EMAIL_FROM",
+        "",
+    ).strip()
+)
+
+ONEUCH_APPROVAL_SIGNIN_URL = (
+    os.environ.get(
+        "ONEUCH_APPROVAL_SIGNIN_URL",
+        ONEUCH_FRONTEND_LOGIN_URL,
+    ).strip()
+)
+
+EMAIL_BACKEND = os.environ.get(
+    "DJANGO_EMAIL_BACKEND",
+    "django.core.mail.backends.smtp.EmailBackend",
+).strip()
+
+EMAIL_HOST = os.environ.get(
+    "DJANGO_EMAIL_HOST",
+    "",
+).strip()
+
+EMAIL_PORT = int(
+    os.environ.get(
+        "DJANGO_EMAIL_PORT",
+        "587",
+    )
+)
+
+EMAIL_HOST_USER = os.environ.get(
+    "DJANGO_EMAIL_HOST_USER",
+    "",
+).strip()
+
+EMAIL_HOST_PASSWORD = os.environ.get(
+    "DJANGO_EMAIL_HOST_PASSWORD",
+    "",
+)
+
+EMAIL_USE_TLS = os.environ.get(
+    "DJANGO_EMAIL_USE_TLS",
+    "true",
+).strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+
+EMAIL_USE_SSL = os.environ.get(
+    "DJANGO_EMAIL_USE_SSL",
+    "false",
+).strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+
+EMAIL_TIMEOUT = float(
+    os.environ.get(
+        "DJANGO_EMAIL_TIMEOUT_SECONDS",
+        "10",
+    )
+)
+
 GOOGLE_IDENTITY_CLIENT_ID = os.environ.get(
     "GOOGLE_IDENTITY_CLIENT_ID",
     "",

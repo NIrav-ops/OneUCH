@@ -308,6 +308,9 @@ class H2B3D3BFederatedRegistrationTests(
                     "microsoft",
                 ],
 
+                "approval_email_enabled":
+                    False,
+
                 "privacy_notice_version":
                     "privacy-2026-09",
 
@@ -367,6 +370,9 @@ class H2B3D3BFederatedRegistrationTests(
 
                 "providers":
                     [],
+
+                "approval_email_enabled":
+                    False,
             },
         )
 

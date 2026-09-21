@@ -27,6 +27,10 @@ from django.utils import (
     timezone,
 )
 
+from accounts.registration_notifications import (
+    registration_approval_email_available,
+)
+
 from accounts.models import (
     AUTH_METHOD_GOOGLE,
     AUTH_METHOD_MICROSOFT,
@@ -733,6 +737,35 @@ def approve_registration_request(
         ),
         actor=reviewer,
     )
+
+
+    if (
+        registration_approval_email_available()
+    ):
+
+        registration_id = (
+            registration.public_id
+        )
+
+
+        def queue_approval_email():
+
+            from accounts.tasks import (
+                send_registration_approval_email_task,
+            )
+
+
+            send_registration_approval_email_task.delay(
+                registration_id
+            )
+
+
+        # Approval is authoritative. Notification
+        # infrastructure cannot roll it back.
+        transaction.on_commit(
+            queue_approval_email,
+            robust=True,
+        )
 
 
     return registration
