@@ -93,6 +93,8 @@ class H2B3D3DRegistrationLoginUXTests(
                 organization_name=(
                     "D3D Pending Company"
                 ),
+                first_name="Pending",
+                last_name="User",
                 privacy_notice_version=(
                     "privacy-2026-09"
                 ),

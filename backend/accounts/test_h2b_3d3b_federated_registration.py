@@ -113,6 +113,9 @@ class H2B3D3BFederatedRegistrationTests(
         organization_name=(
             "D3B Federated Company"
         ),
+        first_name="Federated",
+        last_name="User",
+        phone_number="",
         acknowledged=True,
     ):
         return self.client.post(
@@ -125,6 +128,15 @@ class H2B3D3BFederatedRegistrationTests(
             {
                 "organization_name":
                     organization_name,
+
+                "first_name":
+                    first_name,
+
+                "last_name":
+                    last_name,
+
+                "phone_number":
+                    phone_number,
 
                 "acknowledged":
                     acknowledged,

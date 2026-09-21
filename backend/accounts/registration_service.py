@@ -289,6 +289,9 @@ def submit_registration_request(
     terms_version,
     consent_recorded_at,
     requested_region="",
+    first_name="",
+    last_name="",
+    phone_number="",
 ):
     """
     Create the fail-closed identity + tenant registration shell.
@@ -319,6 +322,32 @@ def submit_registration_request(
     email = _normalize_email(
         email
     )
+
+    first_name = (
+        _required_text(
+            first_name,
+            field="first name",
+            max_length=80,
+        )
+    )
+
+    last_name = (
+        _required_text(
+            last_name,
+            field="last name",
+            max_length=80,
+        )
+    )
+
+    phone_number = str(
+        phone_number
+        or ""
+    ).strip()
+
+    if len(phone_number) > 32:
+        raise RegistrationValidationError(
+            "Invalid phone number."
+        )
 
     organization_name = (
         _required_text(
@@ -414,6 +443,9 @@ def submit_registration_request(
                     password=None,
                     signup_method=provider,
                     is_active=False,
+                    first_name=first_name,
+                    last_name=last_name,
+                    phone_number=phone_number,
                 )
             )
 

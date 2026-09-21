@@ -716,6 +716,9 @@ def _create_registration_transaction(
     provider,
     organization_name,
     acknowledged,
+    first_name="",
+    last_name="",
+    phone_number="",
 ):
     _require_registration_feature()
 
@@ -736,6 +739,30 @@ def _create_registration_transaction(
             max_length=255,
         )
     )
+
+    first_name = (
+        _registration_text(
+            first_name,
+            max_length=80,
+        )
+    )
+
+    last_name = (
+        _registration_text(
+            last_name,
+            max_length=80,
+        )
+    )
+
+    phone_number = str(
+        phone_number
+        or ""
+    ).strip()
+
+    if len(phone_number) > 32:
+        raise IdentityRegistrationError(
+            GENERIC_IDENTITY_ERROR
+        )
 
 
     registration_config = (
@@ -790,6 +817,15 @@ def _create_registration_transaction(
 
             "organization_name":
                 organization_name,
+
+            "first_name":
+                first_name,
+
+            "last_name":
+                last_name,
+
+            "phone_number":
+                phone_number,
 
             "privacy_notice_version":
                 registration_config[
@@ -862,6 +898,9 @@ def build_registration_authorization_url(
     provider,
     organization_name,
     acknowledged,
+    first_name="",
+    last_name="",
+    phone_number="",
 ):
     (
         state,
@@ -874,6 +913,9 @@ def build_registration_authorization_url(
             organization_name
         ),
         acknowledged=acknowledged,
+        first_name=first_name,
+        last_name=last_name,
+        phone_number=phone_number,
     )
 
 
@@ -988,6 +1030,37 @@ def _resolve_registration_context(
     )
 
 
+    first_name = (
+        _registration_text(
+            context.get(
+                "first_name"
+            ),
+            max_length=80,
+        )
+    )
+
+    last_name = (
+        _registration_text(
+            context.get(
+                "last_name"
+            ),
+            max_length=80,
+        )
+    )
+
+    phone_number = str(
+        context.get(
+            "phone_number"
+        )
+        or ""
+    ).strip()
+
+    if len(phone_number) > 32:
+        raise IdentityRegistrationError(
+            GENERIC_IDENTITY_ERROR
+        )
+
+
     privacy_notice_version = (
         _registration_text(
             context.get(
@@ -1061,6 +1134,15 @@ def _resolve_registration_context(
     return {
         "organization_name":
             organization_name,
+
+        "first_name":
+            first_name,
+
+        "last_name":
+            last_name,
+
+        "phone_number":
+            phone_number,
 
         "privacy_notice_version":
             privacy_notice_version,

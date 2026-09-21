@@ -85,6 +85,18 @@ def build_safe_registration_payload(
             "email":
                 registration.user.email,
 
+            "first_name":
+                registration.user.first_name,
+
+            "last_name":
+                registration.user.last_name,
+
+            "phone_number":
+                (
+                    registration.user.phone_number
+                    or None
+                ),
+
             "active":
                 bool(
                     registration.user.is_active

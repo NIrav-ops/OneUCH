@@ -103,6 +103,8 @@ class H2B3D3AGovernedRegistrationTests(
                 organization_name=(
                     organization_name
                 ),
+                first_name="New",
+                last_name="User",
                 privacy_notice_version=(
                     "privacy-2026-09"
                 ),
@@ -471,6 +473,8 @@ class H2B3D3AGovernedRegistrationTests(
                 organization_name=(
                     "Invalid Consent"
                 ),
+                first_name="Invalid",
+                last_name="Consent",
                 privacy_notice_version="",
                 terms_version=(
                     "terms-2026-09"
@@ -497,6 +501,8 @@ class H2B3D3AGovernedRegistrationTests(
                 organization_name=(
                     "Local"
                 ),
+                first_name="Local",
+                last_name="User",
                 privacy_notice_version=(
                     "privacy-2026-09"
                 ),
@@ -804,6 +810,8 @@ class H2B3D3AGovernedRegistrationTests(
                 organization_name=(
                     "Rejected Once"
                 ),
+                first_name="Rejected",
+                last_name="User",
                 privacy_notice_version=(
                     "privacy-2026-09"
                 ),

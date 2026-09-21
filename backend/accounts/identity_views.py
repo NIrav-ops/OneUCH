@@ -228,6 +228,24 @@ class IdentityRegistrationStartAPIView(
             )
         )
 
+        first_name = (
+            request.data.get(
+                "first_name"
+            )
+        )
+
+        last_name = (
+            request.data.get(
+                "last_name"
+            )
+        )
+
+        phone_number = (
+            request.data.get(
+                "phone_number"
+            )
+        )
+
         acknowledged = (
             request.data.get(
                 "acknowledged"
@@ -250,6 +268,9 @@ class IdentityRegistrationStartAPIView(
                     acknowledged=(
                         acknowledged
                     ),
+                    first_name=first_name,
+                    last_name=last_name,
+                    phone_number=phone_number,
                 )
             )
 
@@ -481,6 +502,21 @@ class IdentityCallbackAPIView(
                         requested_region=(
                             context[
                                 "requested_region"
+                            ]
+                        ),
+                        first_name=(
+                            context[
+                                "first_name"
+                            ]
+                        ),
+                        last_name=(
+                            context[
+                                "last_name"
+                            ]
+                        ),
+                        phone_number=(
+                            context[
+                                "phone_number"
                             ]
                         ),
                     )

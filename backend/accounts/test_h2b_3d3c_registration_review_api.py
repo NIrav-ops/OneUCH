@@ -106,6 +106,8 @@ class H2B3D3CRegistrationReviewAPITests(
                 organization_name=(
                     organization_name
                 ),
+                first_name="Candidate",
+                last_name="User",
                 privacy_notice_version=(
                     "privacy-2026-09"
                 ),
