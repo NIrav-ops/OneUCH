@@ -187,7 +187,7 @@ export default function Login({
     authMode,
     setAuthMode,
   ] = useState(
-    "signin"
+    "request"
   );
 
 
@@ -200,6 +200,24 @@ export default function Login({
     privacy_notice_version: "",
     terms_version: "",
   });
+
+
+  const [
+    firstName,
+    setFirstName,
+  ] = useState("");
+
+
+  const [
+    lastName,
+    setLastName,
+  ] = useState("");
+
+
+  const [
+    phoneNumber,
+    setPhoneNumber,
+  ] = useState("");
 
 
   const [
@@ -518,6 +536,21 @@ export default function Login({
                   ),
               });
 
+              if (
+                response.data?.enabled
+                !== true
+                &&
+                !registrationStatus
+                &&
+                !registrationError
+              ) {
+
+                setAuthMode(
+                  "signin"
+                );
+
+              }
+
             }
 
 
@@ -651,6 +684,28 @@ export default function Login({
       }
 
 
+      if (!firstName.trim()) {
+
+        setError(
+          "Enter your first name."
+        );
+
+        return;
+
+      }
+
+
+      if (!lastName.trim()) {
+
+        setError(
+          "Enter your last name."
+        );
+
+        return;
+
+      }
+
+
       if (!organizationName.trim()) {
 
         setError(
@@ -665,7 +720,7 @@ export default function Login({
       if (!registrationAcknowledged) {
 
         setError(
-          "Agree to the Terms of Service and acknowledge the Privacy Notice before requesting access."
+          "Agree to the Terms of Service and acknowledge the Privacy Notice before creating your account."
         );
 
         return;
@@ -693,6 +748,15 @@ export default function Login({
               + "/start/"
             ),
             {
+              first_name:
+                firstName.trim(),
+
+              last_name:
+                lastName.trim(),
+
+              phone_number:
+                phoneNumber.trim(),
+
               organization_name:
                 organizationName.trim(),
 
@@ -754,7 +818,7 @@ export default function Login({
         );
 
         setError(
-          "We couldn't start the access request. Try again."
+          "We couldn't start sign up. Try again."
         );
 
       }
@@ -1202,8 +1266,42 @@ export default function Login({
                     p-1
                   "
                   role="tablist"
-                  aria-label="Workspace access"
+                  aria-label="One UCH account access"
                 >
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={
+                      authMode ===
+                      "request"
+                    }
+                    onClick={() =>
+                      switchMode(
+                        "request"
+                      )
+                    }
+                    className={`
+                      rounded-lg
+                      px-3
+                      py-2
+                      text-xs
+                      font-semibold
+                      transition
+                      ${
+                        authMode ===
+                        "request"
+                          ? (
+                              "bg-white text-slate-950 shadow-sm"
+                            )
+                          : (
+                              "text-slate-500 hover:text-slate-800"
+                            )
+                      }
+                    `}
+                  >
+                    Sign up
+                  </button>
+
                   <button
                     type="button"
                     role="tab"
@@ -1236,40 +1334,6 @@ export default function Login({
                     `}
                   >
                     Sign in
-                  </button>
-
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={
-                      authMode ===
-                      "request"
-                    }
-                    onClick={() =>
-                      switchMode(
-                        "request"
-                      )
-                    }
-                    className={`
-                      rounded-lg
-                      px-3
-                      py-2
-                      text-xs
-                      font-semibold
-                      transition
-                      ${
-                        authMode ===
-                        "request"
-                          ? (
-                              "bg-white text-slate-950 shadow-sm"
-                            )
-                          : (
-                              "text-slate-500 hover:text-slate-800"
-                            )
-                      }
-                    `}
-                  >
-                    Request access
                   </button>
                 </div>
 
@@ -1323,7 +1387,7 @@ export default function Login({
                 {
                   authMode ===
                     "request"
-                    ? "Request workspace access"
+                    ? "Create your One UCH account"
                     : "Welcome back"
                 }
               </h2>
@@ -1341,10 +1405,10 @@ export default function Login({
                   authMode ===
                     "request"
                     ? (
-                        "Verify your work identity and submit your organization for One UCH approval."
+                        "Create your profile, verify your work identity, and submit your workspace for approval."
                       )
                     : (
-                        "Sign in to your approved One UCH workspace."
+                        "Sign in with the same Google or Microsoft identity used to create your approved One UCH account."
                       )
                 }
               </p>
@@ -1389,14 +1453,14 @@ export default function Login({
                     {
                       outcomeStatus ===
                         "approved"
-                        ? "Access approved"
+                        ? "Account approved"
                         : outcomeStatus ===
                             "pending"
-                          ? "Access request pending"
+                          ? "Account awaiting approval"
                           : outcomeStatus ===
                               "rejected"
-                            ? "Access request not approved"
-                            : "Access request could not be completed"
+                            ? "Account not approved"
+                            : "Sign up could not be completed"
                     }
                   </div>
 
@@ -1412,20 +1476,20 @@ export default function Login({
                       outcomeStatus ===
                         "approved"
                         ? (
-                            `Your workspace is approved. Sign in with ${outcomeProviderLabel}.`
+                            `Your account is approved. Sign in with ${outcomeProviderLabel}.`
                           )
                         : outcomeStatus ===
                             "pending"
                           ? (
-                              "Your identity is verified, but workspace access remains disabled until One UCH platform approval."
+                              "Your identity is verified. Your account is awaiting One UCH platform approval before sign in is enabled."
                             )
                           : outcomeStatus ===
                               "rejected"
                             ? (
-                                "This registration remains disabled. Contact One UCH platform administration if the request requires review."
+                                "This account remains disabled. Contact One UCH platform administration if it needs further review."
                               )
                             : (
-                                "No workspace was activated. Please try the request again."
+                                "No account was activated. Please try signing up again."
                               )
                     }
                   </div>
@@ -1492,6 +1556,204 @@ export default function Login({
                 ? (
 
                     <>
+                      {
+                        identityProviders.length > 0
+                        && (
+
+                          <div
+                            className="
+                              mb-5
+                            "
+                          >
+                            <div
+                              className="
+                                flex
+                                items-center
+                                gap-3
+                                text-[10px]
+                                font-semibold
+                                uppercase
+                                tracking-[0.12em]
+                                text-slate-400
+                              "
+                            >
+                              <span
+                                className="
+                                  h-px
+                                  flex-1
+                                  bg-slate-200
+                                "
+                              />
+
+                              <span>
+                                Sign in with your work identity
+                              </span>
+
+                              <span
+                                className="
+                                  h-px
+                                  flex-1
+                                  bg-slate-200
+                                "
+                              />
+                            </div>
+
+
+                            <div
+                              className="
+                                mt-4
+                                grid
+                                gap-3
+                                sm:grid-cols-2
+                              "
+                            >
+                              {
+                                identityProviders.map(
+                                  (provider) => {
+
+                                    const label =
+                                      IDENTITY_PROVIDER_LABELS[
+                                        provider
+                                      ];
+
+
+                                    return (
+
+                                      <button
+                                        key={provider}
+                                        type="button"
+                                        aria-label={
+                                          `Continue with ${label}`
+                                        }
+                                        disabled={
+                                          loading
+                                          ||
+                                          Boolean(
+                                            identityAction
+                                          )
+                                          ||
+                                          Boolean(
+                                            registrationAction
+                                          )
+                                        }
+                                        onClick={() =>
+                                          handleIdentityStart(
+                                            provider
+                                          )
+                                        }
+                                        className="
+                                          flex
+                                          min-h-11
+                                          items-center
+                                          justify-center
+                                          gap-2
+                                          rounded-xl
+                                          border
+                                          border-slate-200
+                                          bg-white
+                                          px-3
+                                          py-2.5
+                                          text-xs
+                                          font-semibold
+                                          text-slate-700
+                                          shadow-sm
+                                          transition
+                                          hover:border-slate-300
+                                          hover:bg-slate-50
+                                          disabled:cursor-not-allowed
+                                          disabled:opacity-60
+                                        "
+                                      >
+                                        <span
+                                          aria-hidden="true"
+                                          className="
+                                            flex
+                                            h-6
+                                            w-6
+                                            items-center
+                                            justify-center
+                                            rounded-md
+                                            border
+                                            border-slate-200
+                                            bg-slate-50
+                                            text-[10px]
+                                            font-black
+                                            text-slate-700
+                                          "
+                                        >
+                                          {
+                                            provider ===
+                                              "google"
+                                              ? "G"
+                                              : "M"
+                                          }
+                                        </span>
+
+                                        <span>
+                                          {
+                                            identityAction ===
+                                              provider
+                                              ? "Connecting..."
+                                              : (
+                                                  `Continue with ${label}`
+                                                )
+                                          }
+                                        </span>
+                                      </button>
+
+                                    );
+
+                                  }
+                                )
+                              }
+                            </div>
+                          </div>
+
+                        )
+                      }
+
+
+                      {
+                        identityProviders.length > 0
+                        && (
+
+                          <div
+                            className="
+                              mb-5
+                              flex
+                              items-center
+                              gap-3
+                              text-[10px]
+                              font-semibold
+                              uppercase
+                              tracking-[0.12em]
+                              text-slate-400
+                            "
+                          >
+                            <span
+                              className="
+                                h-px
+                                flex-1
+                                bg-slate-200
+                              "
+                            />
+
+                            <span>
+                              or use an existing One UCH account
+                            </span>
+
+                            <span
+                              className="
+                                h-px
+                                flex-1
+                                bg-slate-200
+                              "
+                            />
+                          </div>
+
+                        )
+                      }
+
                       <form
                         onSubmit={
                           handleLogin
@@ -1677,161 +1939,6 @@ export default function Login({
                       </form>
 
 
-                      {
-                        identityProviders.length > 0
-                        && (
-
-                          <div
-                            className="
-                              mt-6
-                            "
-                          >
-                            <div
-                              className="
-                                flex
-                                items-center
-                                gap-3
-                                text-[10px]
-                                font-semibold
-                                uppercase
-                                tracking-[0.12em]
-                                text-slate-400
-                              "
-                            >
-                              <span
-                                className="
-                                  h-px
-                                  flex-1
-                                  bg-slate-200
-                                "
-                              />
-
-                              <span>
-                                or use your work identity
-                              </span>
-
-                              <span
-                                className="
-                                  h-px
-                                  flex-1
-                                  bg-slate-200
-                                "
-                              />
-                            </div>
-
-
-                            <div
-                              className="
-                                mt-4
-                                grid
-                                gap-3
-                                sm:grid-cols-2
-                              "
-                            >
-                              {
-                                identityProviders.map(
-                                  (provider) => {
-
-                                    const label =
-                                      IDENTITY_PROVIDER_LABELS[
-                                        provider
-                                      ];
-
-
-                                    return (
-
-                                      <button
-                                        key={provider}
-                                        type="button"
-                                        aria-label={
-                                          `Continue with ${label}`
-                                        }
-                                        disabled={
-                                          loading
-                                          ||
-                                          Boolean(
-                                            identityAction
-                                          )
-                                          ||
-                                          Boolean(
-                                            registrationAction
-                                          )
-                                        }
-                                        onClick={() =>
-                                          handleIdentityStart(
-                                            provider
-                                          )
-                                        }
-                                        className="
-                                          flex
-                                          min-h-11
-                                          items-center
-                                          justify-center
-                                          gap-2
-                                          rounded-xl
-                                          border
-                                          border-slate-200
-                                          bg-white
-                                          px-3
-                                          py-2.5
-                                          text-xs
-                                          font-semibold
-                                          text-slate-700
-                                          shadow-sm
-                                          transition
-                                          hover:border-slate-300
-                                          hover:bg-slate-50
-                                          disabled:cursor-not-allowed
-                                          disabled:opacity-60
-                                        "
-                                      >
-                                        <span
-                                          aria-hidden="true"
-                                          className="
-                                            flex
-                                            h-6
-                                            w-6
-                                            items-center
-                                            justify-center
-                                            rounded-md
-                                            border
-                                            border-slate-200
-                                            bg-slate-50
-                                            text-[10px]
-                                            font-black
-                                            text-slate-700
-                                          "
-                                        >
-                                          {
-                                            provider ===
-                                              "google"
-                                              ? "G"
-                                              : "M"
-                                          }
-                                        </span>
-
-                                        <span>
-                                          {
-                                            identityAction ===
-                                              provider
-                                              ? "Connecting..."
-                                              : (
-                                                  `Continue with ${label}`
-                                                )
-                                          }
-                                        </span>
-                                      </button>
-
-                                    );
-
-                                  }
-                                )
-                              }
-                            </div>
-                          </div>
-
-                        )
-                      }
                     </>
 
                   )
@@ -1879,6 +1986,173 @@ export default function Login({
                                   space-y-4
                                 "
                               >
+
+                                <div
+                                  className="
+                                    grid
+                                    gap-4
+                                    sm:grid-cols-2
+                                  "
+                                >
+                                  <div>
+                                    <label
+                                      htmlFor="oneuch-first-name"
+                                      className="
+                                        mb-1.5
+                                        block
+                                        text-xs
+                                        font-semibold
+                                        text-slate-700
+                                      "
+                                    >
+                                      First name
+                                    </label>
+
+                                    <input
+                                      id="oneuch-first-name"
+                                      type="text"
+                                      autoComplete="given-name"
+                                      maxLength={80}
+                                      required
+                                      value={
+                                        firstName
+                                      }
+                                      onChange={
+                                        (event) =>
+                                          setFirstName(
+                                            event.target.value
+                                          )
+                                      }
+                                      placeholder="First name"
+                                      className="
+                                        w-full
+                                        rounded-xl
+                                        border
+                                        border-slate-200
+                                        bg-white
+                                        px-3
+                                        py-3
+                                        text-sm
+                                        text-slate-900
+                                        outline-none
+                                        placeholder:text-slate-400
+                                        focus:border-slate-400
+                                        focus:ring-2
+                                        focus:ring-slate-100
+                                      "
+                                    />
+                                  </div>
+
+
+                                  <div>
+                                    <label
+                                      htmlFor="oneuch-last-name"
+                                      className="
+                                        mb-1.5
+                                        block
+                                        text-xs
+                                        font-semibold
+                                        text-slate-700
+                                      "
+                                    >
+                                      Last name
+                                    </label>
+
+                                    <input
+                                      id="oneuch-last-name"
+                                      type="text"
+                                      autoComplete="family-name"
+                                      maxLength={80}
+                                      required
+                                      value={
+                                        lastName
+                                      }
+                                      onChange={
+                                        (event) =>
+                                          setLastName(
+                                            event.target.value
+                                          )
+                                      }
+                                      placeholder="Last name"
+                                      className="
+                                        w-full
+                                        rounded-xl
+                                        border
+                                        border-slate-200
+                                        bg-white
+                                        px-3
+                                        py-3
+                                        text-sm
+                                        text-slate-900
+                                        outline-none
+                                        placeholder:text-slate-400
+                                        focus:border-slate-400
+                                        focus:ring-2
+                                        focus:ring-slate-100
+                                      "
+                                    />
+                                  </div>
+                                </div>
+
+
+                                <div>
+                                  <label
+                                    htmlFor="oneuch-phone"
+                                    className="
+                                      mb-1.5
+                                      block
+                                      text-xs
+                                      font-semibold
+                                      text-slate-700
+                                    "
+                                  >
+                                    Mobile number
+                                    <span
+                                      className="
+                                        ml-1
+                                        font-normal
+                                        text-slate-400
+                                      "
+                                    >
+                                      (optional)
+                                    </span>
+                                  </label>
+
+                                  <input
+                                    id="oneuch-phone"
+                                    type="tel"
+                                    autoComplete="tel"
+                                    maxLength={32}
+                                    value={
+                                      phoneNumber
+                                    }
+                                    onChange={
+                                      (event) =>
+                                        setPhoneNumber(
+                                          event.target.value
+                                        )
+                                    }
+                                    placeholder="+91 98765 43210"
+                                    className="
+                                      w-full
+                                      rounded-xl
+                                      border
+                                      border-slate-200
+                                      bg-white
+                                      px-3
+                                      py-3
+                                      text-sm
+                                      text-slate-900
+                                      outline-none
+                                      placeholder:text-slate-400
+                                      focus:border-slate-400
+                                      focus:ring-2
+                                      focus:ring-slate-100
+                                    "
+                                  />
+                                </div>
+
+
                                 <div>
                                   <label
                                     htmlFor="oneuch-organization"
@@ -2013,8 +2287,8 @@ export default function Login({
                                       className="cursor-pointer"
                                     >
                                       {", "}and confirm I am authorized
-                                      to request access for this
-                                      organization.
+                                      to create a One UCH workspace
+                                      for this organization.
                                     </label>
                                   </div>
                                 </div>
@@ -2033,8 +2307,8 @@ export default function Login({
                                     text-sky-800
                                   "
                                 >
-                                  Google or Microsoft is used only to verify your identity here.
-                                  Mailbox access is requested separately after workspace approval.
+                                  Your work email is verified by Google or Microsoft and becomes your One UCH sign-in identity.
+                                  Mailbox access is requested separately after account approval.
                                 </div>
 
 
@@ -2070,6 +2344,10 @@ export default function Login({
                                               )
                                               ||
                                               loading
+                                              ||
+                                              !firstName.trim()
+                                              ||
+                                              !lastName.trim()
                                               ||
                                               !organizationName.trim()
                                               ||
@@ -2128,7 +2406,7 @@ export default function Login({
                                                   provider
                                                   ? "Starting..."
                                                   : (
-                                                      `Request with ${label}`
+                                                      `Continue with ${label}`
                                                     )
                                               }
                                             </span>
@@ -2168,7 +2446,7 @@ export default function Login({
               {
                 authMode ===
                   "request"
-                  ? "Approval required before workspace access"
+                  ? "Approval required before account activation"
                   : "Protected workspace access"
               }
             </div>
