@@ -665,7 +665,7 @@ export default function Login({
       if (!registrationAcknowledged) {
 
         setError(
-          "Acknowledge the Privacy Notice and Terms before requesting access."
+          "Agree to the Terms of Service and acknowledge the Privacy Notice before requesting access."
         );
 
         return;
@@ -1928,10 +1928,9 @@ export default function Login({
                                 </div>
 
 
-                                <label
+                                <div
                                   className="
                                     flex
-                                    cursor-pointer
                                     items-start
                                     gap-3
                                     rounded-xl
@@ -1942,6 +1941,7 @@ export default function Login({
                                   "
                                 >
                                   <input
+                                    id="registration-consent"
                                     type="checkbox"
                                     checked={
                                       registrationAcknowledged
@@ -1956,26 +1956,48 @@ export default function Login({
                                       mt-0.5
                                       h-4
                                       w-4
+                                      shrink-0
                                       rounded
                                       border-slate-300
                                     "
                                   />
 
-                                  <span
+                                  <div
                                     className="
                                       text-xs
                                       leading-5
                                       text-slate-600
                                     "
                                   >
-                                    I acknowledge the One UCH{" "}
+                                    <label
+                                      htmlFor="registration-consent"
+                                      className="cursor-pointer"
+                                    >
+                                      I have read and agree to the{" "}
+                                    </label>
+
+                                    <a
+                                      href="https://cyberllix.com/ci-terms"
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="
+                                        font-semibold
+                                        text-indigo-700
+                                        underline
+                                        underline-offset-2
+                                      "
+                                    >
+                                      Terms of Service
+                                    </a>
+
+                                    <span>
+                                      {", "}acknowledge the{" "}
+                                    </span>
+
                                     <a
                                       href="https://cyberllix.com/ci-privacy"
                                       target="_blank"
-                                      rel="noreferrer"
-                                      onClick={(event) =>
-                                        event.stopPropagation()
-                                      }
+                                      rel="noopener noreferrer"
                                       className="
                                         font-semibold
                                         text-indigo-700
@@ -1985,56 +2007,17 @@ export default function Login({
                                     >
                                       Privacy Notice
                                     </a>
-                                    {
-                                      registrationConfig
-                                        .privacy_notice_version
-                                      && (
-                                        <>
-                                          {" "}
-                                          (
-                                          {
-                                            registrationConfig
-                                              .privacy_notice_version
-                                          }
-                                          )
-                                        </>
-                                      )
-                                    }
-                                    {" "}and{" "}
-                                    <a
-                                      href="https://cyberllix.com/ci-terms"
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      onClick={(event) =>
-                                        event.stopPropagation()
-                                      }
-                                      className="
-                                        font-semibold
-                                        text-indigo-700
-                                        underline
-                                        underline-offset-2
-                                      "
+
+                                    <label
+                                      htmlFor="registration-consent"
+                                      className="cursor-pointer"
                                     >
-                                      Terms
-                                    </a>
-                                    {
-                                      registrationConfig
-                                        .terms_version
-                                      && (
-                                        <>
-                                          {" "}
-                                          (
-                                          {
-                                            registrationConfig
-                                              .terms_version
-                                          }
-                                          )
-                                        </>
-                                      )
-                                    }
-                                    {" "}for this access request.
-                                  </span>
-                                </label>
+                                      {", "}and confirm I am authorized
+                                      to request access for this
+                                      organization.
+                                    </label>
+                                  </div>
+                                </div>
 
 
                                 <div
@@ -2087,6 +2070,10 @@ export default function Login({
                                               )
                                               ||
                                               loading
+                                              ||
+                                              !organizationName.trim()
+                                              ||
+                                              !registrationAcknowledged
                                             }
                                             onClick={() =>
                                               handleRegistrationStart(
