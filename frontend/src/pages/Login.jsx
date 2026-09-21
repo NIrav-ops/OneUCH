@@ -1968,7 +1968,23 @@ export default function Login({
                                       text-slate-600
                                     "
                                   >
-                                    I acknowledge the One UCH Privacy Notice
+                                    I acknowledge the One UCH{" "}
+                                    <a
+                                      href="https://cyberllix.com/ci-privacy"
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      onClick={(event) =>
+                                        event.stopPropagation()
+                                      }
+                                      className="
+                                        font-semibold
+                                        text-indigo-700
+                                        underline
+                                        underline-offset-2
+                                      "
+                                    >
+                                      Privacy Notice
+                                    </a>
                                     {
                                       registrationConfig
                                         .privacy_notice_version
@@ -1984,7 +2000,23 @@ export default function Login({
                                         </>
                                       )
                                     }
-                                    {" "}and Terms
+                                    {" "}and{" "}
+                                    <a
+                                      href="https://cyberllix.com/ci-terms"
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      onClick={(event) =>
+                                        event.stopPropagation()
+                                      }
+                                      className="
+                                        font-semibold
+                                        text-indigo-700
+                                        underline
+                                        underline-offset-2
+                                      "
+                                    >
+                                      Terms
+                                    </a>
                                     {
                                       registrationConfig
                                         .terms_version
