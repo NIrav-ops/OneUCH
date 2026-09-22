@@ -1200,6 +1200,17 @@ export default function Inbox() {
 
 
   // ==========================================================
+  // CONVERSATION LIST NAVIGATION
+  // ==========================================================
+
+  const conversationListRef =
+    useRef(null);
+
+  const conversationPageRef =
+    useRef(1);
+
+
+  // ==========================================================
   // LOAD ACCOUNTS
   // ==========================================================
 
@@ -1825,6 +1836,31 @@ export default function Inbox() {
     };
 
 
+  const returnToLatestConversations =
+    async () => {
+
+      await loadConversations({
+        page: 1,
+        append: false,
+      });
+
+
+      window.requestAnimationFrame(
+        () => {
+
+          conversationListRef
+            .current
+            ?.scrollTo({
+              top: 0,
+              behavior: "smooth",
+            });
+
+        }
+      );
+
+    };
+
+
   // ==========================================================
   // CONVERSATION SELECTION
   // ==========================================================
@@ -1932,6 +1968,16 @@ export default function Inbox() {
       loadConversations;
 
   }, [loadConversations]);
+
+
+  useEffect(() => {
+
+    conversationPageRef.current =
+      conversationMeta.currentPage;
+
+  }, [
+    conversationMeta.currentPage,
+  ]);
 
 
   useEffect(() => {
@@ -2071,7 +2117,19 @@ export default function Inbox() {
             realtimeRefreshTimer = null;
 
 
-            loadConversationsRef.current();
+            // When the user deliberately loaded older
+            // conversation history, preserve that browsing
+            // context. Returning to page 1 is an explicit
+            // "Back to latest" action instead of a background
+            // realtime side effect.
+            if (
+              conversationPageRef.current <=
+              1
+            ) {
+
+              loadConversationsRef.current();
+
+            }
 
             loadSyncStatus();
 
@@ -5244,6 +5302,23 @@ export default function Inbox() {
                     Showing {conversations.length} of {conversationMeta.count}
                   </span>
 
+
+                  {conversationMeta.currentPage >
+                    1 && (
+
+                    <button
+                      type="button"
+                      onClick={
+                        returnToLatestConversations
+                      }
+                      className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[9px] font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      Back to latest
+                    </button>
+
+                  )}
+
+
                   <button
                     type="button"
                     onClick={
@@ -5301,7 +5376,10 @@ export default function Inbox() {
               CONVERSATION LIST
           ================================================ */}
 
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <div
+            ref={conversationListRef}
+            className="min-h-0 flex-1 overflow-y-auto"
+          >
 
             {error && (
 
