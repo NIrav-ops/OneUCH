@@ -593,22 +593,97 @@ const compactMessageUrlLabel = (
 };
 
 
-const renderMessageDisplayText = (
+const MESSAGE_MARKDOWN_LABELED_LINK_PATTERN =
+  /^(\s*)\[([^\]\n]{1,100})\]\((https?:\/\/[^)\s]+)\)(.*)$/i;
+
+
+const MESSAGE_ANGLE_LABELED_LINK_PATTERN =
+  /^(\s*)([^<>\n]{1,100})<(https?:\/\/[^>\s]+)>(.*)$/i;
+
+
+const MESSAGE_SEPARATED_LABELED_LINK_PATTERN =
+  /^(\s*)([^<>\n]{1,100}?)\s*(?:→|->|-|:)\s*(https?:\/\/[^\s<>"'\]]+)(?:\s*\[\s*(https?:\/\/[^\]\s]+)\s*\])?\s*$/i;
+
+
+const isUsableMessageLinkLabel = (
   value
 ) => {
 
-  const normalized =
-    normalizeMessageDisplayText(
-      value
-    );
+  const label =
+    String(
+      value || ""
+    ).trim();
 
 
-  if (!normalized) {
-    return null;
+  if (!label) {
+    return false;
   }
 
 
-  return normalized
+  if (
+    label.length >
+    100
+  ) {
+    return false;
+  }
+
+
+  // Never reinterpret another URL as a display label.
+  if (
+    /(?:https?:\/\/|www\.)/i
+      .test(
+        label
+      )
+  ) {
+    return false;
+  }
+
+
+  return true;
+
+};
+
+
+const renderMessageAnchor = (
+  {
+    href,
+    label,
+    key,
+  }
+) => (
+
+  <a
+    key={key}
+    href={href}
+    target="_blank"
+    rel="noopener noreferrer"
+    title={href}
+    className="break-words font-medium text-sky-700 underline decoration-sky-300 underline-offset-2 hover:text-sky-900"
+  >
+    {label}
+    {" ↗"}
+  </a>
+
+);
+
+
+const renderFallbackMessageLinks = (
+  value,
+  keyPrefix
+) => {
+
+  const source =
+    String(
+      value || ""
+    );
+
+
+  if (!source) {
+    return [];
+  }
+
+
+  return source
     .split(
       MESSAGE_URL_PATTERN
     )
@@ -657,26 +732,289 @@ const renderMessageDisplayText = (
           );
 
 
-        return (
-
-          <a
-            key={`message-link-${index}`}
-            href={href}
-            target="_blank"
-            rel="noopener noreferrer"
-            title={href}
-            className="break-words font-medium text-sky-700 underline decoration-sky-300 underline-offset-2 hover:text-sky-900"
-          >
-            {compactMessageUrlLabel(
-              href
-            )}
-            {" ↗"}
-          </a>
-
+        return renderMessageAnchor(
+          {
+            href,
+            label:
+              compactMessageUrlLabel(
+                href
+              ),
+            key:
+              `${keyPrefix}-fallback-${index}`,
+          }
         );
 
       }
     );
+
+};
+
+
+const renderMessageDisplayLine = (
+  line,
+  lineIndex
+) => {
+
+  const source =
+    String(
+      line || ""
+    );
+
+
+  // ----------------------------------------------------------
+  // Markdown-style:
+  // [Manage your apps](https://example.com)
+  // ----------------------------------------------------------
+
+  const markdownMatch =
+    source.match(
+      MESSAGE_MARKDOWN_LABELED_LINK_PATTERN
+    );
+
+
+  if (
+    markdownMatch &&
+    isUsableMessageLinkLabel(
+      markdownMatch[2]
+    )
+  ) {
+
+    const [
+      ,
+      leading,
+      label,
+      rawHref,
+      suffix,
+    ] = markdownMatch;
+
+
+    const href =
+      normalizeMessageHref(
+        rawHref
+      );
+
+
+    return [
+      leading,
+
+      renderMessageAnchor(
+        {
+          href,
+          label:
+            label.trim(),
+          key:
+            `message-line-${lineIndex}-markdown`,
+        }
+      ),
+
+      ...renderFallbackMessageLinks(
+        suffix,
+        `message-line-${lineIndex}-markdown-suffix`
+      ),
+    ];
+
+  }
+
+
+  // ----------------------------------------------------------
+  // Common provider text normalization:
+  //
+  // Manage your apps<https://example.com>
+  // Privacy Statement<https://example.com>
+  //
+  // This is visible in real Outlook normalized bodies and can
+  // also occur through other provider text alternatives.
+  // ----------------------------------------------------------
+
+  const angleMatch =
+    source.match(
+      MESSAGE_ANGLE_LABELED_LINK_PATTERN
+    );
+
+
+  if (
+    angleMatch &&
+    isUsableMessageLinkLabel(
+      angleMatch[2]
+    )
+  ) {
+
+    const [
+      ,
+      leading,
+      label,
+      rawHref,
+      suffix,
+    ] = angleMatch;
+
+
+    const href =
+      normalizeMessageHref(
+        rawHref
+      );
+
+
+    return [
+      leading,
+
+      renderMessageAnchor(
+        {
+          href,
+          label:
+            label.trim(),
+          key:
+            `message-line-${lineIndex}-angle`,
+        }
+      ),
+
+      ...renderFallbackMessageLinks(
+        suffix,
+        `message-line-${lineIndex}-angle-suffix`
+      ),
+    ];
+
+  }
+
+
+  // ----------------------------------------------------------
+  // Strong plain-text label separators:
+  //
+  // Save your seat here → https://example.com
+  // Save your seat here → https://example.com [ https://... ]
+  // Unsubscribe - https://example.com
+  // Manage profile: https://example.com
+  //
+  // A duplicate bracket URL is hidden only when it is exactly
+  // the same destination. Otherwise we fail safely to normal
+  // compact URL presentation.
+  // ----------------------------------------------------------
+
+  const separatedMatch =
+    source.match(
+      MESSAGE_SEPARATED_LABELED_LINK_PATTERN
+    );
+
+
+  if (
+    separatedMatch &&
+    isUsableMessageLinkLabel(
+      separatedMatch[2]
+    )
+  ) {
+
+    const [
+      ,
+      leading,
+      label,
+      rawHref,
+      duplicateHref,
+    ] = separatedMatch;
+
+
+    const href =
+      normalizeMessageHref(
+        rawHref
+      );
+
+
+    const normalizedDuplicate =
+      duplicateHref
+        ? normalizeMessageHref(
+            duplicateHref
+          )
+        : "";
+
+
+    if (
+      !normalizedDuplicate ||
+      normalizedDuplicate ===
+        href
+    ) {
+
+      return [
+        leading,
+
+        renderMessageAnchor(
+          {
+            href,
+            label:
+              label.trim(),
+            key:
+              `message-line-${lineIndex}-label`,
+          }
+        ),
+      ];
+
+    }
+
+  }
+
+
+  // No trustworthy label was recovered.
+  // Keep the already-approved compact URL representation.
+  return renderFallbackMessageLinks(
+    source,
+    `message-line-${lineIndex}`
+  );
+
+};
+
+
+const renderMessageDisplayText = (
+  value
+) => {
+
+  const normalized =
+    normalizeMessageDisplayText(
+      value
+    );
+
+
+  if (!normalized) {
+    return null;
+  }
+
+
+  const lines =
+    normalized.split(
+      "\n"
+    );
+
+
+  const rendered =
+    [];
+
+
+  lines.forEach(
+    (
+      line,
+      lineIndex
+    ) => {
+
+      rendered.push(
+        ...renderMessageDisplayLine(
+          line,
+          lineIndex
+        )
+      );
+
+
+      if (
+        lineIndex <
+        lines.length - 1
+      ) {
+
+        rendered.push(
+          "\n"
+        );
+
+      }
+
+    }
+  );
+
+
+  return rendered;
 
 };
 
