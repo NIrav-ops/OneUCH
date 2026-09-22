@@ -2370,3 +2370,223 @@ class MailRC1C5DConvergenceTests(
             ],
         )
 
+    def test_trash_reconciliation_backfills_before_existing_cursor_once(
+        self,
+    ):
+        conversation, message = (
+            self.make_message(
+                message_id=(
+                    "<historical-provider-trash@example.net>"
+                )
+            )
+        )
+
+
+        self.account.last_synced_uids = {
+            "trash":
+                900,
+
+            "_uidvalidity": {
+                "trash":
+                    "333",
+            },
+        }
+
+        self.account.save(
+            update_fields=[
+                "last_synced_uids",
+            ]
+        )
+
+
+        fake = (
+            FakeConvergenceIMAP(
+                folder_messages={
+                    "INBOX": {},
+
+                    "Sent": {},
+
+                    "Trash": {
+                        "50": {
+                            "message_id":
+                                (
+                                    "<historical-provider-trash@example.net>"
+                                ),
+                        },
+                    },
+                }
+            )
+        )
+
+
+        (
+            endpoint_patch,
+            client_patch,
+            cache_patch,
+        ) = self.provider_patches(
+            fake
+        )
+
+
+        observed_last_uids = []
+
+
+        def historical_search(
+            mail,
+            *,
+            last_uid,
+            cutoff,
+        ):
+
+            observed_last_uids.append(
+                last_uid
+            )
+
+
+            # Historical backfill must ignore the existing 900
+            # cursor for this one reconciliation cycle.
+            if last_uid == 0:
+
+                return [
+                    b"50"
+                ]
+
+
+            return []
+
+
+        with (
+            endpoint_patch,
+            client_patch,
+            cache_patch,
+            patch(
+                (
+                    "email_accounts.services."
+                    "imap_convergence."
+                    "_search_folder_uids"
+                ),
+                side_effect=(
+                    historical_search
+                ),
+            ),
+        ):
+
+            result = (
+                reconcile_imap_trash(
+                    user=self.user,
+                    email_account=(
+                        self.account
+                    ),
+                )
+            )
+
+
+        message.refresh_from_db()
+
+        self.account.refresh_from_db()
+
+
+        self.assertEqual(
+            observed_last_uids,
+            [0],
+        )
+
+
+        self.assertEqual(
+            result["matched"],
+            1,
+        )
+
+
+        self.assertEqual(
+            message.folder,
+            "trash",
+        )
+
+
+        # The old incremental cursor must never regress.
+        self.assertEqual(
+            self.account
+            .last_synced_uids[
+                "trash"
+            ],
+            900,
+        )
+
+
+        self.assertEqual(
+            self.account
+            .last_synced_uids[
+                "_trash_reconciliation_version"
+            ],
+            1,
+        )
+
+
+        # The second pass is incremental again.
+        fake_second = (
+            FakeConvergenceIMAP(
+                folder_messages={
+                    "INBOX": {},
+                    "Sent": {},
+                    "Trash": {},
+                }
+            )
+        )
+
+
+        (
+            endpoint_patch,
+            client_patch,
+            cache_patch,
+        ) = self.provider_patches(
+            fake_second
+        )
+
+
+        observed_second = []
+
+
+        def incremental_search(
+            mail,
+            *,
+            last_uid,
+            cutoff,
+        ):
+
+            observed_second.append(
+                last_uid
+            )
+
+            return []
+
+
+        with (
+            endpoint_patch,
+            client_patch,
+            cache_patch,
+            patch(
+                (
+                    "email_accounts.services."
+                    "imap_convergence."
+                    "_search_folder_uids"
+                ),
+                side_effect=(
+                    incremental_search
+                ),
+            ),
+        ):
+
+            reconcile_imap_trash(
+                user=self.user,
+                email_account=(
+                    self.account
+                ),
+            )
+
+
+        self.assertEqual(
+            observed_second,
+            [900],
+        )
+

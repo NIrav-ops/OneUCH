@@ -4421,16 +4421,50 @@ export default function Inbox() {
         setError("");
 
 
-        await axios.post(
-          `/api/inbox/conversation/${selectedId}/mark-read/`,
-          {
-            is_read:
-              false,
-          }
+        const response =
+          await axios.post(
+            `/api/inbox/conversation/${selectedId}/mark-read/`,
+            {
+              is_read:
+                false,
+            }
+          );
+
+
+        const updatedCount =
+          Math.max(
+            1,
+            Number(
+              response.data
+                ?.updated ||
+              1
+            )
+          );
+
+
+        setConversations(
+          (items) =>
+            items.map(
+              (item) =>
+                String(
+                  item.conversation_id
+                ) ===
+                String(selectedId)
+                  ? {
+                      ...item,
+                      unread_count:
+                        updatedCount,
+                    }
+                  : item
+            )
         );
 
 
-        await loadConversations();
+        // Provider mutation already succeeded. Do not perform a
+        // second collection reload that can both disturb older
+        // history and incorrectly turn a refresh failure into a
+        // mail-mutation error.
+        setError("");
 
       } catch (err) {
 
@@ -4463,12 +4497,42 @@ export default function Inbox() {
         setError("");
 
 
-        await axios.post(
-          `/api/inbox/conversation/${selectedId}/toggle-star/`
+        const response =
+          await axios.post(
+            `/api/inbox/conversation/${selectedId}/toggle-star/`
+          );
+
+
+        const isStarred =
+          Boolean(
+            response.data
+              ?.is_starred
+          );
+
+
+        setConversations(
+          (items) =>
+            items.map(
+              (item) =>
+                String(
+                  item.conversation_id
+                ) ===
+                String(selectedId)
+                  ? {
+                      ...item,
+                      is_starred:
+                        isStarred,
+                    }
+                  : item
+            )
         );
 
 
-        await loadConversations();
+        // The provider mutation is authoritative. A separate
+        // page-1 reload is unnecessary and previously caused a
+        // successful star change to be reported as failed when
+        // only list reconciliation failed.
+        setError("");
 
       } catch (err) {
 

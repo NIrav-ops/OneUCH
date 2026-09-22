@@ -68,6 +68,13 @@ IMAP_TRASH_ALIASES = (
 )
 
 
+IMAP_TRASH_RECONCILIATION_VERSION = 1
+
+IMAP_TRASH_RECONCILIATION_STATE_KEY = (
+    "_trash_reconciliation_version"
+)
+
+
 class IMAPConvergenceError(RuntimeError):
     pass
 
@@ -1387,12 +1394,37 @@ def reconcile_imap_trash(
         )
 
 
-        last_uid = (
+        stored_last_uid = (
             _folder_last_uid(
                 state,
                 folder_key="trash",
                 uidvalidity=uidvalidity,
             )
+        )
+
+
+        try:
+
+            reconciliation_version = int(
+                state.get(
+                    IMAP_TRASH_RECONCILIATION_STATE_KEY,
+                    0,
+                )
+                or 0
+            )
+
+        except (
+            TypeError,
+            ValueError,
+        ):
+
+            reconciliation_version = 0
+
+
+        historical_backfill = (
+            reconciliation_version
+            <
+            IMAP_TRASH_RECONCILIATION_VERSION
         )
 
 
@@ -1403,11 +1435,72 @@ def reconcile_imap_trash(
         )
 
 
+        search_cutoff = (
+            window.cutoff
+        )
+
+
+        if historical_backfill:
+
+            # The previous Trash cursor may have been created
+            # after some provider deletions had already happened.
+            # Revisit the historical period represented by the
+            # actual local One UCH mailbox exactly once.
+            earliest_local_message = (
+                InboxMessage.objects
+                .filter(
+                    user=user,
+                    email_account=(
+                        email_account
+                    ),
+                    platform="imap",
+                )
+                .exclude(
+                    folder="trash"
+                )
+                .order_by(
+                    "received_at"
+                )
+                .values_list(
+                    "received_at",
+                    flat=True,
+                )
+                .first()
+            )
+
+
+            if (
+                earliest_local_message
+                is not None
+                and
+                earliest_local_message
+                <
+                search_cutoff
+            ):
+
+                search_cutoff = (
+                    earliest_local_message
+                )
+
+
+            search_last_uid = 0
+
+        else:
+
+            search_last_uid = (
+                stored_last_uid
+            )
+
+
         uids = (
             _search_folder_uids(
                 mail,
-                last_uid=last_uid,
-                cutoff=window.cutoff,
+                last_uid=(
+                    search_last_uid
+                ),
+                cutoff=(
+                    search_cutoff
+                ),
             )
         )
 
@@ -1417,7 +1510,7 @@ def reconcile_imap_trash(
         candidate_message_ids = {}
 
         highest_uid = (
-            last_uid
+            search_last_uid
         )
 
 
@@ -1609,13 +1702,57 @@ def reconcile_imap_trash(
             )
 
 
+        # Never regress an already-known incremental Trash
+        # cursor just because a historical reconciliation was
+        # requested.
+        persisted_trash_uid = max(
+            stored_last_uid,
+            highest_uid,
+        )
+
+
         _record_folder_cursor(
             email_account=(
                 locked_account
             ),
             folder_key="trash",
-            uid=highest_uid,
+            uid=(
+                persisted_trash_uid
+            ),
             uidvalidity=uidvalidity,
+        )
+
+
+        reconciliation_state = (
+            dict(
+                locked_account
+                .last_synced_uids
+            )
+            if isinstance(
+                locked_account
+                .last_synced_uids,
+                dict,
+            )
+            else {}
+        )
+
+
+        reconciliation_state[
+            IMAP_TRASH_RECONCILIATION_STATE_KEY
+        ] = (
+            IMAP_TRASH_RECONCILIATION_VERSION
+        )
+
+
+        locked_account.last_synced_uids = (
+            reconciliation_state
+        )
+
+
+        locked_account.save(
+            update_fields=[
+                "last_synced_uids",
+            ]
         )
 
 
@@ -1638,6 +1775,9 @@ def reconcile_imap_trash(
         ),
         matched=(
             len(matched_ids)
+        ),
+        historical_backfill=(
+            historical_backfill
         ),
     )
 
