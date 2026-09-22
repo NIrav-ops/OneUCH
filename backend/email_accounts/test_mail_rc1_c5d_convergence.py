@@ -2150,3 +2150,223 @@ class MailRC1C5DConvergenceTests(
             ],
         )
 
+    def test_imap_flag_mutation_does_not_require_background_sync_lock(
+        self,
+    ):
+        conversation, message = (
+            self.make_message(
+                message_id=(
+                    "<interactive-no-sync-lock@example.net>"
+                )
+            )
+        )
+
+
+        fake = (
+            FakeConvergenceIMAP(
+                folder_messages={
+                    "INBOX": {
+                        "21": {
+                            "message_id":
+                                (
+                                    "<interactive-no-sync-lock@example.net>"
+                                ),
+                        },
+                    },
+                    "Sent": {},
+                    "Trash": {},
+                }
+            )
+        )
+
+
+        (
+            endpoint_patch,
+            client_patch,
+            cache_patch,
+        ) = self.provider_patches(
+            fake
+        )
+
+
+        with (
+            endpoint_patch,
+            client_patch,
+            cache_patch,
+            patch(
+                (
+                    "email_accounts.services."
+                    "imap_convergence."
+                    "acquire_sync_lock"
+                ),
+                return_value=None,
+            ) as acquire_mock,
+        ):
+
+            result = (
+                set_imap_conversation_star(
+                    conversation=(
+                        conversation
+                    ),
+                    user=self.user,
+                    is_starred=True,
+                )
+            )
+
+
+        message.refresh_from_db()
+
+
+        self.assertEqual(
+            result["status"],
+            "completed",
+        )
+
+        self.assertTrue(
+            message.is_starred
+        )
+
+        acquire_mock.assert_not_called()
+
+
+        self.assertEqual(
+            fake.store_calls,
+            [
+                (
+                    "INBOX",
+                    "21",
+                    "+FLAGS.SILENT",
+                    r"(\Flagged)",
+                ),
+            ],
+        )
+
+
+    def test_imap_flag_mutation_falls_back_to_exact_identity_scan(
+        self,
+    ):
+        conversation, message = (
+            self.make_message(
+                message_id=(
+                    "<interactive-scan-fallback@example.net>"
+                )
+            )
+        )
+
+
+        target_identity = (
+            message.external_message_id
+        )
+
+
+        fake = (
+            FakeConvergenceIMAP(
+                folder_messages={
+                    "INBOX": {
+                        "22": {
+                            "message_id":
+                                (
+                                    "<interactive-scan-fallback@example.net>"
+                                ),
+                        },
+                    },
+                    "Sent": {},
+                    "Trash": {},
+                }
+            )
+        )
+
+
+        (
+            endpoint_patch,
+            client_patch,
+            cache_patch,
+        ) = self.provider_patches(
+            fake
+        )
+
+
+        def scan_result(
+            **kwargs,
+        ):
+
+            if (
+                kwargs["folder_key"]
+                ==
+                "inbox"
+            ):
+
+                return {
+                    target_identity:
+                        ["22"]
+                }
+
+
+            return {}
+
+
+        with (
+            endpoint_patch,
+            client_patch,
+            cache_patch,
+            patch(
+                (
+                    "email_accounts.services."
+                    "imap_convergence."
+                    "_search_folder_for_local_messages"
+                ),
+                side_effect=lambda **kwargs: {},
+            ),
+            patch(
+                (
+                    "email_accounts.services."
+                    "imap_convergence."
+                    "_scan_folder_for_identities"
+                ),
+                side_effect=(
+                    scan_result
+                ),
+            ) as scan_mock,
+        ):
+
+            result = (
+                set_imap_conversation_read(
+                    conversation=(
+                        conversation
+                    ),
+                    user=self.user,
+                    is_read=True,
+                )
+            )
+
+
+        message.refresh_from_db()
+
+
+        self.assertEqual(
+            result["status"],
+            "completed",
+        )
+
+        self.assertTrue(
+            message.is_read
+        )
+
+        self.assertGreaterEqual(
+            scan_mock.call_count,
+            1,
+        )
+
+
+        self.assertEqual(
+            fake.store_calls,
+            [
+                (
+                    "INBOX",
+                    "22",
+                    "+FLAGS.SILENT",
+                    r"(\Seen)",
+                ),
+            ],
+        )
+

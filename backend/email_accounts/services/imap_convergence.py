@@ -297,15 +297,9 @@ def _message_identity_for_uid(
         message.get("Message-ID")
     )
 
-    if not message_id:
-        if include_message_id:
-            return (
-                None,
-                "",
-            )
-
-        return None
-
+    # Stable IMAP identity is valid even when a provider
+    # message has no RFC Message-ID. In that case the normal
+    # UID + UIDVALIDITY identity contract is used.
     identity = _stable_external_message_id(
         email_account=email_account,
         folder_key=folder_key,
@@ -320,7 +314,7 @@ def _message_identity_for_uid(
     if include_message_id:
         return (
             identity,
-            message_id,
+            message_id or "",
         )
 
     return identity
@@ -1099,17 +1093,6 @@ def _scan_folder_for_identities(
                     )
                 )
 
-                message_id = (
-                    _first_message_id(
-                        message.get(
-                            "Message-ID"
-                        )
-                    )
-                )
-
-                if not message_id:
-                    continue
-
                 identity = (
                     _stable_external_message_id(
                         email_account=(
@@ -1719,20 +1702,13 @@ def _set_imap_conversation_flag(
         )
 
 
-    lock = (
-        acquire_sync_lock(
-            account.id
-        )
-    )
-
-
-    if not lock:
-        raise IMAPConvergenceError(
-            "Mailbox is currently synchronizing. "
-            "Please retry shortly."
-        )
-
-
+    # Read/unread and star/unstar are independent IMAP flag
+    # mutations performed through their own authenticated
+    # connection. They must remain interactive even while the
+    # background incremental mailbox sync is running.
+    #
+    # Destructive MOVE/Trash convergence continues to use the
+    # exclusive mailbox sync lock in its own path.
     mail = None
 
 
@@ -1892,6 +1868,94 @@ def _set_imap_conversation_flag(
             -
             provider_identities
         )
+
+
+        if missing:
+
+            log_event(
+                logger,
+                "info",
+                "imap.flag.identity_scan_fallback",
+                account_id=(
+                    account.id
+                ),
+                conversation_id=(
+                    conversation.id
+                ),
+                missing_count=(
+                    len(missing)
+                ),
+            )
+
+
+            for config in active_folders:
+
+                if not missing:
+                    break
+
+
+                scanned = (
+                    _scan_folder_for_identities(
+                        mail=mail,
+                        email_account=account,
+                        folder_key=(
+                            config["folder_key"]
+                        ),
+                        folder_name=(
+                            config["folder_name"]
+                        ),
+                        target_identities=(
+                            missing
+                        ),
+                    )
+                )
+
+
+                folder_map = (
+                    locations[
+                        config["folder_name"]
+                    ]
+                )
+
+
+                for identity, uids in (
+                    scanned.items()
+                ):
+
+                    current = (
+                        folder_map.setdefault(
+                            identity,
+                            [],
+                        )
+                    )
+
+
+                    for uid in uids:
+
+                        if uid not in current:
+
+                            current.append(
+                                uid
+                            )
+
+
+                provider_identities = set()
+
+
+                for candidate_map in (
+                    locations.values()
+                ):
+
+                    provider_identities.update(
+                        candidate_map.keys()
+                    )
+
+
+                missing = (
+                    target_identities
+                    -
+                    provider_identities
+                )
 
 
         if missing:
@@ -2081,11 +2145,6 @@ def _set_imap_conversation_flag(
 
             except Exception:
                 pass
-
-
-        release_sync_lock(
-            lock
-        )
 
 
 def set_imap_conversation_read(
