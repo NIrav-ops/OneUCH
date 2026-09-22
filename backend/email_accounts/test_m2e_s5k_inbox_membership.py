@@ -311,6 +311,13 @@ class IMAPInboxMembershipReconciliationTests(
                     ]
                 },
             ),
+            patch(
+                (
+                    "email_accounts.services."
+                    "imap_convergence."
+                    "log_event"
+                )
+            ) as log_mock,
         ):
 
             result = (
@@ -353,6 +360,52 @@ class IMAPInboxMembershipReconciliationTests(
                 "updated"
             ],
             0,
+        )
+
+
+        log_mock.assert_called_once()
+
+
+        log_args = (
+            log_mock
+            .call_args
+            .args
+        )
+
+
+        log_kwargs = (
+            log_mock
+            .call_args
+            .kwargs
+        )
+
+
+        self.assertEqual(
+            log_args[2],
+            "imap.inbox_membership.reconciled",
+        )
+
+
+        self.assertEqual(
+            log_kwargs[
+                "stale_count"
+            ],
+            0,
+        )
+
+
+        self.assertEqual(
+            log_kwargs[
+                "updated_count"
+            ],
+            0,
+        )
+
+
+        self.assertTrue(
+            log_kwargs[
+                "apply_changes"
+            ]
         )
 
 

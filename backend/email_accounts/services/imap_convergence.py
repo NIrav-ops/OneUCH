@@ -1414,6 +1414,36 @@ def reconcile_imap_inbox_membership(
         not stale_message_ids
     ):
 
+        log_event(
+            logger,
+            "info",
+            "imap.inbox_membership.reconciled",
+            account_id=(
+                email_account.id
+            ),
+            local_inbox_count=(
+                len(local_messages)
+            ),
+            checked_count=(
+                len(stable_messages)
+            ),
+            provider_present_count=(
+                len(stable_messages)
+                -
+                len(stale_message_ids)
+            ),
+            stale_count=(
+                len(stale_message_ids)
+            ),
+            updated_count=0,
+            skipped_unstable_count=(
+                skipped_unstable
+            ),
+            apply_changes=(
+                apply_changes
+            ),
+        )
+
         return result
 
 
@@ -1542,6 +1572,9 @@ def reconcile_imap_inbox_membership(
         ),
         skipped_unstable_count=(
             skipped_unstable
+        ),
+        apply_changes=(
+            apply_changes
         ),
     )
 
