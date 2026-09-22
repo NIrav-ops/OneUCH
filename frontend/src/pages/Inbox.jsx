@@ -355,6 +355,332 @@ const splitQuotedMessageBody = (
 };
 
 
+const normalizeMessageDisplayText = (
+  value
+) => {
+
+  const source =
+    String(
+      value || ""
+    )
+      .replace(
+        /\r\n/g,
+        "\n"
+      )
+      .replace(
+        /\r/g,
+        "\n"
+      );
+
+
+  const inputLines =
+    source.split(
+      "\n"
+    );
+
+
+  const outputLines =
+    [];
+
+
+  let consecutiveBlankLines =
+    0;
+
+
+  for (
+    const rawLine
+    of inputLines
+  ) {
+
+    // Remove only trailing horizontal whitespace.
+    // Leading whitespace is intentionally preserved so
+    // signatures, indented text and plain-text formatting
+    // are not damaged.
+    const line =
+      rawLine.replace(
+        /[ \t]+$/g,
+        ""
+      );
+
+
+    if (
+      line.trim() === ""
+    ) {
+
+      consecutiveBlankLines += 1;
+
+
+      // Preserve up to two intentional blank lines.
+      // Larger whitespace blocks are visual noise from
+      // provider conversion/signatures and are collapsed.
+      if (
+        consecutiveBlankLines <=
+        2
+      ) {
+
+        outputLines.push(
+          ""
+        );
+
+      }
+
+
+      continue;
+
+    }
+
+
+    consecutiveBlankLines =
+      0;
+
+
+    outputLines.push(
+      line
+    );
+
+  }
+
+
+  // Remove empty padding at the very beginning/end without
+  // trimming indentation from actual content.
+  while (
+    outputLines.length >
+      0
+    &&
+    outputLines[0].trim() ===
+      ""
+  ) {
+
+    outputLines.shift();
+
+  }
+
+
+  while (
+    outputLines.length >
+      0
+    &&
+    outputLines[
+      outputLines.length - 1
+    ].trim() ===
+      ""
+  ) {
+
+    outputLines.pop();
+
+  }
+
+
+  return outputLines.join(
+    "\n"
+  );
+
+};
+
+
+// Provider-neutral link recognition.
+//
+// Supported examples:
+// https://example.com/path
+// <https://example.com/path>
+// www.example.com/path
+//
+// This runs after Gmail / Outlook / IMAP have already
+// normalized provider content into InboxMessage.body.
+const MESSAGE_URL_PATTERN =
+  /(<https?:\/\/[^>\s]+>|(?:https?:\/\/|www\.)[^\s<>"']*[A-Za-z0-9/#%=_~+-])/gi;
+
+
+const normalizeMessageHref = (
+  token
+) => {
+
+  const value =
+    String(
+      token || ""
+    );
+
+
+  if (
+    /^www\./i.test(
+      value
+    )
+  ) {
+
+    return (
+      "https://" +
+      value
+    );
+
+  }
+
+
+  return value;
+
+};
+
+
+const compactMessageUrlLabel = (
+  href
+) => {
+
+  try {
+
+    const parsed =
+      new URL(
+        href
+      );
+
+
+    const hostname =
+      parsed.hostname.replace(
+        /^www\./i,
+        ""
+      );
+
+
+    const pathname =
+      parsed.pathname === "/"
+        ? ""
+        : parsed.pathname.replace(
+            /\/$/,
+            ""
+          );
+
+
+    const compact =
+      hostname +
+      pathname;
+
+
+    if (
+      compact.length >
+      58
+    ) {
+
+      return (
+        compact.slice(
+          0,
+          55
+        )
+        +
+        "…"
+      );
+
+    }
+
+
+    return compact;
+
+  } catch {
+
+    return (
+      href.length >
+        58
+        ? (
+            href.slice(
+              0,
+              55
+            )
+            +
+            "…"
+          )
+        : href
+    );
+
+  }
+
+};
+
+
+const renderMessageDisplayText = (
+  value
+) => {
+
+  const normalized =
+    normalizeMessageDisplayText(
+      value
+    );
+
+
+  if (!normalized) {
+    return null;
+  }
+
+
+  return normalized
+    .split(
+      MESSAGE_URL_PATTERN
+    )
+    .map(
+      (
+        part,
+        index
+      ) => {
+
+        const angleWrapped =
+          /^<https?:\/\/[^>\s]+>$/i
+            .test(
+              part
+            );
+
+
+        const directUrl =
+          /^(?:https?:\/\/|www\.)/i
+            .test(
+              part
+            );
+
+
+        if (
+          !angleWrapped &&
+          !directUrl
+        ) {
+
+          return part;
+
+        }
+
+
+        const linkToken =
+          angleWrapped
+            ? part.slice(
+                1,
+                -1
+              )
+            : part;
+
+
+        const href =
+          normalizeMessageHref(
+            linkToken
+          );
+
+
+        return (
+
+          <a
+            key={`message-link-${index}`}
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={href}
+            className="break-words font-medium text-sky-700 underline decoration-sky-300 underline-offset-2 hover:text-sky-900"
+          >
+            {compactMessageUrlLabel(
+              href
+            )}
+            {" ↗"}
+          </a>
+
+        );
+
+      }
+    );
+
+};
+
+
 export default function Inbox() {
 
   // ==========================================================
@@ -5328,7 +5654,9 @@ export default function Inbox() {
 
 
                               <div className="whitespace-pre-wrap break-words px-5 py-5 text-sm leading-7 text-slate-700">
-                                {currentBody ||
+                                {renderMessageDisplayText(
+                                  currentBody
+                                ) ||
                                   "(No content)"}
                               </div>
 
@@ -5343,7 +5671,9 @@ export default function Inbox() {
 
 
                                   <div className="whitespace-pre-wrap break-words border-t border-slate-100 px-5 py-4 text-xs leading-6 text-slate-500">
-                                    {quotedBody}
+                                    {renderMessageDisplayText(
+                                      quotedBody
+                                    )}
                                   </div>
 
                                 </details>
