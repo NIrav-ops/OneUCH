@@ -50,6 +50,7 @@ from email_accounts.services.imap_smtp import send_via_smtp, fetch_imap_emails
 
 from email_accounts.services.imap_convergence import (
     IMAPConvergenceError,
+    reconcile_imap_inbox_membership,
     reconcile_imap_trash,
 )
 
@@ -349,7 +350,10 @@ def _pending_mail_intelligence_message_ids(
             is_draft=False,
         )
         .exclude(
-            folder="trash"
+            folder__in=[
+                "trash",
+                "archive",
+            ]
         )
     )
 
@@ -748,6 +752,32 @@ def sync_email_account(
                     imap_password
                 ),
             )
+
+
+            try:
+                reconcile_imap_inbox_membership(
+                    user=account.user,
+                    email_account=(
+                        account
+                    ),
+                )
+
+            except IMAPConvergenceError as exc:
+                log_event(
+                    logger,
+                    "warning",
+                    (
+                        "sync.imap_inbox_"
+                        "membership.failed"
+                    ),
+                    account_id=(
+                        account.id
+                    ),
+                    provider="imap",
+                    error_type=(
+                        type(exc).__name__
+                    ),
+                )
 
 
             try:

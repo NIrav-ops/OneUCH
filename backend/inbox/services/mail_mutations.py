@@ -59,7 +59,10 @@ def refresh_conversation_local_state(
             is_draft=False,
         )
         .exclude(
-            folder="trash"
+            folder__in=[
+                "trash",
+                "archive",
+            ]
         )
     )
 

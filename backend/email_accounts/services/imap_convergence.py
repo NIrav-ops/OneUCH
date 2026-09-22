@@ -1168,6 +1168,387 @@ def _scan_folder_for_identities(
 
     return found
 
+def reconcile_imap_inbox_membership(
+    *,
+    user,
+    email_account,
+    apply_changes=True,
+):
+    """
+    Reconcile local One UCH Inbox membership against the
+    provider's authoritative IMAP INBOX.
+
+    Only stable RFC Message-ID identities are eligible.
+
+    Messages no longer present in provider INBOX are retained
+    locally as folder="archive". Historical communication is
+    therefore preserved while stale entries disappear from the
+    One UCH Inbox.
+
+    This operation never mutates the provider.
+    """
+
+    if (
+        email_account.user_id
+        !=
+        user.id
+    ):
+        raise IMAPConvergenceError(
+            "IMAP mailbox ownership mismatch."
+        )
+
+
+    if (
+        email_account.account_type
+        !=
+        "imap"
+        or
+        not email_account.is_active
+    ):
+        raise IMAPConvergenceError(
+            "IMAP mailbox is unavailable."
+        )
+
+
+    if not isinstance(
+        apply_changes,
+        bool,
+    ):
+        raise IMAPConvergenceError(
+            "apply_changes must be boolean."
+        )
+
+
+    local_messages = list(
+        InboxMessage.objects
+        .filter(
+            user=user,
+            email_account=(
+                email_account
+            ),
+            platform="imap",
+            folder="inbox",
+            is_draft=False,
+        )
+        .order_by(
+            "id"
+        )
+    )
+
+
+    stable_messages = [
+        message
+        for message in local_messages
+        if (
+            str(
+                message.external_message_id
+                or ""
+            )
+            .strip()
+            .startswith(
+                "imap-rfc822-"
+            )
+        )
+    ]
+
+
+    skipped_unstable = (
+        len(local_messages)
+        -
+        len(stable_messages)
+    )
+
+
+    # UID-only identities are intentionally not used for
+    # negative membership decisions. UID values may change
+    # after mailbox moves or UIDVALIDITY changes.
+    if not stable_messages:
+
+        return {
+            "status":
+                "completed",
+
+            "local_inbox":
+                len(local_messages),
+
+            "checked":
+                0,
+
+            "present":
+                0,
+
+            "stale":
+                0,
+
+            "updated":
+                0,
+
+            "skipped_unstable":
+                skipped_unstable,
+
+            "stale_message_ids":
+                [],
+        }
+
+
+    target_identities = {
+        str(
+            message.external_message_id
+            or ""
+        ).strip()
+        for message
+        in stable_messages
+    }
+
+
+    mail = (
+        _open_imap_mailbox(
+            email_account
+        )
+    )
+
+
+    try:
+
+        # Use the existing batched header scanner rather than
+        # trusting provider HEADER SEARCH. S5J demonstrated that
+        # provider HEADER SEARCH may return no hit for a known
+        # RFC Message-ID.
+        provider_matches = (
+            _scan_folder_for_identities(
+                mail=mail,
+                email_account=(
+                    email_account
+                ),
+                folder_key="inbox",
+                folder_name="INBOX",
+                target_identities=(
+                    target_identities
+                ),
+            )
+        )
+
+
+    finally:
+
+        try:
+
+            mail.logout()
+
+        except Exception:
+
+            pass
+
+
+    provider_identities = set(
+        provider_matches.keys()
+    )
+
+
+    stale_identities = (
+        target_identities
+        -
+        provider_identities
+    )
+
+
+    stale_message_ids = [
+        message.id
+        for message
+        in stable_messages
+        if (
+            str(
+                message.external_message_id
+                or ""
+            )
+            .strip()
+            in
+            stale_identities
+        )
+    ]
+
+
+    result = {
+        "status":
+            "completed",
+
+        "local_inbox":
+            len(local_messages),
+
+        "checked":
+            len(stable_messages),
+
+        "present":
+            (
+                len(stable_messages)
+                -
+                len(stale_message_ids)
+            ),
+
+        "stale":
+            len(stale_message_ids),
+
+        "updated":
+            0,
+
+        "skipped_unstable":
+            skipped_unstable,
+
+        "stale_message_ids":
+            stale_message_ids[
+                :100
+            ],
+
+        "stale_message_ids_truncated":
+            (
+                len(stale_message_ids)
+                >
+                100
+            ),
+    }
+
+
+    if (
+        not apply_changes
+        or
+        not stale_message_ids
+    ):
+
+        return result
+
+
+    updated_ids = []
+
+    conversation_ids = set()
+
+
+    with transaction.atomic():
+
+        # Re-verify all mutable local predicates while holding
+        # row locks. A message changed by another path during
+        # provider scanning is not overwritten.
+        locked_messages = list(
+            InboxMessage.objects
+            .select_for_update()
+            .filter(
+                id__in=(
+                    stale_message_ids
+                ),
+                user=user,
+                email_account=(
+                    email_account
+                ),
+                platform="imap",
+                folder="inbox",
+                is_draft=False,
+                external_message_id__in=(
+                    stale_identities
+                ),
+            )
+            .order_by(
+                "id"
+            )
+        )
+
+
+        updated_ids = [
+            message.id
+            for message
+            in locked_messages
+        ]
+
+
+        conversation_ids = {
+            message.conversation_id
+            for message
+            in locked_messages
+            if (
+                message.conversation_id
+                is not None
+            )
+        }
+
+
+        if updated_ids:
+
+            (
+                InboxMessage.objects
+                .filter(
+                    id__in=(
+                        updated_ids
+                    )
+                )
+                .update(
+                    folder="archive"
+                )
+            )
+
+
+        conversations = list(
+            Conversation.objects
+            .select_for_update()
+            .filter(
+                id__in=(
+                    conversation_ids
+                )
+            )
+        )
+
+
+        for conversation in conversations:
+
+            refresh_conversation_local_state(
+                conversation
+            )
+
+
+    if updated_ids:
+
+        invalidate_conversation_cache(
+            user.id
+        )
+
+
+    result[
+        "updated"
+    ] = len(
+        updated_ids
+    )
+
+
+    log_event(
+        logger,
+        "info",
+        "imap.inbox_membership.reconciled",
+        account_id=(
+            email_account.id
+        ),
+        local_inbox_count=(
+            len(local_messages)
+        ),
+        checked_count=(
+            len(stable_messages)
+        ),
+        provider_present_count=(
+            len(stable_messages)
+            -
+            len(stale_message_ids)
+        ),
+        stale_count=(
+            len(stale_message_ids)
+        ),
+        updated_count=(
+            len(updated_ids)
+        ),
+        skipped_unstable_count=(
+            skipped_unstable
+        ),
+    )
+
+
+    return result
+
+
 def _search_folder_for_candidate_identities(
     *,
     mail,
