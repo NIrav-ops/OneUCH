@@ -2456,6 +2456,8 @@ def fetch_imap_emails(
 
             folder_failed = False
 
+            last_folder_error = None
+
             highest_uid = (
                 batch[
                     "last_uid"
@@ -3194,6 +3196,10 @@ def fetch_imap_emails(
 
                     folder_failed = True
 
+                    last_folder_error = (
+                        exc
+                    )
+
 
                     log_event(
                         logger,
@@ -3217,13 +3223,23 @@ def fetch_imap_emails(
 
             if folder_failed:
 
-                raise RuntimeError(
+                error = RuntimeError(
                     "IMAP partial sync failure: "
                     + str(
                         failed_count
                     )
                     + " message(s) failed."
                 )
+
+
+                if last_folder_error is not None:
+
+                    raise error from (
+                        last_folder_error
+                    )
+
+
+                raise error
 
 
             _record_folder_cursor(

@@ -13,6 +13,8 @@ from email_accounts.services.imap_convergence import (
     IMAPConvergenceError,
     _discover_imap_trash_folder,
     reconcile_imap_trash,
+    set_imap_conversation_read,
+    set_imap_conversation_star,
     trash_imap_conversation,
 )
 
@@ -56,6 +58,7 @@ class FakeConvergenceIMAP:
 
         self.selected = None
         self.move_calls = []
+        self.store_calls = []
         self.fetch_queries = []
         self.logged_out = False
 
@@ -350,6 +353,35 @@ class FakeConvergenceIMAP:
             return (
                 "OK",
                 response,
+            )
+
+
+        if command == "store":
+
+            uid = str(
+                args[0]
+            )
+
+            operation = str(
+                args[1]
+            )
+
+            flag = str(
+                args[2]
+            )
+
+            self.store_calls.append(
+                (
+                    self.selected,
+                    uid,
+                    operation,
+                    flag,
+                )
+            )
+
+            return (
+                "OK",
+                [b"stored"],
             )
 
 
@@ -1875,3 +1907,246 @@ class MailRC1C5DConvergenceTests(
         self.assertTrue(
             fake.logged_out
         )
+
+    def test_imap_read_unread_converges_seen_flag_and_local_state(
+        self,
+    ):
+        conversation, message = (
+            self.make_message(
+                message_id=(
+                    "<imap-read-state@example.net>"
+                )
+            )
+        )
+
+
+        fake = (
+            FakeConvergenceIMAP(
+                folder_messages={
+                    "INBOX": {
+                        "10": {
+                            "message_id":
+                                "<imap-read-state@example.net>",
+                        },
+                    },
+                    "Sent": {},
+                    "Trash": {},
+                }
+            )
+        )
+
+
+        (
+            endpoint_patch,
+            client_patch,
+            cache_patch,
+        ) = self.provider_patches(
+            fake
+        )
+
+
+        with (
+            endpoint_patch,
+            client_patch,
+            cache_patch,
+            patch(
+                (
+                    "email_accounts.services."
+                    "imap_convergence."
+                    "acquire_sync_lock"
+                ),
+                return_value="flag-lock",
+            ),
+            patch(
+                (
+                    "email_accounts.services."
+                    "imap_convergence."
+                    "release_sync_lock"
+                ),
+            ),
+        ):
+
+            result = (
+                set_imap_conversation_read(
+                    conversation=conversation,
+                    user=self.user,
+                    is_read=True,
+                )
+            )
+
+
+            message.refresh_from_db()
+            conversation.refresh_from_db()
+
+
+            self.assertTrue(
+                message.is_read
+            )
+
+            self.assertEqual(
+                conversation.unread_count,
+                0,
+            )
+
+            self.assertEqual(
+                result["updated"],
+                1,
+            )
+
+
+            set_imap_conversation_read(
+                conversation=conversation,
+                user=self.user,
+                is_read=False,
+            )
+
+
+        message.refresh_from_db()
+        conversation.refresh_from_db()
+
+
+        self.assertFalse(
+            message.is_read
+        )
+
+        self.assertEqual(
+            conversation.unread_count,
+            1,
+        )
+
+
+        self.assertEqual(
+            fake.store_calls,
+            [
+                (
+                    "INBOX",
+                    "10",
+                    "+FLAGS.SILENT",
+                    r"(\Seen)",
+                ),
+                (
+                    "INBOX",
+                    "10",
+                    "-FLAGS.SILENT",
+                    r"(\Seen)",
+                ),
+            ],
+        )
+
+
+    def test_imap_star_unstar_converges_flagged_and_local_state(
+        self,
+    ):
+        conversation, message = (
+            self.make_message(
+                message_id=(
+                    "<imap-star-state@example.net>"
+                )
+            )
+        )
+
+
+        fake = (
+            FakeConvergenceIMAP(
+                folder_messages={
+                    "INBOX": {
+                        "11": {
+                            "message_id":
+                                "<imap-star-state@example.net>",
+                        },
+                    },
+                    "Sent": {},
+                    "Trash": {},
+                }
+            )
+        )
+
+
+        (
+            endpoint_patch,
+            client_patch,
+            cache_patch,
+        ) = self.provider_patches(
+            fake
+        )
+
+
+        with (
+            endpoint_patch,
+            client_patch,
+            cache_patch,
+            patch(
+                (
+                    "email_accounts.services."
+                    "imap_convergence."
+                    "acquire_sync_lock"
+                ),
+                return_value="flag-lock",
+            ),
+            patch(
+                (
+                    "email_accounts.services."
+                    "imap_convergence."
+                    "release_sync_lock"
+                ),
+            ),
+        ):
+
+            set_imap_conversation_star(
+                conversation=conversation,
+                user=self.user,
+                is_starred=True,
+            )
+
+
+            message.refresh_from_db()
+            conversation.refresh_from_db()
+
+
+            self.assertTrue(
+                message.is_starred
+            )
+
+            self.assertTrue(
+                conversation.is_starred
+            )
+
+
+            set_imap_conversation_star(
+                conversation=conversation,
+                user=self.user,
+                is_starred=False,
+            )
+
+
+        message.refresh_from_db()
+        conversation.refresh_from_db()
+
+
+        self.assertFalse(
+            message.is_starred
+        )
+
+        self.assertFalse(
+            conversation.is_starred
+        )
+
+
+        self.assertEqual(
+            fake.store_calls,
+            [
+                (
+                    "INBOX",
+                    "11",
+                    "+FLAGS.SILENT",
+                    r"(\Flagged)",
+                ),
+                (
+                    "INBOX",
+                    "11",
+                    "-FLAGS.SILENT",
+                    r"(\Flagged)",
+                ),
+            ],
+        )
+

@@ -1596,6 +1596,28 @@ export default function Inbox() {
           [];
 
 
+        const resolvedCurrentPage =
+          Number(
+            response.data?.current_page ||
+            requestedPage
+          );
+
+
+        const resolvedTotalPages =
+          Number(
+            response.data?.total_pages ||
+            1
+          );
+
+
+        // Update the synchronous ref before React commits state.
+        // A realtime sync-completion event arriving immediately
+        // after Load older must therefore see the user's actual
+        // browsing page rather than stale page 1.
+        conversationPageRef.current =
+          resolvedCurrentPage;
+
+
         setConversationMeta({
           count:
             Number(
@@ -1604,16 +1626,10 @@ export default function Inbox() {
             ),
 
           currentPage:
-            Number(
-              response.data?.current_page ||
-              requestedPage
-            ),
+            resolvedCurrentPage,
 
           totalPages:
-            Number(
-              response.data?.total_pages ||
-              1
-            ),
+            resolvedTotalPages,
         });
 
 
@@ -2141,7 +2157,11 @@ export default function Inbox() {
 
 
             if (
-              currentSelectedId &&
+              conversationPageRef.current <=
+                1
+              &&
+              currentSelectedId
+              &&
               activeTabRef.current !==
                 "draft"
             ) {
@@ -4096,10 +4116,22 @@ export default function Inbox() {
             );
 
 
-            await loadConversations({
-              page: 1,
-              append: false,
-            });
+            // A manual synchronization must not destroy
+            // the user's older-history browsing context.
+            // Latest-page users reconcile immediately; page 2+
+            // users keep their current list/thread and can use
+            // Back to latest when they choose.
+            if (
+              conversationPageRef.current <=
+              1
+            ) {
+
+              await loadConversations({
+                page: 1,
+                append: false,
+              });
+
+            }
 
 
             break;

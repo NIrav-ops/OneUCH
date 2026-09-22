@@ -16,6 +16,8 @@ from inbox.models import (
 
 from email_accounts.services.imap_convergence import (
     IMAPConvergenceError,
+    set_imap_conversation_read,
+    set_imap_conversation_star,
     trash_imap_conversation,
 )
 
@@ -170,6 +172,37 @@ class MarkConversationReadAPIView(
                             result[
                                 "errors"
                             ],
+                    },
+                    status=502,
+                )
+
+
+        elif (
+            account
+            and
+            account.account_type
+            ==
+            "imap"
+        ):
+
+            try:
+
+                result = (
+                    set_imap_conversation_read(
+                        conversation=(
+                            conversation
+                        ),
+                        user=request.user,
+                        is_read=is_read,
+                    )
+                )
+
+            except IMAPConvergenceError as exc:
+
+                return Response(
+                    {
+                        "error":
+                            str(exc)
                     },
                     status=502,
                 )
@@ -330,6 +363,37 @@ class ToggleConversationStarAPIView(
                             result[
                                 "errors"
                             ],
+                    },
+                    status=502,
+                )
+
+
+        elif (
+            account
+            and
+            account.account_type
+            ==
+            "imap"
+        ):
+
+            try:
+
+                set_imap_conversation_star(
+                    conversation=(
+                        conversation
+                    ),
+                    user=request.user,
+                    is_starred=(
+                        new_state
+                    ),
+                )
+
+            except IMAPConvergenceError as exc:
+
+                return Response(
+                    {
+                        "error":
+                            str(exc)
                     },
                     status=502,
                 )

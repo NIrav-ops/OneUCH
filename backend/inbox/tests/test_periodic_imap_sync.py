@@ -1,3 +1,5 @@
+import imaplib
+
 from unittest.mock import (
     Mock,
     patch,
@@ -180,3 +182,93 @@ class PeriodicIMAPSyncTests(
         release_sync_lock.assert_called_once_with(
             lock
         )
+
+    def test_periodic_imap_sync_retries_transient_unavailable(
+        self,
+    ):
+        account = self.create_account(
+            password="temporary-app-password",
+        )
+
+
+        lock = Mock()
+
+
+        with (
+            patch(
+                "inbox.tasks.acquire_sync_lock",
+                return_value=lock,
+            ),
+            patch(
+                "inbox.tasks.release_sync_lock"
+            ) as release_sync_lock,
+            patch(
+                "inbox.tasks.fetch_imap_emails"
+            ) as fetch_imap_emails,
+            patch(
+                "inbox.tasks.reconcile_imap_trash"
+            ),
+            patch(
+                "inbox.tasks.time.sleep"
+            ) as sleep_mock,
+        ):
+
+            fetch_imap_emails.side_effect = [
+                imaplib.IMAP4.error(
+                    "[UNAVAILABLE] Account is temporarily unavailable."
+                ),
+                None,
+            ]
+
+
+            result = (
+                sync_email_account.run(
+                    account.id
+                )
+            )
+
+
+        self.assertEqual(
+            result["status"],
+            "completed",
+        )
+
+        self.assertEqual(
+            fetch_imap_emails.call_count,
+            2,
+        )
+
+        sleep_mock.assert_called_once_with(
+            2
+        )
+
+        release_sync_lock.assert_called_once_with(
+            lock
+        )
+
+
+    def test_partial_sync_connection_reset_is_retryable(
+        self,
+    ):
+        from inbox.tasks import (
+            _is_retryable_imap_sync_error,
+        )
+
+
+        outer = RuntimeError(
+            "IMAP partial sync failure"
+        )
+
+        outer.__cause__ = (
+            ConnectionResetError(
+                "connection reset"
+            )
+        )
+
+
+        self.assertTrue(
+            _is_retryable_imap_sync_error(
+                outer
+            )
+        )
+

@@ -1671,6 +1671,473 @@ def reconcile_imap_trash(
     }
 
 
+IMAP_INTERACTIVE_FLAG_TIMEOUT_SECONDS = 20
+
+
+def _set_imap_conversation_flag(
+    *,
+    conversation,
+    user,
+    flag,
+    enabled,
+    local_field,
+    inbound_only=False,
+):
+    """
+    Converge one One UCH conversation flag to the IMAP provider.
+
+    Provider mutation completes before local state is changed.
+    Existing stable-message identity verification is reused so
+    One UCH never mutates a provider UID merely by position.
+    """
+
+    if (
+        conversation is None
+        or conversation.user_id
+        != user.id
+    ):
+        raise IMAPConvergenceError(
+            "Conversation ownership mismatch."
+        )
+
+
+    account = (
+        conversation.email_account
+    )
+
+
+    if (
+        account is None
+        or account.account_type
+        != "imap"
+        or not account.is_active
+        or account.user_id
+        != user.id
+    ):
+        raise IMAPConvergenceError(
+            "Conversation IMAP mailbox is unavailable."
+        )
+
+
+    lock = (
+        acquire_sync_lock(
+            account.id
+        )
+    )
+
+
+    if not lock:
+        raise IMAPConvergenceError(
+            "Mailbox is currently synchronizing. "
+            "Please retry shortly."
+        )
+
+
+    mail = None
+
+
+    try:
+
+        queryset = (
+            conversation.messages
+            .filter(
+                user=user,
+                organization=(
+                    conversation.organization
+                ),
+                email_account=account,
+                platform="imap",
+                is_draft=False,
+            )
+            .exclude(
+                folder="trash"
+            )
+        )
+
+
+        if inbound_only:
+
+            queryset = (
+                queryset.filter(
+                    direction="inbound"
+                )
+            )
+
+
+        messages = list(
+            queryset.order_by(
+                "id"
+            )
+        )
+
+
+        if not messages:
+
+            return {
+                "status":
+                    "completed",
+
+                "updated":
+                    0,
+
+                "provider_updates":
+                    0,
+            }
+
+
+        message_ids = [
+            message.id
+            for message in messages
+        ]
+
+
+        target_identities = {
+            str(
+                message.external_message_id
+                or ""
+            ).strip()
+            for message in messages
+        }
+
+
+        if (
+            not target_identities
+            or any(
+                not identity
+                or not (
+                    identity.startswith(
+                        "imap-rfc822-"
+                    )
+                    or identity.startswith(
+                        "imap-uid-"
+                    )
+                )
+                for identity
+                in target_identities
+            )
+        ):
+            raise IMAPConvergenceError(
+                "Conversation contains an IMAP "
+                "message without a safe provider identity."
+            )
+
+
+        mail = (
+            _open_imap_mailbox(
+                account,
+                timeout=(
+                    IMAP_INTERACTIVE_FLAG_TIMEOUT_SECONDS
+                ),
+            )
+        )
+
+
+        status, folder_list = (
+            mail.list()
+        )
+
+
+        if status != "OK":
+            raise IMAPConvergenceError(
+                "Unable to fetch IMAP folder list."
+            )
+
+
+        active_folders = (
+            _discover_imap_folders(
+                folder_list
+            )
+        )
+
+
+        locations = {}
+
+
+        for config in active_folders:
+
+            locations[
+                config["folder_name"]
+            ] = (
+                _search_folder_for_local_messages(
+                    mail=mail,
+                    email_account=account,
+                    folder_key=(
+                        config["folder_key"]
+                    ),
+                    folder_name=(
+                        config["folder_name"]
+                    ),
+                    local_messages=messages,
+                    target_identities=(
+                        target_identities
+                    ),
+                )
+            )
+
+
+        provider_identities = set()
+
+
+        for folder_map in (
+            locations.values()
+        ):
+
+            provider_identities.update(
+                folder_map.keys()
+            )
+
+
+        missing = (
+            target_identities
+            -
+            provider_identities
+        )
+
+
+        if missing:
+            raise IMAPConvergenceError(
+                "One or more conversation messages "
+                "could not be located in the "
+                "IMAP mailbox."
+            )
+
+
+        operation = (
+            "+FLAGS.SILENT"
+            if enabled
+            else "-FLAGS.SILENT"
+        )
+
+
+        provider_updates = 0
+
+
+        for config in active_folders:
+
+            folder_name = (
+                config["folder_name"]
+            )
+
+            folder_map = (
+                locations[
+                    folder_name
+                ]
+            )
+
+
+            if not folder_map:
+                continue
+
+
+            status, _ = (
+                mail.select(
+                    _quote_imap_mailbox(
+                        folder_name
+                    )
+                )
+            )
+
+
+            if status != "OK":
+                raise IMAPConvergenceError(
+                    "Unable to select IMAP folder "
+                    "for flag mutation."
+                )
+
+
+            for identity in (
+                target_identities
+            ):
+
+                for uid in (
+                    folder_map.get(
+                        identity,
+                        [],
+                    )
+                ):
+
+                    status, _ = (
+                        mail.uid(
+                            "STORE",
+                            uid,
+                            operation,
+                            (
+                                "("
+                                + flag
+                                + ")"
+                            ),
+                        )
+                    )
+
+
+                    if status != "OK":
+                        raise IMAPConvergenceError(
+                            "IMAP provider flag "
+                            "mutation failed."
+                        )
+
+
+                    provider_updates += 1
+
+
+        with transaction.atomic():
+
+            locked_messages = (
+                InboxMessage.objects
+                .select_for_update()
+                .filter(
+                    id__in=message_ids,
+                    user=user,
+                    organization=(
+                        conversation.organization
+                    ),
+                    email_account=account,
+                    platform="imap",
+                    is_draft=False,
+                )
+                .exclude(
+                    folder="trash"
+                )
+            )
+
+
+            if (
+                locked_messages.count()
+                !=
+                len(message_ids)
+            ):
+                raise IMAPConvergenceError(
+                    "Conversation changed while "
+                    "IMAP flag mutation was executing."
+                )
+
+
+            locked_messages.update(
+                **{
+                    local_field:
+                        enabled
+                }
+            )
+
+
+            locked_conversation = (
+                Conversation.objects
+                .select_for_update()
+                .get(
+                    id=conversation.id
+                )
+            )
+
+
+            refresh_conversation_local_state(
+                locked_conversation
+            )
+
+
+        invalidate_conversation_cache(
+            user.id
+        )
+
+
+        log_event(
+            logger,
+            "info",
+            "imap.flag.conversation_updated",
+            account_id=(
+                account.id
+            ),
+            conversation_id=(
+                conversation.id
+            ),
+            flag=flag,
+            enabled=bool(enabled),
+            provider_updates=(
+                provider_updates
+            ),
+            local_updates=(
+                len(message_ids)
+            ),
+        )
+
+
+        return {
+            "status":
+                "completed",
+
+            "updated":
+                len(message_ids),
+
+            "provider_updates":
+                provider_updates,
+        }
+
+
+    finally:
+
+        if mail is not None:
+
+            try:
+                mail.logout()
+
+            except Exception:
+                pass
+
+
+        release_sync_lock(
+            lock
+        )
+
+
+def set_imap_conversation_read(
+    *,
+    conversation,
+    user,
+    is_read,
+):
+    if not isinstance(
+        is_read,
+        bool,
+    ):
+        raise IMAPConvergenceError(
+            "is_read must be boolean."
+        )
+
+
+    return _set_imap_conversation_flag(
+        conversation=conversation,
+        user=user,
+        flag=r"\Seen",
+        enabled=is_read,
+        local_field="is_read",
+        inbound_only=True,
+    )
+
+
+def set_imap_conversation_star(
+    *,
+    conversation,
+    user,
+    is_starred,
+):
+    if not isinstance(
+        is_starred,
+        bool,
+    ):
+        raise IMAPConvergenceError(
+            "is_starred must be boolean."
+        )
+
+
+    return _set_imap_conversation_flag(
+        conversation=conversation,
+        user=user,
+        flag=r"\Flagged",
+        enabled=is_starred,
+        local_field="is_starred",
+        inbound_only=False,
+    )
+
+
 def trash_imap_conversation(
     *,
     conversation,

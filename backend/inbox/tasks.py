@@ -2,6 +2,9 @@
 # IMPORTS
 # ============================================
 
+import imaplib
+import time
+
 from celery import shared_task
 from django.utils import timezone
 from django.contrib.auth import get_user_model
@@ -96,6 +99,163 @@ DELIVERY_UNCERTAIN_ERROR_PREFIX = (
 INTELLIGENCE_HANDOFF_BATCH_SIZE = (
     500
 )
+
+
+IMAP_SYNC_RETRY_DELAYS_SECONDS = (
+    2,
+    5,
+)
+
+
+def _imap_exception_chain(
+    exc,
+):
+    current = exc
+
+    seen = set()
+
+
+    while (
+        current is not None
+        and id(current)
+        not in seen
+    ):
+
+        seen.add(
+            id(current)
+        )
+
+        yield current
+
+        current = (
+            current.__cause__
+            or
+            current.__context__
+        )
+
+
+def _is_retryable_imap_sync_error(
+    exc,
+):
+
+    for item in (
+        _imap_exception_chain(
+            exc
+        )
+    ):
+
+        if isinstance(
+            item,
+            (
+                ConnectionResetError,
+                TimeoutError,
+                imaplib.IMAP4.abort,
+            ),
+        ):
+            return True
+
+
+        if isinstance(
+            item,
+            imaplib.IMAP4.error,
+        ):
+
+            text = (
+                str(item)
+                .casefold()
+            )
+
+
+            if any(
+                token in text
+                for token in (
+                    "unavailable",
+                    "temporarily unavailable",
+                    "try again",
+                    "server unavailable",
+                )
+            ):
+                return True
+
+
+    return False
+
+
+def _fetch_imap_with_transient_retry(
+    *,
+    account,
+    password,
+):
+
+    attempts = (
+        len(
+            IMAP_SYNC_RETRY_DELAYS_SECONDS
+        )
+        +
+        1
+    )
+
+
+    for attempt in range(
+        attempts
+    ):
+
+        try:
+
+            return fetch_imap_emails(
+                user=account.user,
+                email_account=account,
+                password=password,
+            )
+
+
+        except Exception as exc:
+
+            retryable = (
+                _is_retryable_imap_sync_error(
+                    exc
+                )
+            )
+
+
+            if (
+                not retryable
+                or attempt >=
+                attempts - 1
+            ):
+                raise
+
+
+            delay = (
+                IMAP_SYNC_RETRY_DELAYS_SECONDS[
+                    attempt
+                ]
+            )
+
+
+            log_event(
+                logger,
+                "warning",
+                "sync.imap.transient_retry",
+                account_id=(
+                    account.id
+                ),
+                provider="imap",
+                attempt=(
+                    attempt + 1
+                ),
+                retry_delay_seconds=(
+                    delay
+                ),
+                error_type=(
+                    type(exc).__name__
+                ),
+            )
+
+
+            time.sleep(
+                delay
+            )
 
 
 def _broadcast_inbox_sync_event(
@@ -582,11 +742,8 @@ def sync_email_account(
                 }
 
 
-            fetch_imap_emails(
-                user=account.user,
-                email_account=(
-                    account
-                ),
+            _fetch_imap_with_transient_retry(
+                account=account,
                 password=(
                     imap_password
                 ),
