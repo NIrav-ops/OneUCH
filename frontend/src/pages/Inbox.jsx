@@ -1409,6 +1409,10 @@ export default function Inbox() {
 
             loadConversationsRef.current();
 
+            loadSyncStatus();
+
+            loadMailAdoption();
+
 
             const currentSelectedId =
               selectedIdRef.current;
@@ -1637,7 +1641,11 @@ export default function Inbox() {
 
     };
 
-  }, [loadConversationThread]);
+  }, [
+    loadConversationThread,
+    loadMailAdoption,
+    loadSyncStatus,
+  ]);
 
 
   // ==========================================================
