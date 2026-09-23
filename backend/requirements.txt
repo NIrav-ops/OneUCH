@@ -27,3 +27,5 @@ PyJWT==2.9.0
 
 razorpay==2.0.0
 cryptography==43.0.3
+
+openai==3.17.0

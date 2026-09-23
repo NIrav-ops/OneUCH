@@ -24,6 +24,7 @@ from email_accounts.models import (
 from inbox.models import (
     InboxMessage,
     Organization,
+    OrganizationUser,
 )
 
 
@@ -45,6 +46,12 @@ class ApprovalAIGovernanceModeTests(
                 name="Approval Governance Test",
                 slug="approval-governance-test",
             )
+        )
+
+        OrganizationUser.objects.create(
+            user=self.user,
+            organization=self.organization,
+            role="owner",
         )
 
         self.account = (
