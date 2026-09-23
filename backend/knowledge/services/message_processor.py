@@ -65,6 +65,15 @@ class MessageProcessor:
             RelationshipDiscoveryService()
         )
 
+        # Scoped to this processor instance only.
+        #
+        # KnowledgeBackfillService owns one processor per
+        # preview/process execution, so outbound self-address
+        # discovery is loaded once per user instead of once
+        # per outbound message without introducing a global
+        # or cross-process cache.
+        self._self_address_cache = {}
+
 
     @staticmethod
     def _normalize_email(
@@ -127,14 +136,30 @@ class MessageProcessor:
         return None
 
 
-    @classmethod
     def _self_addresses(
-        cls,
+        self,
         message,
     ):
+        user_id = getattr(
+            message,
+            "user_id",
+            None,
+        )
+
+        if (
+            user_id is not None
+            and
+            user_id in self._self_address_cache
+        ):
+            return (
+                self._self_address_cache[
+                    user_id
+                ]
+            )
+
         addresses = set()
 
-        user_email = cls._normalize_email(
+        user_email = self._normalize_email(
             getattr(
                 message.user,
                 "email",
@@ -158,7 +183,7 @@ class MessageProcessor:
             )
         ):
             normalized = (
-                cls._normalize_email(
+                self._normalize_email(
                     address
                 )
             )
@@ -168,16 +193,25 @@ class MessageProcessor:
                     normalized
                 )
 
-        return addresses
+        result = frozenset(
+            addresses
+        )
+
+        if user_id is not None:
+
+            self._self_address_cache[
+                user_id
+            ] = result
+
+        return result
 
 
-    @classmethod
     def _outbound_recipient_addresses(
-        cls,
+        self,
         message,
     ):
         self_addresses = (
-            cls._self_addresses(
+            self._self_addresses(
                 message
             )
         )
@@ -189,7 +223,7 @@ class MessageProcessor:
             value,
         ):
             normalized = (
-                cls._normalize_email(
+                self._normalize_email(
                     value
                 )
             )

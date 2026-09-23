@@ -1,10 +1,3 @@
-from knowledge.models import BusinessIdentity
-from context.models import (
-    BusinessObject,
-    BusinessObjectAlias,
-    BusinessObjectDomain,
-)
-
 from knowledge.services.logger import log_info
 
 from knowledge.services.identity_normalizer import (
@@ -53,9 +46,7 @@ class BusinessObjectResolver:
             # Identity Match
             # -----------------------------
 
-            identities = BusinessIdentity.objects.filter(
-                business_object=obj,
-            )
+            identities = obj.identities.all()
 
             for identity in identities:
 
@@ -114,9 +105,7 @@ class BusinessObjectResolver:
             # Legacy Alias
             # -----------------------------
 
-            aliases = BusinessObjectAlias.objects.filter(
-                business_object=obj,
-            )
+            aliases = obj.aliases.all()
 
             for alias in aliases:
 
@@ -135,9 +124,7 @@ class BusinessObjectResolver:
             # Legacy Domain
             # -----------------------------
 
-            domains = BusinessObjectDomain.objects.filter(
-                business_object=obj,
-            )
+            domains = obj.domains.all()
 
             sender_domain = ""
 

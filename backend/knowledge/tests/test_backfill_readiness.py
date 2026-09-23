@@ -284,6 +284,67 @@ class KnowledgeBackfillReadinessTests(
         )
 
 
+    def test_outbound_self_addresses_are_cached_per_processor(
+        self,
+    ):
+
+        first = (
+            self.message(
+                direction="outbound",
+                sender=self.user.email,
+                recipients=(
+                    "alice@alpha.example"
+                ),
+                subject=(
+                    "First outbound"
+                ),
+            )
+        )
+
+        second = (
+            self.message(
+                direction="outbound",
+                sender=self.user.email,
+                recipients=(
+                    "bob@beta.example"
+                ),
+                subject=(
+                    "Second outbound"
+                ),
+            )
+        )
+
+        with self.assertNumQueries(1):
+
+            first_addresses = (
+                self.processor
+                ._outbound_recipient_addresses(
+                    first
+                )
+            )
+
+            second_addresses = (
+                self.processor
+                ._outbound_recipient_addresses(
+                    second
+                )
+            )
+
+        self.assertEqual(
+            first_addresses,
+            [
+                "alice@alpha.example",
+            ],
+        )
+
+        self.assertEqual(
+            second_addresses,
+            [
+                "bob@beta.example",
+            ],
+        )
+
+
     def test_multi_company_outbound_is_fail_closed(
         self,
     ):

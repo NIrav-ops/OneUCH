@@ -23,6 +23,10 @@ class BusinessObjectCache:
                 BusinessObject.objects.filter(
                     organization=organization,
                     status="active",
+                ).prefetch_related(
+                    "identities",
+                    "aliases",
+                    "domains",
                 )
             )
 

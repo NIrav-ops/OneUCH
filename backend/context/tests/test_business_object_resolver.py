@@ -15,6 +15,10 @@ from knowledge.services.resolver import (
     BusinessObjectResolver,
 )
 
+from context.services.business_object_cache import (
+    BusinessObjectCache,
+)
+
 
 class BusinessObjectResolverTests(TestCase):
 
@@ -91,3 +95,43 @@ class BusinessObjectResolverTests(TestCase):
         )
 
         self.assertFalse(result["matched"])
+
+    def test_repeated_resolution_reuses_prefetched_relationships(
+        self,
+    ):
+
+        BusinessObjectCache.clear()
+
+        with self.assertNumQueries(4):
+
+            first = BusinessObjectResolver.resolve(
+                organization=self.organization,
+                sender="support@google.com",
+                subject="First",
+                body="",
+            )
+
+            second = BusinessObjectResolver.resolve(
+                organization=self.organization,
+                sender="support@google.com",
+                subject="Second",
+                body="",
+            )
+
+        self.assertTrue(
+            first["matched"]
+        )
+
+        self.assertTrue(
+            second["matched"]
+        )
+
+        self.assertEqual(
+            first["best_match"]["business_object"].id,
+            self.google.id,
+        )
+
+        self.assertEqual(
+            second["best_match"]["business_object"].id,
+            self.google.id,
+        )
