@@ -84,6 +84,7 @@ def resolve_websocket_user(
 
     from accounts.authentication import (
         OneUCHJWTAuthentication,
+        get_active_browser_session,
         get_active_membership,
     )
 
@@ -103,6 +104,20 @@ def resolve_websocket_user(
 
     if membership is None:
         return None
+
+    # Keep WebSocket browser-session authority aligned with
+    # OneUCHJWTAuthentication.authenticate().
+    #
+    # Legacy/API JWTs without the browser-session claim remain
+    # compatible because get_active_browser_session() returns
+    # None when that claim is absent.
+    #
+    # Browser-session-bound JWTs fail closed when their
+    # server-side BrowserSession is revoked, expired or missing.
+    get_active_browser_session(
+        user,
+        validated_token,
+    )
 
     return user
 
@@ -129,9 +144,20 @@ class JWTAuthMiddleware(
             AccessToken,
         )
 
+        from accounts.models import (
+            BROWSER_SESSION_CLAIM,
+        )
+
 
         scope["user"] = (
             AnonymousUser()
+        )
+
+        # Browser-session-bound sockets carry only the safe
+        # server-side BrowserSession identifier in ASGI scope.
+        # The bearer JWT itself is never retained in scope.
+        scope["oneuch_browser_session_id"] = (
+            None
         )
 
 
@@ -157,6 +183,28 @@ class JWTAuthMiddleware(
                         validated_token
                     )
                 )
+
+
+                if (
+                    scope["user"]
+                    and
+                    not scope["user"].is_anonymous
+                ):
+
+                    session_id = str(
+                        validated_token.payload.get(
+                            BROWSER_SESSION_CLAIM
+                        )
+                        or ""
+                    ).strip()
+
+
+                    if session_id:
+
+                        scope[
+                            "oneuch_browser_session_id"
+                        ] = session_id
+
 
             except Exception:
                 # Authentication must fail closed. Do not log
