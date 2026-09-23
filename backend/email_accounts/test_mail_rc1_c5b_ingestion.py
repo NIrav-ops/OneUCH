@@ -1547,7 +1547,315 @@ class MailRC1C5BIngestionTests(
 
 
     # ========================================================
-    # 13. Legacy folder_UID rows are upgraded in place instead
+    # 13. An already-materialized outbound self-send must not
+    # be overwritten when the same RFC identity arrives in
+    # provider Inbox. Sent and Inbox are distinct semantic
+    # roles but retain the same canonical provider identity.
+    # ========================================================
+
+    def test_existing_outbound_self_send_preserves_sent_and_materializes_inbox(
+        self,
+    ):
+        self_send = (
+            self.build_message(
+                message_id=(
+                    "<self-send-dual-role@example.net>"
+                ),
+                sender=(
+                    "Owner "
+                    "<owner@example.com>"
+                ),
+                to=(
+                    "Owner "
+                    "<owner@example.com>"
+                ),
+                subject=(
+                    "Self send dual role"
+                ),
+                date=(
+                    "Sun, 06 Sep 2026 "
+                    "15:30:00 +0000"
+                ),
+                body=(
+                    "Self-send dual-role regression."
+                ),
+            )
+        )
+
+
+        stable_id = (
+            _stable_external_message_id(
+                email_account=(
+                    self.account
+                ),
+                folder_key="sent",
+                uid="0",
+                uidvalidity=None,
+                message=(
+                    self_send
+                ),
+            )
+        )
+
+
+        conversation = (
+            Conversation.objects.create(
+                user=self.user,
+                organization=(
+                    self.organization
+                ),
+                email_account=(
+                    self.account
+                ),
+                subject=(
+                    "Self send dual role"
+                ),
+                conversation_key=(
+                    "self-send-dual-role-"
+                    + uuid4().hex
+                ),
+                external_conversation_id=(
+                    "<self-send-dual-role@example.net>"
+                ),
+            )
+        )
+
+
+        outbound = (
+            InboxMessage.objects.create(
+                user=self.user,
+                organization=(
+                    self.organization
+                ),
+                email_account=(
+                    self.account
+                ),
+                conversation=(
+                    conversation
+                ),
+                platform="imap",
+                folder="sent",
+                direction="outbound",
+                external_message_id=(
+                    stable_id
+                ),
+                external_conversation_id=(
+                    "<self-send-dual-role@example.net>"
+                ),
+                sender=(
+                    "owner@example.com"
+                ),
+                recipients=(
+                    "owner@example.com"
+                ),
+                subject=(
+                    "Self send dual role"
+                ),
+                body=(
+                    "Self-send dual-role regression."
+                ),
+                received_at=(
+                    datetime(
+                        2026,
+                        9,
+                        6,
+                        15,
+                        29,
+                        55,
+                        tzinfo=(
+                            datetime_timezone.utc
+                        ),
+                    )
+                ),
+                is_read=True,
+                is_draft=False,
+                status="sent",
+            )
+        )
+
+
+        fake = (
+            FakeIMAP(
+                folder_messages={
+                    "INBOX": {
+                        "10": {
+                            "raw":
+                                self_send.as_bytes(),
+
+                            "flags":
+                                "\\Seen",
+                        },
+                    },
+
+                    "Sent Items":
+                        {},
+                }
+            )
+        )
+
+
+        first_result, _ = (
+            self.sync_with_fake(
+                fake
+            )
+        )
+
+
+        rows = (
+            InboxMessage.objects
+            .filter(
+                email_account=(
+                    self.account
+                ),
+                external_message_id=(
+                    stable_id
+                ),
+            )
+            .order_by(
+                "id"
+            )
+        )
+
+
+        self.assertEqual(
+            rows.count(),
+            2,
+        )
+
+
+        outbound.refresh_from_db()
+
+
+        self.assertEqual(
+            outbound.folder,
+            "sent",
+        )
+
+        self.assertEqual(
+            outbound.direction,
+            "outbound",
+        )
+
+        self.assertEqual(
+            outbound.status,
+            "sent",
+        )
+
+
+        inbound = (
+            rows.get(
+                direction="inbound"
+            )
+        )
+
+
+        self.assertEqual(
+            inbound.folder,
+            "inbox",
+        )
+
+        self.assertEqual(
+            inbound.status,
+            "queued",
+        )
+
+        self.assertEqual(
+            inbound.external_message_id,
+            outbound.external_message_id,
+        )
+
+        self.assertEqual(
+            inbound.conversation_id,
+            outbound.conversation_id,
+        )
+
+        self.assertEqual(
+            first_result[
+                "created"
+            ],
+            1,
+        )
+
+
+        # Prove a later provider sync cannot recreate the old
+        # inbound/status=sent corruption either.
+        inbound.status = (
+            "sent"
+        )
+
+        inbound.save(
+            update_fields=[
+                "status",
+            ]
+        )
+
+
+        second_result, _ = (
+            self.sync_with_fake(
+                fake
+            )
+        )
+
+
+        outbound.refresh_from_db()
+
+        inbound.refresh_from_db()
+
+
+        self.assertEqual(
+            InboxMessage.objects
+            .filter(
+                email_account=(
+                    self.account
+                ),
+                external_message_id=(
+                    stable_id
+                ),
+            )
+            .count(),
+            2,
+        )
+
+        self.assertEqual(
+            outbound.folder,
+            "sent",
+        )
+
+        self.assertEqual(
+            outbound.direction,
+            "outbound",
+        )
+
+        self.assertEqual(
+            outbound.status,
+            "sent",
+        )
+
+        self.assertEqual(
+            inbound.folder,
+            "inbox",
+        )
+
+        self.assertEqual(
+            inbound.direction,
+            "inbound",
+        )
+
+        self.assertEqual(
+            inbound.status,
+            "queued",
+        )
+
+        self.assertEqual(
+            second_result[
+                "created"
+            ],
+            0,
+        )
+
+
+    # ========================================================
+    # 14. Legacy folder_UID rows are upgraded in place instead
     # of duplicated by the new stable Message-ID identity.
     # ========================================================
 
@@ -1696,7 +2004,7 @@ class MailRC1C5BIngestionTests(
 
 
     # ========================================================
-    # 14. A failed message must not advance the folder cursor or
+    # 15. A failed message must not advance the folder cursor or
     # falsely mark initial history complete.
     # ========================================================
 

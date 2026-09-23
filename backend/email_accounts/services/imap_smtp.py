@@ -2749,7 +2749,7 @@ def fetch_imap_emails(
                     )
 
 
-                    existing = (
+                    stable_candidates = list(
                         InboxMessage.objects
                         .filter(
                             user=user,
@@ -2760,11 +2760,49 @@ def fetch_imap_emails(
                                 stable_external_id
                             ),
                         )
-                        .first()
+                        .order_by(
+                            "id"
+                        )
                     )
 
 
-                    if existing is None:
+                    identity_existing = (
+                        stable_candidates[0]
+                        if stable_candidates
+                        else None
+                    )
+
+
+                    existing = next(
+                        (
+                            candidate
+                            for candidate
+                            in stable_candidates
+                            if (
+                                candidate.direction
+                                ==
+                                message_direction
+                            )
+                        ),
+                        None,
+                    )
+
+
+                    # Legacy folder_UID identity is considered
+                    # only when this canonical provider identity
+                    # has no local representation at all.
+                    #
+                    # If the RFC identity already exists with the
+                    # opposite semantic direction, the provider
+                    # message has two legitimate local roles
+                    # (for example a self-send: Sent + Inbox).
+                    # Preserve the existing role and materialize
+                    # the second one separately.
+                    if (
+                        existing is None
+                        and
+                        identity_existing is None
+                    ):
 
                         existing = (
                             InboxMessage.objects
@@ -2787,6 +2825,13 @@ def fetch_imap_emails(
                         existing.external_message_id
                         !=
                         stable_external_id
+                    )
+
+
+                    conversation_seed = (
+                        existing
+                        or
+                        identity_existing
                     )
 
 
@@ -2836,7 +2881,7 @@ def fetch_imap_emails(
                                 subject
                             ),
                             local_message=(
-                                existing
+                                conversation_seed
                             ),
                         )
                     )
@@ -3059,15 +3104,16 @@ def fetch_imap_emails(
                         )
 
 
-                        if (
-                            message_direction
-                            ==
-                            "outbound"
-                        ):
-
-                            message_obj.status = (
-                                "sent"
+                        message_obj.status = (
+                            "sent"
+                            if (
+                                message_direction
+                                ==
+                                "outbound"
                             )
+                            else
+                            "queued"
+                        )
 
 
                         message_obj.save(
