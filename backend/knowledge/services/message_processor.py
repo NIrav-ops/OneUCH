@@ -870,21 +870,6 @@ class MessageProcessor:
 
 
             discovered_relationships = (
-                self.relationships.discover(
-                    source_object=(
-                        business_object
-                    ),
-                    related_objects=(
-                        related_objects
-                    ),
-                    source=(
-                        source_channel
-                    ),
-                )
-            )
-
-
-            candidate_relationships = (
                 self.relationships
                 .discover_between_candidates(
                     business_objects=(
@@ -894,11 +879,6 @@ class MessageProcessor:
                         source_channel
                     ),
                 )
-            )
-
-
-            discovered_relationships.extend(
-                candidate_relationships
             )
 
 

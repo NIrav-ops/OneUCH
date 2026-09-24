@@ -76,41 +76,34 @@ class RelationshipDiscoveryService:
                     )
                 )
 
+                metadata = (
+                    relationship.metadata
+                    or {}
+                )
+
                 if created:
 
-                    metadata = relationship.metadata or {}
-
-                    metadata["first_source"] = source
-
-                    relationship.metadata = metadata
-
-                    relationship.save(
-                        update_fields=[
-                            "metadata",
-                        ]
-                    )
+                    metadata[
+                        "first_source"
+                    ] = source
 
                 else:
 
-                    relationship = (
-                        self.repository.strengthen_relationship(
-                            relationship
-                        )
-                    )
+                    metadata[
+                        "last_source"
+                    ] = source
 
-                    metadata = relationship.metadata or {}
+                relationship.metadata = metadata
 
-                    metadata["last_source"] = source
+                relationship.save(
+                    update_fields=[
+                        "metadata",
+                    ]
+                )
 
-                    relationship.metadata = metadata
-
-                    relationship.save(
-                        update_fields=[
-                            "metadata",
-                        ]
-                    )
-
-                discovered.append(relationship)
+                discovered.append(
+                    relationship
+                )
 
             except Exception:
 
@@ -169,7 +162,7 @@ class RelationshipDiscoveryService:
 
                 try:
 
-                    relationship, created = (
+                    relationship, _ = (
                         self.repository.get_or_create_relationship(
                             source_object=objects[i],
                             target_object=objects[j],
@@ -177,14 +170,6 @@ class RelationshipDiscoveryService:
                             source=source,
                         )
                     )
-
-                    if not created:
-
-                        relationship = (
-                            self.repository.strengthen_relationship(
-                                relationship
-                            )
-                        )
 
                     discovered.append(
                         relationship
@@ -199,17 +184,5 @@ class RelationshipDiscoveryService:
                             "target_object": objects[j].id,
                         },
                     )
-
-                if not created:
-
-                    relationship = (
-                        self.repository.strengthen_relationship(
-                            relationship
-                        )
-                    )
-
-                discovered.append(
-                    relationship
-                )
 
         return discovered

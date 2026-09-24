@@ -11,6 +11,7 @@ from inbox.models import (
 from context.models import (
     BusinessObject,
     BusinessObjectType,
+    BusinessRelationship,
 )
 
 from knowledge.models import (
@@ -196,3 +197,70 @@ class MessageProcessorTests(TestCase):
         self.assertIn("evidence", result)
 
         self.assertIn("fact", result)
+
+    def test_multi_candidate_inbound_creates_each_relationship_once(
+        self,
+    ):
+
+        secondary = (
+            BusinessObject.objects.create(
+                organization=self.organization,
+                object_type=self.object_type,
+                name="Google Domain Candidate",
+                status="active",
+            )
+        )
+
+        BusinessIdentity.objects.create(
+            business_object=secondary,
+            identity_type="DOMAIN",
+            value="google.com",
+            normalized_value="google.com",
+            source="manual",
+        )
+
+        result = (
+            self.processor.process_message(
+                organization=self.organization,
+                message=self.message,
+                sender=self.message.sender,
+                subject=self.message.subject,
+                body=self.message.body,
+                source_channel="gmail",
+            )
+        )
+
+        self.assertTrue(
+            result["matched"]
+        )
+
+        self.assertEqual(
+            len(
+                result["relationships"]
+            ),
+            1,
+        )
+
+        self.assertEqual(
+            BusinessRelationship.objects.count(),
+            1,
+        )
+
+        relationship = (
+            BusinessRelationship.objects.get()
+        )
+
+        self.assertEqual(
+            relationship.source_object,
+            self.business_object,
+        )
+
+        self.assertEqual(
+            relationship.target_object,
+            secondary,
+        )
+
+        self.assertEqual(
+            relationship.evidence_count,
+            1,
+        )
