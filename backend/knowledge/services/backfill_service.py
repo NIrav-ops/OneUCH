@@ -84,6 +84,32 @@ class KnowledgeBackfillService:
 
 
     @staticmethod
+    def _has_message_resolution_evidence(
+        message,
+    ):
+        """
+        Return True only when normal Knowledge resolution
+        has already processed this message.
+
+        Intelligence provenance rows use a separate resolver
+        contract and must not suppress historical Knowledge
+        resolution/backfill.
+        """
+
+        return (
+            KnowledgeEvidence.objects
+            .filter(
+                message=message,
+                business_object__isnull=False,
+                resolver_version="1.0",
+                is_active=True,
+                is_archived=False,
+            )
+            .exists()
+        )
+
+
+    @staticmethod
     def _queryset(
         *,
         organization=None,
@@ -362,15 +388,14 @@ class KnowledgeBackfillService:
 
                 if not force:
 
-                    exists = (
-                        KnowledgeEvidence.objects
-                        .filter(
-                            message=message
+                    already_resolved = (
+                        self
+                        ._has_message_resolution_evidence(
+                            message
                         )
-                        .exists()
                     )
 
-                    if exists:
+                    if already_resolved:
 
                         runner.skip()
 

@@ -611,3 +611,159 @@ class KnowledgeBackfillReadinessTests(
             ],
             66.67,
         )
+
+    @override_settings(
+        KNOWLEDGE_JOB_CHECKPOINT_INTERVAL=1
+    )
+    def test_intelligence_only_evidence_does_not_block_non_force_backfill(
+        self,
+    ):
+
+        message = (
+            self.message(
+                direction="inbound",
+                sender="alice@alpha.example",
+                recipients=self.user.email,
+                subject="Historical Alpha",
+            )
+        )
+
+        KnowledgeEvidence.objects.create(
+            organization=self.organization,
+            business_object=None,
+            conversation=self.conversation,
+            message=message,
+            evidence_type="TASK",
+            title="Historical intelligence provenance",
+            source_channel="gmail",
+            resolver_version="intelligence-1",
+        )
+
+        service = (
+            KnowledgeBackfillService()
+        )
+
+        result = (
+            service.process(
+                organization=self.organization,
+                user=self.user,
+            )
+        )
+
+        self.assertEqual(
+            result["total"],
+            1,
+        )
+
+        self.assertEqual(
+            result["processed"],
+            1,
+        )
+
+        self.assertEqual(
+            result["skipped"],
+            0,
+        )
+
+        self.assertEqual(
+            result["matched"],
+            1,
+        )
+
+        self.assertEqual(
+            result["failed"],
+            0,
+        )
+
+        self.assertEqual(
+            KnowledgeEvidence.objects
+            .filter(
+                message=message,
+                resolver_version="intelligence-1",
+            )
+            .count(),
+            1,
+        )
+
+        self.assertEqual(
+            KnowledgeEvidence.objects
+            .filter(
+                message=message,
+                business_object=self.alpha,
+                resolver_version="1.0",
+                is_active=True,
+                is_archived=False,
+            )
+            .count(),
+            1,
+        )
+
+
+    @override_settings(
+        KNOWLEDGE_JOB_CHECKPOINT_INTERVAL=1
+    )
+    def test_resolver_evidence_blocks_duplicate_non_force_backfill(
+        self,
+    ):
+
+        message = (
+            self.message(
+                direction="inbound",
+                sender="alice@alpha.example",
+                recipients=self.user.email,
+                subject="Already Resolved Alpha",
+            )
+        )
+
+        KnowledgeEvidence.objects.create(
+            organization=self.organization,
+            business_object=self.alpha,
+            conversation=self.conversation,
+            message=message,
+            evidence_type="EMAIL",
+            title="Already Resolved Alpha",
+            source_channel="gmail",
+            resolver_version="1.0",
+            is_active=True,
+            is_archived=False,
+        )
+
+        service = (
+            KnowledgeBackfillService()
+        )
+
+        result = (
+            service.process(
+                organization=self.organization,
+                user=self.user,
+            )
+        )
+
+        self.assertEqual(
+            result["total"],
+            1,
+        )
+
+        self.assertEqual(
+            result["processed"],
+            0,
+        )
+
+        self.assertEqual(
+            result["skipped"],
+            1,
+        )
+
+        self.assertEqual(
+            result["failed"],
+            0,
+        )
+
+        self.assertEqual(
+            KnowledgeEvidence.objects
+            .filter(
+                message=message,
+            )
+            .count(),
+            1,
+        )
