@@ -501,11 +501,18 @@ class FactRepository(BaseRepository):
         fact_key,
     ):
 
-        return self.model.objects.filter(
-            business_object=business_object,
-            fact_key=fact_key,
-            status="ACTIVE",
-        ).first()
+        return (
+            self.model.objects
+            .select_related(
+                "primary_evidence__message",
+            )
+            .filter(
+                business_object=business_object,
+                fact_key=fact_key,
+                status="ACTIVE",
+            )
+            .first()
+        )
 
     # -----------------------------------------------------
     # UPSERT
@@ -522,6 +529,62 @@ class FactRepository(BaseRepository):
         )
 
         if fact:
+
+            incoming_evidence = (
+                payload.get(
+                    "primary_evidence"
+                )
+            )
+
+            if (
+                payload[
+                    "fact_key"
+                ]
+                ==
+                "LAST_COMMUNICATION"
+                and
+                incoming_evidence
+                is not None
+                and
+                fact.primary_evidence_id
+                is not None
+            ):
+
+                current_evidence = (
+                    fact.primary_evidence
+                )
+
+                current_message = (
+                    current_evidence.message
+                )
+
+                incoming_message = (
+                    incoming_evidence.message
+                )
+
+                current_order = (
+                    current_message.received_at,
+                    current_message.pk,
+                )
+
+                incoming_order = (
+                    incoming_message.received_at,
+                    incoming_message.pk,
+                )
+
+                if (
+                    incoming_order
+                    <
+                    current_order
+                ):
+
+                    logger.info(
+                        "KnowledgeFact preserved newer "
+                        "LAST_COMMUNICATION (%s)",
+                        fact.pk,
+                    )
+
+                    return fact, False
 
             changed = False
 

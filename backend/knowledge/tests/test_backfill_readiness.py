@@ -1,3 +1,7 @@
+from datetime import (
+    timedelta,
+)
+
 from django.contrib.auth import (
     get_user_model,
 )
@@ -30,6 +34,7 @@ from context.services.business_object_cache import (
 from knowledge.models import (
     BusinessIdentity,
     KnowledgeEvidence,
+    KnowledgeFact,
     KnowledgeJob,
 )
 
@@ -766,4 +771,195 @@ class KnowledgeBackfillReadinessTests(
             )
             .count(),
             1,
+        )
+
+    @override_settings(
+        KNOWLEDGE_JOB_CHECKPOINT_INTERVAL=1
+    )
+    def test_historical_backfill_does_not_move_last_communication_backward(
+        self,
+    ):
+
+        now = timezone.now()
+
+        older = (
+            self.message(
+                direction="inbound",
+                sender="alice@alpha.example",
+                recipients=self.user.email,
+                subject="Older Historical Alpha",
+            )
+        )
+
+        newer = (
+            self.message(
+                direction="inbound",
+                sender="alice@alpha.example",
+                recipients=self.user.email,
+                subject="Newer Live Alpha",
+            )
+        )
+
+        InboxMessage.objects.filter(
+            pk=older.pk
+        ).update(
+            received_at=(
+                now
+                -
+                timedelta(
+                    days=2
+                )
+            )
+        )
+
+        InboxMessage.objects.filter(
+            pk=newer.pk
+        ).update(
+            received_at=now
+        )
+
+        older.refresh_from_db()
+        newer.refresh_from_db()
+
+        live_result = (
+            self.processor
+            .process_message(
+                organization=self.organization,
+                message=newer,
+                sender=newer.sender,
+                subject=newer.subject,
+                body=newer.body,
+                source_channel="gmail",
+            )
+        )
+
+        self.assertTrue(
+            live_result[
+                "matched"
+            ]
+        )
+
+        live_fact = (
+            KnowledgeFact.objects.get(
+                business_object=self.alpha,
+                fact_key="LAST_COMMUNICATION",
+            )
+        )
+
+        self.assertEqual(
+            live_fact.primary_evidence.message_id,
+            newer.id,
+        )
+
+        self.assertEqual(
+            live_fact.fact_value,
+            "Newer Live Alpha",
+        )
+
+        KnowledgeEvidence.objects.create(
+            organization=self.organization,
+            business_object=None,
+            conversation=self.conversation,
+            message=older,
+            evidence_type="TASK",
+            title=(
+                "Older intelligence provenance"
+            ),
+            source_channel="gmail",
+            resolver_version="intelligence-1",
+        )
+
+        service = (
+            KnowledgeBackfillService()
+        )
+
+        result = (
+            service.process(
+                organization=self.organization,
+                user=self.user,
+            )
+        )
+
+        self.assertEqual(
+            result["total"],
+            2,
+        )
+
+        self.assertEqual(
+            result["processed"],
+            1,
+        )
+
+        self.assertEqual(
+            result["matched"],
+            1,
+        )
+
+        self.assertEqual(
+            result["skipped"],
+            1,
+        )
+
+        self.assertEqual(
+            result["failed"],
+            0,
+        )
+
+        self.assertEqual(
+            KnowledgeEvidence.objects
+            .filter(
+                message=older,
+                resolver_version="intelligence-1",
+            )
+            .count(),
+            1,
+        )
+
+        self.assertEqual(
+            KnowledgeEvidence.objects
+            .filter(
+                message=older,
+                business_object=self.alpha,
+                resolver_version="1.0",
+            )
+            .count(),
+            1,
+        )
+
+        self.assertEqual(
+            KnowledgeEvidence.objects
+            .filter(
+                message=newer,
+                business_object=self.alpha,
+                resolver_version="1.0",
+            )
+            .count(),
+            1,
+        )
+
+        self.assertEqual(
+            KnowledgeFact.objects
+            .filter(
+                business_object=self.alpha,
+                fact_key="LAST_COMMUNICATION",
+            )
+            .count(),
+            1,
+        )
+
+        final_fact = (
+            KnowledgeFact.objects.get(
+                business_object=self.alpha,
+                fact_key="LAST_COMMUNICATION",
+            )
+        )
+
+        self.assertEqual(
+            final_fact.primary_evidence.message_id,
+            newer.id,
+        )
+
+        self.assertEqual(
+            final_fact.fact_value,
+            "Newer Live Alpha",
         )
