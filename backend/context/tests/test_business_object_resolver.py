@@ -4,6 +4,8 @@ from inbox.models import Organization
 
 from context.models import (
     BusinessObject,
+    BusinessObjectAlias,
+    BusinessObjectDomain,
     BusinessObjectType,
 )
 
@@ -134,4 +136,271 @@ class BusinessObjectResolverTests(TestCase):
         self.assertEqual(
             second["best_match"]["business_object"].id,
             self.google.id,
+        )
+
+    def test_identity_mutation_invalidates_prefetched_cache(
+        self,
+    ):
+
+        BusinessObjectCache.clear()
+
+        initial = (
+            BusinessObjectResolver.resolve(
+                organization=self.organization,
+                sender="new-contact@example.test",
+                subject="",
+                body="",
+            )
+        )
+
+        self.assertFalse(
+            initial["matched"]
+        )
+
+        identity = (
+            BusinessIdentity.objects.create(
+                business_object=self.google,
+                identity_type="EMAIL",
+                value="new-contact@example.test",
+                normalized_value="new-contact@example.test",
+                source="manual",
+            )
+        )
+
+        created = (
+            BusinessObjectResolver.resolve(
+                organization=self.organization,
+                sender="new-contact@example.test",
+                subject="",
+                body="",
+            )
+        )
+
+        self.assertTrue(
+            created["matched"]
+        )
+
+        identity.value = (
+            "changed-contact@example.test"
+        )
+
+        identity.save()
+
+        old_value = (
+            BusinessObjectResolver.resolve(
+                organization=self.organization,
+                sender="new-contact@example.test",
+                subject="",
+                body="",
+            )
+        )
+
+        new_value = (
+            BusinessObjectResolver.resolve(
+                organization=self.organization,
+                sender="changed-contact@example.test",
+                subject="",
+                body="",
+            )
+        )
+
+        self.assertFalse(
+            old_value["matched"]
+        )
+
+        self.assertTrue(
+            new_value["matched"]
+        )
+
+        identity.delete()
+
+        deleted = (
+            BusinessObjectResolver.resolve(
+                organization=self.organization,
+                sender="changed-contact@example.test",
+                subject="",
+                body="",
+            )
+        )
+
+        self.assertFalse(
+            deleted["matched"]
+        )
+
+
+    def test_domain_mutation_invalidates_prefetched_cache(
+        self,
+    ):
+
+        BusinessObjectCache.clear()
+
+        initial = (
+            BusinessObjectResolver.resolve(
+                organization=self.organization,
+                sender="person@new-domain.test",
+                subject="",
+                body="",
+            )
+        )
+
+        self.assertFalse(
+            initial["matched"]
+        )
+
+        domain = (
+            BusinessObjectDomain.objects.create(
+                business_object=self.google,
+                domain="new-domain.test",
+            )
+        )
+
+        created = (
+            BusinessObjectResolver.resolve(
+                organization=self.organization,
+                sender="person@new-domain.test",
+                subject="",
+                body="",
+            )
+        )
+
+        self.assertTrue(
+            created["matched"]
+        )
+
+        domain.domain = (
+            "changed-domain.test"
+        )
+
+        domain.save()
+
+        old_value = (
+            BusinessObjectResolver.resolve(
+                organization=self.organization,
+                sender="person@new-domain.test",
+                subject="",
+                body="",
+            )
+        )
+
+        new_value = (
+            BusinessObjectResolver.resolve(
+                organization=self.organization,
+                sender="person@changed-domain.test",
+                subject="",
+                body="",
+            )
+        )
+
+        self.assertFalse(
+            old_value["matched"]
+        )
+
+        self.assertTrue(
+            new_value["matched"]
+        )
+
+        domain.delete()
+
+        deleted = (
+            BusinessObjectResolver.resolve(
+                organization=self.organization,
+                sender="person@changed-domain.test",
+                subject="",
+                body="",
+            )
+        )
+
+        self.assertFalse(
+            deleted["matched"]
+        )
+
+
+    def test_alias_mutation_invalidates_prefetched_cache(
+        self,
+    ):
+
+        BusinessObjectCache.clear()
+
+        sender = (
+            "unknown@unknown.test"
+        )
+
+        initial = (
+            BusinessObjectResolver.resolve(
+                organization=self.organization,
+                sender=sender,
+                subject="Project Phoenix",
+                body="",
+            )
+        )
+
+        self.assertFalse(
+            initial["matched"]
+        )
+
+        alias = (
+            BusinessObjectAlias.objects.create(
+                business_object=self.google,
+                alias="Project Phoenix",
+            )
+        )
+
+        created = (
+            BusinessObjectResolver.resolve(
+                organization=self.organization,
+                sender=sender,
+                subject="Project Phoenix",
+                body="",
+            )
+        )
+
+        self.assertTrue(
+            created["matched"]
+        )
+
+        alias.alias = (
+            "Project Orion"
+        )
+
+        alias.save()
+
+        old_value = (
+            BusinessObjectResolver.resolve(
+                organization=self.organization,
+                sender=sender,
+                subject="Project Phoenix",
+                body="",
+            )
+        )
+
+        new_value = (
+            BusinessObjectResolver.resolve(
+                organization=self.organization,
+                sender=sender,
+                subject="Project Orion",
+                body="",
+            )
+        )
+
+        self.assertFalse(
+            old_value["matched"]
+        )
+
+        self.assertTrue(
+            new_value["matched"]
+        )
+
+        alias.delete()
+
+        deleted = (
+            BusinessObjectResolver.resolve(
+                organization=self.organization,
+                sender=sender,
+                subject="Project Orion",
+                body="",
+            )
+        )
+
+        self.assertFalse(
+            deleted["matched"]
         )

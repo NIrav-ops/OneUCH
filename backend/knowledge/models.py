@@ -251,7 +251,42 @@ class BusinessIdentity(models.Model):
             self.value,
 
         )
-        super().save(*args, **kwargs)
+
+        super().save(
+            *args,
+            **kwargs,
+        )
+
+        from context.services.business_object_cache import (
+            BusinessObjectCache,
+        )
+
+        BusinessObjectCache.invalidate(
+            self.business_object.organization,
+        )
+
+
+    def delete(self, *args, **kwargs):
+
+        organization = (
+            self.business_object.organization
+        )
+
+        result = super().delete(
+            *args,
+            **kwargs,
+        )
+
+        from context.services.business_object_cache import (
+            BusinessObjectCache,
+        )
+
+        BusinessObjectCache.invalidate(
+            organization,
+        )
+
+        return result
+
 
     def __str__(self):
 
